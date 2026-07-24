@@ -1,0 +1,36 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import { books } from '../../../books';
+import { getBookChapters, chapterNumber, chapterTitle, chapterSlug } from '../../../lib/chapters';
+import { href } from '../../../lib/url';
+
+export async function getStaticPaths() {
+  return books.map((book) => ({ params: { book: book.slug }, props: { book } }));
+}
+
+const { book } = Astro.props;
+const chapters = await getBookChapters(book.slug);
+---
+
+<BaseLayout title={`${book.title} — Library of Quant`} description={book.description}>
+  <div class="container">
+    <div class="book-head">
+      <span class="eyebrow">{book.badge} &nbsp;·&nbsp; {chapters.length} chapters</span>
+      <h1>{book.title}</h1>
+      <p>{book.description}</p>
+    </div>
+
+    <ol class="toc">
+      {
+        chapters.map((ch) => (
+          <li>
+            <a href={href(`/books/${book.slug}/${chapterSlug(ch)}/`)}>
+              <span class="num">{String(chapterNumber(ch)).padStart(2, '0')}</span>
+              <span class="ch-title">{chapterTitle(ch)}</span>
+            </a>
+          </li>
+        ))
+      }
+    </ol>
+  </div>
+</BaseLayout>

@@ -1,0 +1,35 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { books } from '../books';
+import { getBookChapters } from '../lib/chapters';
+import { href } from '../lib/url';
+
+const cards = await Promise.all(
+  books.map(async (book) => ({
+    book,
+    count: (await getBookChapters(book.slug)).length,
+  })),
+);
+---
+
+<BaseLayout title="Library of Quant">
+  <section class="container">
+    <div class="hero">
+      <h1>Library of Quant</h1>
+      <p>Deep, cost-aware technical books for engineers who care what the machine actually does.</p>
+    </div>
+
+    <div class="book-grid">
+      {
+        cards.map(({ book, count }) => (
+          <a class="book-card" href={href(`/books/${book.slug}/`)}>
+            <span class="book-badge">{book.badge}</span>
+            <h2>{book.title}</h2>
+            <p class="book-sub">{book.subtitle}</p>
+            <span class="book-meta">{count} chapters</span>
+          </a>
+        ))
+      }
+    </div>
+  </section>
+</BaseLayout>

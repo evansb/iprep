@@ -1,0 +1,94 @@
+---
+import { render } from 'astro:content';
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import { books } from '../../../books';
+import {
+  getBookChapters,
+  chapterNumber,
+  chapterTitle,
+  chapterSlug,
+} from '../../../lib/chapters';
+import { href } from '../../../lib/url';
+
+export async function getStaticPaths() {
+  const paths = [];
+  for (const book of books) {
+    const chapters = await getBookChapters(book.slug);
+    for (let i = 0; i < chapters.length; i++) {
+      paths.push({
+        params: { book: book.slug, chapter: chapterSlug(chapters[i]) },
+        props: {
+          book,
+          entry: chapters[i],
+          chapters,
+          index: i,
+        },
+      });
+    }
+  }
+  return paths;
+}
+
+const { book, entry, chapters, index } = Astro.props;
+const { Content } = await render(entry);
+
+const prev = index > 0 ? chapters[index - 1] : null;
+const next = index < chapters.length - 1 ? chapters[index + 1] : null;
+const currentSlug = chapterSlug(entry);
+---
+
+<BaseLayout
+  title={`${chapterTitle(entry)} — ${book.title}`}
+  description={`${book.title}, chapter ${chapterNumber(entry)}: ${chapterTitle(entry)}`}
+>
+  <div class="chapter-shell">
+    <nav class="sidebar" aria-label="Chapters">
+      <p class="side-book">{book.title}</p>
+      <a class="side-back" href={href(`/books/${book.slug}/`)}>← Table of contents</a>
+      <ol>
+        {
+          chapters.map((ch) => (
+            <li>
+              <a
+                href={href(`/books/${book.slug}/${chapterSlug(ch)}/`)}
+                class={chapterSlug(ch) === currentSlug ? 'active' : ''}
+              >
+                <span class="n">{String(chapterNumber(ch)).padStart(2, '0')}</span>
+                <span>{chapterTitle(ch)}</span>
+              </a>
+            </li>
+          ))
+        }
+      </ol>
+    </nav>
+
+    <article class="chapter-main">
+      <div class="prose">
+        <Content />
+      </div>
+
+      <nav class="pager" aria-label="Chapter navigation">
+        {
+          prev ? (
+            <a class="prev" href={href(`/books/${book.slug}/${chapterSlug(prev)}/`)}>
+              <span class="pager-label">← Previous</span>
+              <span class="pager-title">{chapterTitle(prev)}</span>
+            </a>
+          ) : (
+            <span />
+          )
+        }
+        {
+          next ? (
+            <a class="next" href={href(`/books/${book.slug}/${chapterSlug(next)}/`)}>
+              <span class="pager-label">Next →</span>
+              <span class="pager-title">{chapterTitle(next)}</span>
+            </a>
+          ) : (
+            <span />
+          )
+        }
+      </nav>
+    </article>
+  </div>
+</BaseLayout>
