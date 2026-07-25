@@ -4,7 +4,6 @@
 //   1. Drop its chapter markdown files in a new top-level directory (e.g. `python/`),
 //      named `NN-title.md` so they sort by chapter number.
 //   2. Add an entry here.
-//   3. Add its glob pattern in `src/content.config.ts`.
 // Everything else (routes, table of contents, navigation) is generated automatically.
 
 export interface Book {
@@ -41,6 +40,17 @@ export const books: Book[] = [
       'consensus to caching, reliability, and deep dives on PostgreSQL, Redis, and Kafka. ' +
       'Written to work as both a first read and a ten-minute refresher.',
     badge: 'SD',
+  },
+  {
+    dir: 'hft-bootcamp',
+    slug: 'hft-bootcamp',
+    title: 'HFT System Engineering Bootcamp',
+    subtitle: 'A preparation guide for low-latency interviews',
+    description:
+      'A systems-engineering guide to the hardware, operating systems, networking, and ' +
+      'measurement techniques behind deterministic low-latency systems. Built for engineers ' +
+      'preparing for HFT infrastructure and performance interviews.',
+    badge: 'HFT',
   },
 ];
 

@@ -42,7 +42,6 @@ If the repository is ever renamed, update `site` and `base` in `astro.config.mjs
 
 1. Create a new top-level directory (e.g. `python/`) with `NN-title.md` chapter files.
 2. Add an entry to [`src/books.ts`](./src/books.ts).
-3. Add its glob pattern in [`src/content.config.ts`](./src/content.config.ts).
 
 Routes, tables of contents, and navigation are all generated automatically.
 

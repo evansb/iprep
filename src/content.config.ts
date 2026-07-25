@@ -7,7 +7,10 @@ import { books } from './books';
 // The book slug and chapter file are derived from that id in `src/lib/chapters.ts`.
 const chapters = defineCollection({
   loader: glob({
-    pattern: books.map((b) => `${b.dir}/*.md`),
+    // Chapter files follow the documented `NN-title.md` convention. Keeping the
+    // filename constraint here excludes book-level files such as README.md, while
+    // the non-recursive pattern excludes subdirectories such as prompts/.
+    pattern: books.map((b) => `${b.dir}/[0-9][0-9]-*.md`),
     base: '.',
   }),
 });
