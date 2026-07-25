@@ -1,4 +1,5 @@
 ---
+import { Font } from 'astro:assets';
 import '../styles/global.css';
 import { href } from '../lib/url';
 
@@ -20,13 +21,17 @@ const { title, description = 'A library of technical books for quants and system
     <meta name="generator" content={Astro.generator} />
     <title>{title}</title>
     <meta name="description" content={description} />
+    <Font cssVariable="--font-source-serif" preload />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%93%9A%3C/text%3E%3C/svg%3E" />
-    <!-- Set theme before paint to avoid a flash -->
+    <!-- Set theme and sidebar state before paint to avoid a flash -->
     <script is:inline>
       (() => {
         const saved = localStorage.getItem('theme');
         const theme = saved ?? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
         document.documentElement.dataset.theme = theme;
+        if (localStorage.getItem('sidebar') === 'hidden') {
+          document.documentElement.dataset.sidebar = 'hidden';
+        }
       })();
     </script>
   </head>
@@ -37,6 +42,7 @@ const { title, description = 'A library of technical books for quants and system
         <span class="brand-sub">books for systems engineers</span>
       </a>
       <div class="header-actions">
+        <slot name="header-actions" />
         <button
           id="theme-toggle"
           class="theme-toggle"

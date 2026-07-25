@@ -1,0 +1,131 @@
+---
+/**
+ * Client-side mermaid rendering for any `<pre class="mermaid">` on the page
+ * (emitted by `src/lib/remark-mermaid.mjs`).
+ *
+ * Rendering happens in the browser rather than at build time because the site's
+ * light/dark theme is a runtime toggle — a build-time SVG would bake in one
+ * palette and look wrong in the other. Diagram colours are read from the same
+ * CSS custom properties the rest of the site uses, so the two never drift.
+ *
+ * The mermaid bundle is dynamically imported and only fetched on pages that
+ * actually contain a diagram.
+ */
+---
+
+<script>
+  const blocks = Array.from(
+    document.querySelectorAll<HTMLPreElement>('pre.mermaid')
+  );
+
+  if (blocks.length > 0) {
+    const mermaid = (await import('mermaid')).default;
+
+    /** Pull the live palette off :root so diagrams match the current theme. */
+    function paletteVars() {
+      const cs = getComputedStyle(document.documentElement);
+      const v = (name: string) => cs.getPropertyValue(name).trim();
+
+      const bg = v('--bg');
+      const bgSoft = v('--bg-soft');
+      const text = v('--text');
+      const textFaint = v('--text-faint');
+      const border = v('--border');
+      const borderStrong = v('--border-strong');
+      const accent = v('--accent');
+      const accentSoft = v('--accent-soft');
+      const font = v('--font-sans') || 'system-ui, sans-serif';
+
+      return {
+        darkMode: document.documentElement.dataset.theme === 'dark',
+        background: bg,
+        fontFamily: font,
+        fontSize: '14px',
+
+        // Flowchart nodes
+        primaryColor: accentSoft,
+        primaryTextColor: text,
+        primaryBorderColor: accent,
+        secondaryColor: bgSoft,
+        secondaryTextColor: text,
+        secondaryBorderColor: borderStrong,
+        tertiaryColor: bgSoft,
+        tertiaryTextColor: text,
+        tertiaryBorderColor: border,
+        mainBkg: accentSoft,
+        nodeBorder: accent,
+        nodeTextColor: text,
+        textColor: text,
+        lineColor: textFaint,
+        edgeLabelBackground: bg,
+        clusterBkg: bgSoft,
+        clusterBorder: border,
+        titleColor: text,
+
+        // Sequence diagrams
+        actorBkg: accentSoft,
+        actorBorder: accent,
+        actorTextColor: text,
+        actorLineColor: textFaint,
+        signalColor: text,
+        signalTextColor: text,
+        labelBoxBkgColor: bgSoft,
+        labelBoxBorderColor: border,
+        labelTextColor: text,
+        loopTextColor: text,
+        activationBkgColor: accentSoft,
+        activationBorderColor: accent,
+        sequenceNumberColor: bg,
+        noteBkgColor: bgSoft,
+        noteTextColor: text,
+        noteBorderColor: border,
+
+        // State diagrams
+        labelColor: text,
+        altBackground: bgSoft,
+      } as Record<string, unknown>;
+    }
+
+    // Unique across re-renders — mermaid uses the id for internal <style> scoping.
+    let seq = 0;
+
+    async function renderAll() {
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: 'strict',
+        theme: 'base',
+        themeVariables: paletteVars(),
+        flowchart: { htmlLabels: true, curve: 'basis', useMaxWidth: true },
+        sequence: { useMaxWidth: true, wrap: true },
+        state: { useMaxWidth: true },
+      });
+
+      for (const el of blocks) {
+        const src = decodeURIComponent(el.dataset.mermaid ?? '');
+        if (!src) continue;
+        try {
+          const { svg } = await mermaid.render(`mmd-${seq++}`, src);
+          el.innerHTML = svg;
+          el.dataset.state = 'ready';
+        } catch (err) {
+          // Leave the source visible so a broken diagram is debuggable.
+          el.textContent = src;
+          el.dataset.state = 'error';
+          console.error('[mermaid] failed to render diagram', err);
+        }
+      }
+    }
+
+    await renderAll();
+
+    // The header toggle flips data-theme on <html>; rebuild diagrams to match.
+    let pending: number | undefined;
+    new MutationObserver(() => {
+      window.clearTimeout(pending);
+      pending = window.setTimeout(renderAll, 0);
+    }).observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme'],
+    });
+  }
+</script>

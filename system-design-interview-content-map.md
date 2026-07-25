@@ -1,0 +1,957 @@
+# System Design Interview (Staff Level) — Content Map
+
+Scope: concepts and component internals only. No design exercises, no "design X" prompts.
+The goal is the substrate a staff-level candidate reasons *from*, not the problems they
+reason *about*.
+
+## Topic outline
+
+- **I. Physical and Statistical Foundations**
+    - **A. Latency, throughput, and the cost of distance**
+        - **1.** Order-of-magnitude latency table
+            - **a.** L1/L2/L3, DRAM, NVMe, network round trip, cross-region RTT
+            - **b.** Speed of light as a hard floor on cross-region designs
+            - **c.** Why a same-AZ RPC is ~0.5 ms and a cross-continent one is ~150 ms
+        - **2.** Throughput, bandwidth, and concurrency
+            - **a.** Little's Law: `L = λW` and its three uses
+            - **b.** Utilization versus latency: the M/M/1 knee at high load
+            - **c.** Bandwidth-delay product and in-flight data
+        - **3.** Amdahl's and Universal Scalability Law
+            - **a.** Serial fraction as the ceiling on parallel speedup
+            - **b.** Coherence penalty and negative scaling past a peak
+            - **c.** Why adding nodes can slow a system down
+        - **4.** Tail latency
+            - **a.** p50/p90/p99/p99.9 and why averages mislead
+            - **b.** Tail amplification through fan-out: `1 - (1 - p)^n`
+            - **c.** Coordinated omission in load generators
+            - **d.** Tail-tolerant techniques: hedged requests, tied requests, micro-partitioning
+        - **5.** Queueing intuition
+            - **a.** Arrival-rate variance and burstiness
+            - **b.** Queue depth as latency in disguise; bufferbloat
+            - **c.** Bounded queues, load shedding, and why unbounded queues are a bug
+    - **B. Capacity estimation**
+        - **1.** Working the numbers
+            - **a.** QPS from DAU × actions/day ÷ 86,400; peak-to-average ratio
+            - **b.** Storage from row width × rows × replication × retention × overhead
+            - **c.** Bandwidth from payload size × QPS; ingress versus egress asymmetry
+        - **2.** Resource envelopes of a commodity node
+            - **a.** Typical core count, RAM, NVMe IOPS/throughput, NIC bandwidth
+            - **b.** What a single Postgres/Redis/Kafka node can actually sustain
+        - **3.** Cost modeling
+            - **a.** Compute versus storage versus egress pricing shapes
+            - **b.** Cross-AZ and cross-region transfer as a design constraint
+            - **c.** Cost per request as a first-class design metric
+    - **C. Failure as the normal case**
+        - **1.** Independent versus correlated failure
+            - **a.** Failure domains: process, host, rack, AZ, region, provider
+            - **b.** Correlated failure through shared dependencies and shared config
+        - **2.** Failure modes taxonomy
+            - **a.** Crash-stop, crash-recovery, omission, timing, Byzantine
+            - **b.** Gray failure and partial degradation
+            - **c.** Fail-stop as a design goal (fail fast, fail loud)
+        - **3.** Availability arithmetic
+            - **a.** Nines, error budgets, and the serial-dependency multiplication rule
+            - **b.** MTBF, MTTR, and why MTTR usually dominates
+            - **c.** Redundancy math: independent versus shared-fate replicas
+    - **D. The eight fallacies of distributed computing**
+        - **1.** Network is reliable / latency is zero / bandwidth is infinite
+        - **2.** Network is secure / topology doesn't change / one administrator
+        - **3.** Transport cost is zero / network is homogeneous
+        - **4.** How each fallacy shows up as a concrete production incident
+
+- **II. Distributed Systems Theory**
+    - **A. System and timing models**
+        - **1.** Synchronous, partially synchronous, and asynchronous models
+            - **a.** What bounds each model assumes on message delay and clock drift
+            - **b.** Why partial synchrony is the model real consensus protocols target
+        - **2.** Failure detectors
+            - **a.** Completeness versus accuracy
+            - **b.** Timeout-based detection and the false-positive/latency trade-off
+            - **c.** Phi-accrual detectors and adaptive suspicion
+    - **B. Time and ordering**
+        - **1.** Physical clocks
+            - **a.** NTP, clock skew, drift, and leap seconds
+            - **b.** Monotonic versus wall clocks; why wall clocks must not order events
+            - **c.** TrueTime and bounded-uncertainty commit waits
+        - **2.** Logical clocks
+            - **a.** Happens-before and causality
+            - **b.** Lamport timestamps and their loss of concurrency information
+            - **c.** Vector clocks, version vectors, and their size problem
+            - **d.** Hybrid logical clocks
+        - **3.** Ordering guarantees
+            - **a.** Total order, causal order, per-key order, no order
+            - **b.** Cost of each; why per-partition order is the common compromise
+    - **C. Impossibility results and trade-off frameworks**
+        - **1.** FLP impossibility
+            - **a.** No deterministic consensus with one crash in an async model
+            - **b.** How randomization and partial synchrony sidestep it
+        - **2.** CAP
+            - **a.** Precise statement; what "availability" and "partition" actually mean
+            - **b.** Common misreadings; CP/AP as a per-operation, not per-system, property
+        - **3.** PACELC
+            - **a.** Else-latency-or-consistency as the everyday trade-off
+            - **b.** Classifying real systems along both axes
+        - **4.** CALM theorem and monotonicity
+            - **a.** Coordination-free computation when logic is monotone
+            - **b.** Why "just make it a CRDT" is sometimes the right answer
+    - **D. Consistency models**
+        - **1.** The hierarchy
+            - **a.** Strict serializability, linearizability, sequential consistency
+            - **b.** Causal+, read-your-writes, monotonic reads/writes, bounded staleness
+            - **c.** Eventual consistency and convergence
+        - **2.** Transaction isolation versus distributed consistency
+            - **a.** Serializability is about transactions; linearizability is about single objects
+            - **b.** Strict serializability as the conjunction
+            - **c.** Anomaly catalogue: dirty read, lost update, read/write skew, phantom
+        - **3.** Session guarantees
+            - **a.** Sticky sessions and read-your-writes on replicas
+            - **b.** Client-side tokens (LSN/timestamp) to enforce monotonicity
+        - **4.** Convergent replicated data types
+            - **a.** State-based (CvRDT) versus operation-based (CmRDT)
+            - **b.** Counters, registers (LWW, MV), sets (G/2P/OR), sequences
+            - **c.** Metadata growth, tombstones, and garbage collection
+            - **d.** Where CRDTs are and are not appropriate
+    - **E. Consensus and replication protocols**
+        - **1.** The replicated state machine model
+            - **a.** Deterministic application of an ordered log
+            - **b.** Why every strongly consistent system reduces to this
+        - **2.** Paxos family
+            - **a.** Single-decree Paxos: prepare/promise, accept/accepted
+            - **b.** Multi-Paxos, stable leaders, and log holes
+            - **c.** Flexible Paxos and quorum intersection generalization
+        - **3.** Raft
+            - **a.** Leader election, terms, and randomized timeouts
+            - **b.** Log replication, matchIndex/nextIndex, and commit rules
+            - **c.** Safety argument: log matching and leader completeness
+            - **d.** Membership change (joint consensus) and snapshotting
+        - **4.** Quorums
+            - **a.** Majority quorums; `R + W > N` and its limits
+            - **b.** Read/write quorum tuning and sloppy quorums with hinted handoff
+            - **c.** Witness/tiebreaker nodes and cross-AZ placement
+        - **5.** View-stamped replication, ZAB, and Viewstamped-style protocols
+            - **a.** Primary-backup framing of the same problem
+            - **b.** ZooKeeper's ZAB and its ordering guarantees
+        - **6.** Byzantine fault tolerance
+            - **a.** `3f + 1` requirement and PBFT sketch
+            - **b.** When BFT is and is not warranted outside blockchains
+        - **7.** Leases and leader stability
+            - **a.** Leases as time-bounded locks; why a lock service alone is unsafe
+            - **b.** Fencing tokens and the stale-leader write problem
+            - **c.** Clock assumptions hidden inside every lease
+    - **F. Distributed transactions**
+        - **1.** Two-phase commit
+            - **a.** Prepare/commit, coordinator log, and participant durability
+            - **b.** Blocking on coordinator failure; in-doubt transactions
+            - **c.** Why 2PC is availability-hostile and latency-expensive
+        - **2.** Three-phase commit and Paxos-backed commit
+            - **a.** Non-blocking variants and their assumptions
+            - **b.** Replicated coordinator state as the practical fix
+        - **3.** Sagas and compensating transactions
+            - **a.** Choreography versus orchestration
+            - **b.** Compensation semantics; when a compensation is impossible
+            - **c.** Semantic locks, commutative updates, and reservation patterns
+        - **4.** Deterministic and partition-aware transactions
+            - **a.** Calvin-style pre-ordering
+            - **b.** Single-partition fast paths and partition-affinity schema design
+        - **5.** Percolator/Spanner-style distributed MVCC
+            - **a.** Timestamp oracle versus TrueTime
+            - **b.** Snapshot reads without locking
+    - **G. Distributed coordination primitives**
+        - **1.** Distributed locks
+            - **a.** Correctness requirements; the Redlock debate
+            - **b.** Fencing tokens as the only safe general answer
+        - **2.** Leader election
+            - **a.** Lease-based versus consensus-based
+            - **b.** Split-brain detection and prevention
+        - **3.** Membership and failure detection
+            - **a.** Gossip protocols: SWIM, anti-entropy, dissemination
+            - **b.** Central registry versus gossip trade-offs
+        - **4.** Coordination services
+            - **a.** ZooKeeper: znodes, watches, sessions, ephemeral nodes
+            - **b.** etcd: revisions, leases, watch streams, MVCC key space
+            - **c.** Consul and service-discovery integration
+            - **d.** Why coordination services must stay small and off the data path
+
+- **III. Networking and Communication**
+    - **A. Transport layer**
+        - **1.** TCP behavior that designs depend on
+            - **a.** Three-way handshake, slow start, congestion control (Cubic/BBR)
+            - **b.** Head-of-line blocking, Nagle, and delayed ACK interaction
+            - **c.** Keepalives, half-open connections, and the silent-peer problem
+        - **2.** UDP and QUIC
+            - **a.** When loss tolerance beats ordering
+            - **b.** QUIC: stream multiplexing, 0-RTT, connection migration
+        - **3.** TLS
+            - **a.** Handshake cost, session resumption, and ALPN
+            - **b.** mTLS for service identity; certificate rotation as an ops problem
+        - **4.** Connection management
+            - **a.** Connection pooling, warm pools, and pool sizing
+            - **b.** Per-connection memory cost across components
+            - **c.** Ephemeral port exhaustion and TIME_WAIT
+    - **B. Application protocols**
+        - **1.** HTTP/1.1, HTTP/2, HTTP/3
+            - **a.** Pipelining, multiplexing, header compression
+            - **b.** Which head-of-line blocking each version does and doesn't fix
+        - **2.** gRPC and binary RPC
+            - **a.** Protobuf encoding, streaming modes, deadlines
+            - **b.** Load balancing difficulty with long-lived HTTP/2 connections
+        - **3.** REST, GraphQL, and RPC style trade-offs
+            - **a.** Resource versus procedure modeling
+            - **b.** GraphQL N+1, query cost limits, and persisted queries
+        - **4.** Server-push and realtime transports
+            - **a.** Long polling, SSE, WebSocket
+            - **b.** Connection-state cost and fan-out routing for push
+    - **C. Serialization and schema evolution**
+        - **1.** Formats
+            - **a.** JSON, Protobuf, Avro, Thrift, MessagePack, Parquet
+            - **b.** Self-describing versus schema-required encodings
+        - **2.** Compatibility
+            - **a.** Backward, forward, and full compatibility rules
+            - **b.** Field numbering, defaults, and reserved tags
+            - **c.** Schema registries and compatibility enforcement
+        - **3.** Encoding cost
+            - **a.** CPU per message and its effect at high QPS
+            - **b.** Compression choices: gzip, snappy, lz4, zstd
+    - **D. Load balancing and traffic management**
+        - **1.** Layers
+            - **a.** L4 (connection) versus L7 (request) balancing
+            - **b.** DNS-based, anycast, and hardware/software LBs
+        - **2.** Algorithms
+            - **a.** Round robin, least connections, least outstanding requests
+            - **b.** Power-of-two-choices and why it beats naive least-loaded
+            - **c.** Consistent hashing with bounded loads
+        - **3.** Health checking
+            - **a.** Active versus passive; shallow versus deep checks
+            - **b.** Outlier detection and ejection; the cascading-ejection hazard
+        - **4.** Client-side load balancing and service mesh
+            - **a.** Sidecar proxies, xDS, and control-plane/data-plane split
+            - **b.** Mesh overhead and when it is not worth it
+        - **5.** Traffic shaping
+            - **a.** Weighted routing, canaries, blue/green, shadow traffic
+            - **b.** Request hedging and its amplification risk
+    - **E. Edge and content delivery**
+        - **1.** CDN architecture
+            - **a.** PoPs, origin shield, tiered caching
+            - **b.** Cache keys, `Vary`, and cardinality explosion
+        - **2.** Cache-control semantics
+            - **a.** TTL, `stale-while-revalidate`, `stale-if-error`
+            - **b.** ETags and conditional requests
+        - **3.** Invalidation
+            - **a.** Purge by URL, by tag, by surrogate key
+            - **b.** Versioned URLs as invalidation avoidance
+        - **4.** Edge compute
+            - **a.** Where to put logic: edge, origin, client
+            - **b.** State at the edge and its consistency limits
+    - **F. Naming, discovery, and addressing**
+        - **1.** DNS
+            - **a.** TTL, negative caching, resolver behavior, and propagation myths
+            - **b.** DNS as a failover mechanism and its limits
+        - **2.** Service discovery
+            - **a.** Registry-based, DNS-based, and mesh-based
+            - **b.** Health-state propagation delay as a correctness factor
+        - **3.** Multi-region addressing
+            - **a.** GeoDNS, anycast, and latency-based routing
+            - **b.** Sticky routing for stateful sessions
+
+- **IV. Data Storage Concepts**
+    - **A. Storage engine trade-offs**
+        - **1.** B-tree versus LSM-tree
+            - **a.** Read/write/space amplification profiles
+            - **b.** Write path: in-place update versus append-and-compact
+            - **c.** Compaction cost, stalls, and tail-latency impact
+        - **2.** Row, column, and hybrid layouts
+            - **a.** OLTP point access versus OLAP scan-and-aggregate
+            - **b.** Columnar compression and vectorized execution
+        - **3.** Indexing concepts
+            - **a.** Primary, secondary, composite, covering, partial
+            - **b.** Index-organized versus heap-organized tables
+            - **c.** Write amplification from index maintenance
+        - **4.** Probabilistic structures
+            - **a.** Bloom and cuckoo filters
+            - **b.** HyperLogLog, count-min sketch, t-digest
+            - **c.** Where approximation is acceptable and where it is not
+    - **B. Data models and store classes**
+        - **1.** Relational
+            - **a.** Normalization, joins, and constraint enforcement
+            - **b.** When the relational model is the cheapest correct answer
+        - **2.** Key/value and wide-column
+            - **a.** Single-key access paths and denormalized access patterns
+            - **b.** Query-driven schema design (Cassandra/DynamoDB style)
+        - **3.** Document
+            - **a.** Aggregate boundaries and embedded versus referenced data
+            - **b.** Schema-on-read costs
+        - **4.** Graph, time-series, search, and vector stores
+            - **a.** Traversal, retention/rollup, inverted index, ANN
+            - **b.** Specialized store versus extension on a general store
+        - **5.** Object storage
+            - **a.** Flat namespace, eventual-versus-strong consistency, prefix throughput
+            - **b.** Multipart upload, lifecycle tiering, and request cost
+        - **6.** Polyglot persistence
+            - **a.** One store per access pattern versus operational sprawl
+            - **b.** Dual-write hazards and the single-source-of-truth rule
+    - **C. Partitioning (sharding)**
+        - **1.** Partitioning strategies
+            - **a.** Range, hash, list, composite
+            - **b.** Directory/lookup-based partitioning
+            - **c.** Consistent hashing, virtual nodes, and jump hash
+        - **2.** Shard-key selection
+            - **a.** Cardinality, uniformity, and query-locality requirements
+            - **b.** Cross-shard queries, scatter-gather, and fan-out cost
+            - **c.** Why the shard key is the hardest decision to reverse
+        - **3.** Hotspots and skew
+            - **a.** Celebrity/hot-key problem and key salting
+            - **b.** Time-ordered keys and the write-hotspot pattern
+            - **c.** Per-key rate limiting and caching as skew mitigation
+        - **4.** Rebalancing
+            - **a.** Fixed partition count versus dynamic splitting
+            - **b.** Online resharding, double-writes, and cutover
+            - **c.** Data movement cost and throttling
+        - **5.** Routing
+            - **a.** Client-side routing, proxy routing, request redirection
+            - **b.** Routing-table distribution and staleness handling
+    - **D. Replication**
+        - **1.** Topologies
+            - **a.** Single-leader, multi-leader, leaderless
+            - **b.** Chain replication and its read/write split
+            - **c.** Cascading replicas and read-replica trees
+        - **2.** Synchrony
+            - **a.** Synchronous, asynchronous, semi-synchronous, quorum
+            - **b.** RPO/RTO implications of each
+            - **c.** Replication lag: causes, measurement, and user-visible effects
+        - **3.** Replication mechanisms
+            - **a.** Statement, row/logical, and physical/WAL-based
+            - **b.** Snapshot + stream bootstrap
+        - **4.** Conflict handling
+            - **a.** Last-write-wins and its data-loss property
+            - **b.** Application-level merge, CRDTs, and conflict logs
+            - **c.** Write-affinity routing to avoid conflicts entirely
+        - **5.** Failover
+            - **a.** Automatic versus manual promotion
+            - **b.** Split-brain, STONITH, and fencing
+            - **c.** Lost-write windows on async failover
+    - **E. Transactions and concurrency control**
+        - **1.** ACID in practice
+            - **a.** What each letter actually guarantees; per-engine variation
+            - **b.** BASE as a contrast framing
+        - **2.** Isolation levels
+            - **a.** Read committed, repeatable read, snapshot, serializable
+            - **b.** Anomalies permitted at each level
+            - **c.** Application-level compensations: `SELECT FOR UPDATE`, advisory locks
+        - **3.** Concurrency-control families
+            - **a.** Two-phase locking and deadlock handling
+            - **b.** MVCC: snapshots, visibility, and garbage collection
+            - **c.** Optimistic concurrency control and validation
+            - **d.** Timestamp ordering and serializable snapshot isolation
+        - **4.** Idempotency and exactly-once
+            - **a.** Idempotency keys, dedup windows, and their storage cost
+            - **b.** At-most-once, at-least-once, effectively-once
+            - **c.** Why "exactly-once delivery" is impossible and "exactly-once processing" is not
+        - **5.** Outbox, inbox, and CDC
+            - **a.** Transactional outbox pattern
+            - **b.** Log-based change data capture
+            - **c.** Dual-write problem and why CDC is the standard fix
+    - **F. Durability and recovery**
+        - **1.** Write-ahead logging
+            - **a.** WAL ordering rule and group commit
+            - **b.** `fsync` semantics, write caches, and durability lies
+        - **2.** Checkpoints and snapshots
+            - **a.** Recovery-time versus steady-state-I/O trade-off
+        - **3.** Backups
+            - **a.** Full, incremental, differential; logical versus physical
+            - **b.** Point-in-time recovery and log archiving
+            - **c.** Restore-time as the real metric; untested backups
+        - **4.** Data integrity
+            - **a.** Checksums, scrubbing, and silent corruption
+            - **b.** Erasure coding versus replication for durability
+    - **G. Data lifecycle and large-scale processing**
+        - **1.** Batch processing
+            - **a.** MapReduce lineage, Spark, and shuffle cost
+            - **b.** Idempotent, re-runnable job design
+        - **2.** Stream processing
+            - **a.** Event time versus processing time; watermarks
+            - **b.** Windowing: tumbling, sliding, session
+            - **c.** State stores, changelogs, and checkpointing
+            - **d.** Late data, allowed lateness, and reprocessing
+        - **3.** Lambda and Kappa architectures
+            - **a.** Dual-path complexity versus replay-everything simplicity
+        - **4.** Warehouses, lakes, and lakehouses
+            - **a.** ETL versus ELT
+            - **b.** Open table formats: Iceberg, Delta, Hudi
+        - **5.** Retention, archival, and deletion
+            - **a.** TTL, tiering, and cold storage
+            - **b.** Hard delete versus soft delete; GDPR-style erasure through immutable logs
+
+- **V. Caching**
+    - **A. Cache placement**
+        - **1.** Client, CDN/edge, reverse proxy, application, database
+        - **2.** Local (in-process) versus remote (shared) caches
+            - **a.** Latency versus hit-rate and consistency trade-off
+            - **b.** Near-cache/two-tier designs
+        - **3.** Cache-aside, read-through, write-through, write-behind, refresh-ahead
+            - **a.** Failure semantics of each
+            - **b.** Which one leaves stale data on write failure
+    - **B. Cache mechanics**
+        - **1.** Eviction policies
+            - **a.** LRU, LFU, ARC, W-TinyLFU, CLOCK
+            - **b.** Scan resistance and admission control
+        - **2.** Expiration
+            - **a.** TTL selection, jitter, and soft/hard TTL
+            - **b.** Active versus lazy expiration
+        - **3.** Hit rate economics
+            - **a.** Marginal value of the next 1% hit rate
+            - **b.** Working-set size estimation and cache sizing
+    - **C. Cache failure modes**
+        - **1.** Thundering herd / cache stampede
+            - **a.** Request coalescing, single-flight, probabilistic early expiry
+        - **2.** Cache penetration (misses for nonexistent keys)
+            - **a.** Negative caching and Bloom-filter guards
+        - **3.** Cache avalanche (mass simultaneous expiry)
+            - **a.** TTL jitter and staged warming
+        - **4.** Hot keys
+            - **a.** Key replication, client-side caching, and request collapsing
+        - **5.** Cold start and cache warming
+            - **a.** Post-deploy and post-failover capacity cliffs
+            - **b.** Why a cache that is required for availability is a database
+    - **D. Cache coherence and invalidation**
+        - **1.** Invalidation strategies
+            - **a.** TTL-only, explicit delete, versioned keys, tag-based
+            - **b.** Delete-then-write versus write-then-delete race windows
+        - **2.** Multi-instance and multi-region coherence
+            - **a.** Pub/sub invalidation broadcast
+            - **b.** CDC-driven invalidation
+        - **3.** Consistency guarantees a cache can and cannot provide
+
+- **VI. Messaging and Event-Driven Architecture**
+    - **A. Communication styles**
+        - **1.** Synchronous request/response versus asynchronous messaging
+            - **a.** Coupling in time, availability, and schema
+            - **b.** Latency budget versus resilience trade-off
+        - **2.** Point-to-point queues versus publish/subscribe
+        - **3.** Command, event, and document message semantics
+            - **a.** Event-notification versus event-carried-state-transfer
+    - **B. Broker semantics**
+        - **1.** Delivery guarantees
+            - **a.** At-most-once, at-least-once, exactly-once processing
+            - **b.** Acknowledgement models: auto, manual, negative ack
+        - **2.** Ordering guarantees
+            - **a.** Global, per-partition, per-key
+            - **b.** Ordering versus parallelism as a direct trade-off
+        - **3.** Durability and retention
+            - **a.** In-memory versus disk-backed brokers
+            - **b.** Log retention versus queue-drain semantics
+        - **4.** Push versus pull consumption
+            - **a.** Backpressure and flow control in each model
+        - **5.** Consumer scaling
+            - **a.** Competing consumers and partition-bound parallelism
+            - **b.** Rebalancing cost and stop-the-world pauses
+    - **C. Reliability patterns**
+        - **1.** Retries
+            - **a.** Exponential backoff, jitter, retry budgets
+            - **b.** Retry storms and amplification
+        - **2.** Dead-letter queues and poison messages
+            - **a.** Triage, replay, and DLQ monitoring as a first-class signal
+        - **3.** Idempotent consumers
+            - **a.** Dedup stores, processed-offset tracking, natural idempotency
+        - **4.** Backlog management
+            - **a.** Lag as the key SLI; drain-rate math
+            - **b.** Shedding, prioritization, and multi-lane queues
+    - **D. Event-driven architecture patterns**
+        - **1.** Event sourcing
+            - **a.** Event log as source of truth; projections and snapshots
+            - **b.** Schema evolution of historical events; upcasting
+            - **c.** When event sourcing is overkill
+        - **2.** CQRS
+            - **a.** Read/write model separation and projection lag
+            - **b.** Read-your-writes handling in a CQRS system
+        - **3.** Choreography versus orchestration
+            - **a.** Workflow engines and durable execution
+            - **b.** Observability difficulty in choreographed systems
+        - **4.** Stream/table duality
+            - **a.** Changelog as a table; compaction as materialization
+        - **5.** Fan-out patterns
+            - **a.** Write-fan-out versus read-fan-out; hybrid by producer size
+            - **b.** Push versus pull for feed and notification delivery
+    - **E. Scheduling and delayed work**
+        - **1.** Delay queues, visibility timeouts, and scheduled messages
+        - **2.** Timer wheels and time-bucketed scheduling stores
+        - **3.** Cron at scale: leader election, missed runs, and overlap prevention
+        - **4.** Long-running and durable workflows
+            - **a.** Checkpointing, resumability, and non-determinism hazards
+
+- **VII. Service and API Design**
+    - **A. Decomposition**
+        - **1.** Monolith, modular monolith, service-oriented, microservices
+            - **a.** Deployment coupling versus operational overhead
+            - **b.** Distributed monolith as the anti-pattern
+        - **2.** Boundary selection
+            - **a.** Domain-driven bounded contexts and aggregates
+            - **b.** Data ownership as the real boundary
+            - **c.** Team topology and Conway's law as design inputs
+        - **3.** Shared data and shared libraries
+            - **a.** Why a shared database defeats decomposition
+            - **b.** Versioning and lockstep-deploy hazards
+    - **B. API contracts**
+        - **1.** Versioning
+            - **a.** URI, header, and field-level versioning
+            - **b.** Deprecation policy and consumer migration
+        - **2.** Pagination
+            - **a.** Offset versus cursor/keyset; stability under concurrent writes
+        - **3.** Idempotency and safety
+            - **a.** Idempotency keys for POST; safe/idempotent method semantics
+        - **4.** Errors and partial failure
+            - **a.** Error taxonomy, retryable versus terminal
+            - **b.** Partial success responses and batch semantics
+        - **5.** Bulk, batch, and streaming endpoints
+            - **a.** Payload limits, chunking, and long-running-operation patterns
+        - **6.** Backward/forward compatibility discipline
+    - **C. Multi-tenancy**
+        - **1.** Isolation models: shared everything, shared schema, silo
+        - **2.** Noisy-neighbor control and per-tenant quotas
+        - **3.** Tenant-aware sharding and data residency
+    - **D. Configuration and deployment**
+        - **1.** Feature flags, dynamic config, and kill switches
+            - **a.** Config as a change vector for incidents
+        - **2.** Deployment strategies
+            - **a.** Rolling, blue/green, canary, shadow
+            - **b.** Rollback versus roll-forward; irreversible migrations
+        - **3.** Schema migration under zero downtime
+            - **a.** Expand/contract, dual-read/dual-write, backfill
+            - **b.** Lock-avoiding DDL and long-running migration control
+        - **4.** Infrastructure and orchestration concepts
+            - **a.** Containers, schedulers, autoscaling signals
+            - **b.** Stateful workloads on orchestrators and their pitfalls
+
+- **VIII. Reliability and Resilience**
+    - **A. Overload protection**
+        - **1.** Rate limiting
+            - **a.** Fixed window, sliding window log/counter, token bucket, leaky bucket
+            - **b.** Distributed rate limiting: central store, local + sync, probabilistic
+            - **c.** Per-user, per-tenant, per-endpoint, and global limits
+        - **2.** Load shedding
+            - **a.** Priority-aware shedding and criticality tiers
+            - **b.** Admission control and queue-time-based rejection
+        - **3.** Backpressure
+            - **a.** Propagating pressure upstream instead of buffering
+            - **b.** Bounded queues and reactive-stream style credit
+        - **4.** Concurrency limiting
+            - **a.** Bulkheads and thread/connection pool isolation
+            - **b.** Adaptive limits (Gradient/Vegas-style)
+    - **B. Failure containment**
+        - **1.** Timeouts
+            - **a.** Deadline propagation across service hops
+            - **b.** Timeout budgets that shrink down the call chain
+            - **c.** The classic misconfiguration: client timeout < server work time
+        - **2.** Retries
+            - **a.** Only-retry-idempotent rule; retry budgets and circuit-aware retries
+        - **3.** Circuit breakers
+            - **a.** Closed/open/half-open states and thresholds
+            - **b.** Interaction with retries and fallback
+        - **4.** Fallbacks and graceful degradation
+            - **a.** Static/default responses, stale cache serving, feature shedding
+            - **b.** Degradation ladder defined ahead of time
+        - **5.** Cascading failure
+            - **a.** Retry amplification, connection-pool exhaustion, metastable failure
+            - **b.** Why recovery can be harder than the original failure
+            - **c.** Restart storms and thundering herds on recovery
+    - **C. Availability engineering**
+        - **1.** Redundancy models
+            - **a.** Active-active, active-passive, N+1, N+2
+            - **b.** Cell-based architecture and blast-radius reduction
+            - **c.** Shuffle sharding
+        - **2.** Multi-AZ and multi-region
+            - **a.** Latency, consistency, and cost consequences of each
+            - **b.** Read-local/write-global versus full active-active
+            - **c.** Regional failover: data, traffic, and control-plane order of operations
+        - **3.** Disaster recovery
+            - **a.** RPO/RTO targets driving the architecture
+            - **b.** Backup/restore, pilot light, warm standby, hot standby
+            - **c.** DR drills and the untested-failover trap
+        - **4.** Static stability
+            - **a.** Systems that survive without control-plane availability
+            - **b.** Pre-provisioning over reactive scaling during failure
+    - **D. Correctness under failure**
+        - **1.** Reconciliation and self-healing loops
+            - **a.** Desired-state controllers; converge rather than command
+            - **b.** Periodic auditors and drift detection
+        - **2.** Data repair
+            - **a.** Anti-entropy, read repair, Merkle-tree comparison
+            - **b.** Consistency checkers and repair backlogs
+        - **3.** Chaos and fault injection
+            - **a.** Failure hypothesis, blast radius control, steady-state metric
+        - **4.** Testing distributed correctness
+            - **a.** Deterministic simulation, Jepsen-style linearizability checking
+            - **b.** Property-based and fuzz testing of protocols
+
+- **IX. Observability and Operations**
+    - **A. Telemetry pillars**
+        - **1.** Metrics
+            - **a.** Counters, gauges, histograms, summaries
+            - **b.** Cardinality cost and label discipline
+            - **c.** Aggregation error: why averaging percentiles is wrong
+        - **2.** Logs
+            - **a.** Structured logging, sampling, and retention cost
+        - **3.** Traces
+            - **a.** Spans, context propagation, sampling strategies
+            - **b.** Tail-based sampling for rare-failure capture
+        - **4.** Profiles and continuous profiling
+        - **5.** Events and change tracking as a correlation source
+    - **B. Service-level objectives**
+        - **1.** SLI selection: availability, latency, correctness, freshness
+        - **2.** SLO definition, error budgets, and burn-rate alerting
+        - **3.** SLAs and their contractual versus engineering distinction
+        - **4.** Multi-window multi-burn-rate alerting design
+    - **C. Diagnosis**
+        - **1.** USE and RED methods
+        - **2.** Saturation signals per component class
+        - **3.** Distributed debugging: correlation IDs and cross-service timelines
+        - **4.** Distinguishing dependency failure from self-inflicted failure
+    - **D. Operational practice**
+        - **1.** On-call, runbooks, and paging discipline
+        - **2.** Incident command, mitigation-before-diagnosis
+        - **3.** Postmortems and systemic-cause analysis
+        - **4.** Capacity planning, load testing, and pre-scaling
+        - **5.** Change management as the dominant incident cause
+
+- **X. Security and Privacy**
+    - **A. Identity and access**
+        - **1.** AuthN: sessions, tokens, JWT, OAuth 2.0/OIDC
+            - **a.** Token lifetime, refresh, and revocation difficulty
+        - **2.** AuthZ: RBAC, ABAC, ReBAC (Zanzibar-style)
+            - **a.** Policy evaluation placement and caching
+        - **3.** Service-to-service identity: mTLS, SPIFFE, workload identity
+        - **4.** Secrets management and rotation
+    - **B. Data protection**
+        - **1.** Encryption in transit, at rest, and in use
+        - **2.** Key management, envelope encryption, and crypto-shredding
+        - **3.** Tokenization, PII classification, and data minimization
+        - **4.** Residency, sovereignty, and regional data boundaries
+    - **C. Application and platform threats**
+        - **1.** Injection, SSRF, deserialization, and supply chain
+        - **2.** DDoS mitigation layers and rate limiting as defense
+        - **3.** Tenant isolation failures and IDOR-class bugs
+    - **D. Auditability**
+        - **1.** Audit logs, tamper evidence, and retention
+        - **2.** Compliance-driven design constraints (SOC 2, PCI, HIPAA, GDPR)
+
+- **XI. Component Deep Dive: PostgreSQL**
+    - **A. Process and memory architecture**
+        - **1.** Postmaster, backends, and background workers
+            - **a.** Process-per-connection cost; why pooling is mandatory at scale
+            - **b.** Background writer, checkpointer, WAL writer, autovacuum launcher
+        - **2.** Shared memory
+            - **a.** `shared_buffers` sizing and interaction with OS page cache
+            - **b.** WAL buffers, lock tables, and shared hash tables
+        - **3.** Per-backend memory
+            - **a.** `work_mem` as a per-node-per-operation budget, not per query
+            - **b.** `maintenance_work_mem`, temp buffers, and OOM risk
+        - **4.** Connection pooling
+            - **a.** PgBouncer modes: session, transaction, statement
+            - **b.** What breaks in transaction pooling (prepared statements, advisory locks, temp tables)
+            - **c.** Pool sizing from core count and workload, not from client count
+    - **B. Storage internals**
+        - **1.** Heap layout
+            - **a.** Pages, tuples, `ctid`, line pointers
+            - **b.** Tuple header overhead and column-order alignment
+        - **2.** TOAST
+            - **a.** Compression and out-of-line storage thresholds
+            - **b.** Detoasting cost on wide-value queries
+        - **3.** Free space map and visibility map
+        - **4.** Tablespaces, relfilenodes, and segment files
+    - **C. MVCC and vacuum**
+        - **1.** Row versioning
+            - **a.** `xmin`/`xmax`, snapshots, and visibility rules
+            - **b.** Why updates are delete+insert and what that costs indexes
+        - **2.** HOT updates
+            - **a.** Conditions for a heap-only tuple and fill-factor tuning
+        - **3.** Bloat
+            - **a.** Sources, measurement, and remediation (`VACUUM FULL`, `pg_repack`)
+        - **4.** Autovacuum
+            - **a.** Trigger thresholds, cost-delay throttling, and per-table tuning
+            - **b.** Why autovacuum falls behind and the symptoms
+        - **5.** Transaction ID wraparound
+            - **a.** Freezing, `age(datfrozenxid)`, and the anti-wraparound emergency
+            - **b.** Long transactions and replication slots holding back the horizon
+    - **D. Indexing**
+        - **1.** B-tree
+            - **a.** Multicolumn ordering, deduplication, index-only scans
+        - **2.** Hash, GiST, SP-GiST, GIN, BRIN
+            - **a.** Which workload each is actually for
+            - **b.** GIN pending-list and `fastupdate` trade-off
+            - **c.** BRIN and physical-order correlation dependence
+        - **3.** Partial, expression, and covering (`INCLUDE`) indexes
+        - **4.** Extensions: `pgvector` (IVFFlat, HNSW), PostGIS, `pg_trgm`
+        - **5.** Index maintenance
+            - **a.** `CREATE INDEX CONCURRENTLY` and its failure modes
+            - **b.** Bloat, `REINDEX CONCURRENTLY`, unused-index detection
+    - **E. Query planning and execution**
+        - **1.** Planner inputs
+            - **a.** Statistics, `n_distinct`, histograms, MCVs, extended statistics
+            - **b.** Cost constants and their relation to real hardware
+        - **2.** Plan shapes
+            - **a.** Scan types, join methods, aggregation strategies
+            - **b.** Parallel query eligibility and worker limits
+        - **3.** Reading `EXPLAIN (ANALYZE, BUFFERS)`
+            - **a.** Estimate-versus-actual, loops, spills, and buffer counts
+        - **4.** Prepared statements and plan caching
+            - **a.** Custom versus generic plans; parameter sniffing
+    - **F. Concurrency and locking**
+        - **1.** Row locks and isolation levels (RC, RR/snapshot, serializable via SSI)
+        - **2.** Table-level lock modes and DDL lock conflicts
+        - **3.** Deadlocks, lock waits, and `pg_locks` diagnosis
+        - **4.** Advisory locks as an application primitive
+        - **5.** `SKIP LOCKED` and Postgres-as-a-queue
+            - **a.** Where it works well and where it does not
+    - **G. Durability, WAL, and replication**
+        - **1.** WAL mechanics
+            - **a.** Records, LSNs, full-page writes, group commit
+            - **b.** `synchronous_commit` levels and the durability/latency dial
+        - **2.** Checkpoints
+            - **a.** Timed versus requested; tuning to avoid I/O spikes
+        - **3.** Physical replication
+            - **a.** Streaming replicas, `hot_standby_feedback`, replication slots
+            - **b.** Sync/quorum commit and `synchronous_standby_names`
+            - **c.** Replica conflicts and query cancellation
+        - **4.** Logical replication and CDC
+            - **a.** Publications/subscriptions, output plugins, `wal2json`/`pgoutput`
+            - **b.** Debezium-based CDC pipelines and their failure modes
+            - **c.** Slot lag as a disk-fill hazard
+        - **5.** Backup and PITR
+            - **a.** `pg_basebackup`, WAL archiving, `pgBackRest`/`wal-g`
+            - **b.** Recovery targets and timelines
+        - **6.** High availability
+            - **a.** Patroni/etcd-based failover, split-brain prevention
+            - **b.** Failover-induced data loss under async replication
+    - **H. Scaling Postgres**
+        - **1.** Vertical scaling limits and what saturates first
+        - **2.** Read scaling
+            - **a.** Replica routing, lag-aware reads, read-your-writes handling
+        - **3.** Partitioning
+            - **a.** Declarative range/list/hash partitioning
+            - **b.** Partition pruning, partitionwise join/aggregate
+            - **c.** Partition maintenance and detach/attach patterns
+        - **4.** Sharding
+            - **a.** Citus (distributed tables, reference tables, colocation)
+            - **b.** Application-level sharding and its operational cost
+        - **5.** Postgres as a general-purpose substitute
+            - **a.** `LISTEN`/`NOTIFY`, `jsonb`, full-text search, `pgvector`
+            - **b.** When "just use Postgres" is right and when it is not
+    - **I. Operational failure modes worth knowing by name**
+        - **1.** Connection storms and pool exhaustion
+        - **2.** Idle-in-transaction sessions blocking vacuum
+        - **3.** Lock queue pileup behind a single DDL
+        - **4.** Plan flips after statistics change
+        - **5.** Checkpoint/WAL write storms
+        - **6.** Replication slot growth filling the disk
+
+- **XII. Component Deep Dive: Redis**
+    - **A. Execution model**
+        - **1.** Single-threaded command execution
+            - **a.** Atomicity as a free consequence
+            - **b.** Blocking commands as a self-inflicted outage (`KEYS`, big `DEL`, Lua loops)
+        - **2.** I/O threads and Redis 6+ threading model
+        - **3.** Event loop, pipelining, and round-trip amortization
+        - **4.** Memory allocator behavior and fragmentation
+    - **B. Data structures and their internals**
+        - **1.** Strings, lists, sets, hashes, sorted sets
+            - **a.** Encoding transitions (listpack/ziplist → skiplist/hashtable) and thresholds
+            - **b.** Complexity of the commands that matter
+        - **2.** Bitmaps, HyperLogLog, geospatial
+        - **3.** Streams
+            - **a.** Entry IDs, consumer groups, `XACK`, pending-entries list
+            - **b.** Trimming and capped streams
+            - **c.** Streams versus pub/sub versus lists as a queue
+        - **4.** Pub/sub
+            - **a.** Fire-and-forget semantics; no persistence, no replay
+        - **5.** Modules and extensions (RediSearch, RedisJSON, TimeSeries, Bloom)
+    - **C. Persistence**
+        - **1.** RDB snapshots
+            - **a.** Fork and copy-on-write memory spike
+            - **b.** Snapshot loss window
+        - **2.** AOF
+            - **a.** `appendfsync` policies and durability/latency trade-off
+            - **b.** AOF rewrite cost and disk amplification
+        - **3.** Hybrid persistence and restart-time considerations
+        - **4.** Redis as a cache versus as a database
+            - **a.** Data-loss tolerance as the deciding question
+    - **D. Memory management**
+        - **1.** `maxmemory` and eviction policies
+            - **a.** `noeviction`, `allkeys-lru`, `volatile-*`, `allkeys-lfu`
+            - **b.** Approximated LRU/LFU sampling behavior
+        - **2.** Expiration
+            - **a.** Lazy plus active expiry cycle; expiry-lag effects
+        - **3.** Memory accounting
+            - **a.** Per-key overhead, `used_memory` versus RSS, fragmentation ratio
+            - **b.** `MEMORY USAGE`, key-space analysis, big-key detection
+        - **4.** OOM behavior and swap as a latency catastrophe
+    - **E. Replication and clustering**
+        - **1.** Asynchronous replication
+            - **a.** Full sync versus partial resync, replication backlog
+            - **b.** Acknowledged-write loss on failover; `WAIT` and its limits
+        - **2.** Redis Sentinel
+            - **a.** Monitoring, quorum, automatic failover, client rediscovery
+        - **3.** Redis Cluster
+            - **a.** 16,384 hash slots and slot-to-node mapping
+            - **b.** `MOVED`/`ASK` redirection and smart clients
+            - **c.** Hash tags and multi-key operation constraints
+            - **d.** Resharding, slot migration, and cluster-wide failure conditions
+        - **4.** Client-side sharding and proxy approaches
+    - **F. Patterns and primitives**
+        - **1.** Caching patterns and TTL discipline
+        - **2.** Distributed locking
+            - **a.** `SET NX PX`, ownership tokens, and safe release via Lua
+            - **b.** Redlock and its criticisms; when a lock needs fencing instead
+        - **3.** Rate limiting
+            - **a.** Counter, sliding window, and token bucket in Lua
+        - **4.** Leaderboards, counters, and session stores
+        - **5.** Transactions and scripting
+            - **a.** `MULTI`/`EXEC`/`WATCH` optimistic concurrency
+            - **b.** Lua scripts and functions; atomicity versus blocking cost
+        - **6.** Keyspace notifications and their delivery caveats
+    - **G. Operational failure modes**
+        - **1.** Hot keys and single-shard saturation
+        - **2.** Big keys and slow `O(n)` commands
+        - **3.** Fork-induced latency spikes under high write rate
+        - **4.** Eviction storms and hit-rate collapse
+        - **5.** Client-library pitfalls: pool sizing, timeouts, cluster topology refresh
+
+- **XIII. Component Deep Dive: Kafka**
+    - **A. Core abstractions**
+        - **1.** Topics, partitions, offsets, and the immutable log
+            - **a.** Partition as the unit of ordering, parallelism, and placement
+            - **b.** Offsets as consumer-owned position, not broker state
+        - **2.** Brokers, controllers, and metadata
+            - **a.** ZooKeeper-era versus KRaft controller quorum
+            - **b.** Metadata propagation and client bootstrap
+        - **3.** Producers, consumers, and consumer groups
+    - **B. Storage engine**
+        - **1.** Segment files, index files, and time indexes
+        - **2.** Zero-copy transfer and page-cache reliance
+            - **a.** Why Kafka wants free RAM, not a big JVM heap
+        - **3.** Retention
+            - **a.** Time and size retention
+            - **b.** Log compaction: tombstones, cleaner, and compacted-topic semantics
+        - **4.** Tiered storage and its latency profile
+    - **C. Replication and durability**
+        - **1.** Leader/follower replication and the ISR set
+            - **a.** `replica.lag.time.max.ms` and ISR shrink/expand dynamics
+        - **2.** High watermark, log end offset, and visible data
+        - **3.** Durability configuration
+            - **a.** `acks=0/1/all`, `min.insync.replicas`, `replication.factor`
+            - **b.** The `acks=all` + `min.insync=2` + `RF=3` standard and why
+        - **4.** Unclean leader election and the availability/durability choice
+        - **5.** Rack awareness and cross-AZ replica placement
+        - **6.** Leader epochs and log truncation correctness
+    - **D. Producer semantics**
+        - **1.** Batching, `linger.ms`, and compression
+            - **a.** Throughput/latency dial; compression codec trade-offs
+        - **2.** Partitioning
+            - **a.** Key-based hashing, sticky partitioner, custom partitioners
+            - **b.** Key skew and partition hotspots
+        - **3.** Idempotent producer
+            - **a.** Producer ID, sequence numbers, and duplicate suppression
+        - **4.** Transactions
+            - **a.** Transaction coordinator, markers, `read_committed` consumers
+            - **b.** Exactly-once processing within Kafka; boundaries of the guarantee
+        - **5.** Backpressure and buffer exhaustion behavior
+    - **E. Consumer semantics**
+        - **1.** Consumer groups and partition assignment
+            - **a.** Range, round-robin, sticky, cooperative-sticky assignors
+            - **b.** Static membership and `group.instance.id`
+        - **2.** Rebalancing
+            - **a.** Eager (stop-the-world) versus incremental cooperative
+            - **b.** Session timeout, heartbeat, `max.poll.interval.ms`
+            - **c.** Rebalance storms and their causes
+        - **3.** Offset management
+            - **a.** Auto versus manual commit; commit-before versus commit-after
+            - **b.** `__consumer_offsets` and offset retention
+            - **c.** At-least-once and at-most-once as commit-ordering choices
+        - **4.** Consumer lag
+            - **a.** Measurement, drain-rate math, and lag-based autoscaling
+        - **5.** Throughput tuning: fetch sizes, poll loop, parallelism per partition
+    - **F. Topology and capacity decisions**
+        - **1.** Partition count
+            - **a.** Drivers: target throughput, consumer parallelism, ordering needs
+            - **b.** Costs: file handles, metadata, rebalance time, end-to-end latency
+            - **c.** Why partition count is easy to increase and impossible to decrease safely
+        - **2.** Topic design
+            - **a.** Per-entity, per-event-type, and shared-topic modeling
+            - **b.** Key selection for ordering and compaction
+        - **3.** Multi-cluster and multi-region
+            - **a.** MirrorMaker 2 and cluster-linking approaches
+            - **b.** Active-active offsets translation and duplicate handling
+            - **c.** Stretch clusters versus replicated clusters
+        - **4.** Quotas and multi-tenancy
+    - **G. Ecosystem**
+        - **1.** Kafka Connect: source/sink connectors, converters, dead-letter handling
+        - **2.** Kafka Streams: KStream/KTable, state stores, changelog topics, standby replicas
+        - **3.** ksqlDB and Flink as alternative processing layers
+        - **4.** Schema Registry and compatibility enforcement
+    - **H. Operational failure modes**
+        - **1.** Under-replicated and offline partitions
+        - **2.** Disk saturation and retention misconfiguration
+        - **3.** Consumer group stuck in perpetual rebalance
+        - **4.** Poison message blocking a partition
+        - **5.** Hot partition from key skew
+        - **6.** Broker restart/rolling-upgrade impact on latency
+    - **I. Comparison with other brokers**
+        - **1.** RabbitMQ: routing, per-message ack, queue semantics
+        - **2.** SQS/SNS: visibility timeouts, FIFO queues, managed trade-offs
+        - **3.** Pulsar: segment/broker separation, tiered storage, multi-tenancy
+        - **4.** Choosing by ordering, retention, replay, and throughput requirements
+
+- **XIV. Other Components Worth Knowing at Depth**
+    - **A. Wide-column and key/value stores**
+        - **1.** Cassandra: ring, tunable consistency, LSM, read repair, compaction strategies
+        - **2.** DynamoDB: partition/sort keys, WCU/RCU, GSIs/LSIs, adaptive capacity, Streams
+        - **3.** ScyllaDB/HBase as points of contrast
+    - **B. Document and search**
+        - **1.** MongoDB: replica sets, sharding, write concerns, read preferences
+        - **2.** Elasticsearch/OpenSearch: shards/replicas, inverted index, refresh/flush/merge, mapping explosions
+    - **C. Analytical stores**
+        - **1.** ClickHouse, Druid, Pinot: real-time OLAP designs
+        - **2.** Snowflake/BigQuery: storage/compute separation and pricing-driven design
+    - **D. Object and file storage**
+        - **1.** S3 semantics, consistency, prefix scaling, request cost
+        - **2.** HDFS and distributed file systems as contrast
+    - **E. Coordination and control-plane systems**
+        - **1.** ZooKeeper and etcd internals revisited as components
+        - **2.** Consul, Nomad, and Kubernetes control-plane patterns
+    - **F. Proxies and gateways**
+        - **1.** Nginx, Envoy, HAProxy: models and configuration surfaces
+        - **2.** API gateways: auth, rate limiting, transformation, and where not to put logic
+    - **G. Specialized stores**
+        - **1.** Time-series: InfluxDB, TimescaleDB, Prometheus TSDB
+        - **2.** Vector: pgvector, Milvus, FAISS-backed services
+        - **3.** Graph: Neo4j, adjacency modeling in relational stores
+
+- **XV. Cross-Cutting Design Reasoning (Staff-Level)**
+    - **A. Requirements and constraint framing**
+        - **1.** Functional versus non-functional requirements
+        - **2.** Turning vague asks into numbers: QPS, size, latency, durability, consistency
+        - **3.** Explicit non-goals and scope boundaries
+        - **4.** Identifying the one or two constraints that actually drive the design
+    - **B. Trade-off articulation**
+        - **1.** Naming the axis: latency/consistency, cost/reliability, simplicity/flexibility
+        - **2.** Stating what you give up, not only what you gain
+        - **3.** Reversibility: one-way versus two-way doors
+        - **4.** Choosing boring technology and justifying it
+    - **C. Evolution and migration thinking**
+        - **1.** Designing for the next 10× rather than the final 1000×
+        - **2.** Incremental migration paths: strangler fig, dual-write, shadow-read
+        - **3.** Backfill strategy and consistency during migration
+        - **4.** Decommissioning as part of the design
+    - **D. Organizational and lifecycle dimensions**
+        - **1.** Build versus buy versus managed service
+        - **2.** Operational burden as a design cost
+        - **3.** Team ownership boundaries and interface contracts
+        - **4.** Documentation, ADRs, and design-review practice
+    - **E. Failure-first design habit**
+        - **1.** "What happens when this dependency is down/slow/half-down?"
+        - **2.** Enumerating failure domains before drawing the happy path
+        - **3.** Defining degradation behavior per component
+        - **4.** Establishing SLOs before choosing mechanisms
+    - **F. Numeric fluency to have memorized**
+        - **1.** Latency table and its implications by tier
+        - **2.** Typical per-node capacities for Postgres, Redis, Kafka, and app servers
+        - **3.** Common payload/row/message sizes and their storage math
+        - **4.** Replication factor, retention, and overhead multipliers

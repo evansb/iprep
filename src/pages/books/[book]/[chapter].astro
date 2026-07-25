@@ -1,6 +1,7 @@
 ---
 import { render } from 'astro:content';
 import BaseLayout from '../../../layouts/BaseLayout.astro';
+import MermaidRenderer from '../../../components/MermaidRenderer.astro';
 import { books } from '../../../books';
 import {
   getBookChapters,
@@ -30,7 +31,10 @@ export async function getStaticPaths() {
 }
 
 const { book, entry, chapters, index } = Astro.props;
-const { Content } = await render(entry);
+const { Content, headings } = await render(entry);
+
+// Top-level sections of this chapter, shown nested under it in the sidebar.
+const sections = headings.filter((h) => h.depth === 2);
 
 const prev = index > 0 ? chapters[index - 1] : null;
 const next = index < chapters.length - 1 ? chapters[index + 1] : null;
@@ -41,8 +45,21 @@ const currentSlug = chapterSlug(entry);
   title={`${chapterTitle(entry)} — ${book.title}`}
   description={`${book.title}, chapter ${chapterNumber(entry)}: ${chapterTitle(entry)}`}
 >
+  <button
+    slot="header-actions"
+    id="sidebar-toggle"
+    class="theme-toggle sidebar-toggle"
+    type="button"
+    aria-controls="chapter-sidebar"
+    aria-expanded="true"
+    aria-label="Toggle chapter sidebar"
+    title="Toggle chapter sidebar"
+  >
+    <span aria-hidden="true">☰</span>
+  </button>
+
   <div class="chapter-shell">
-    <nav class="sidebar" aria-label="Chapters">
+    <nav class="sidebar" id="chapter-sidebar" aria-label="Chapters">
       <p class="side-book">{book.title}</p>
       <a class="side-back" href={href(`/books/${book.slug}/`)}>← Table of contents</a>
       <ol>
@@ -56,6 +73,17 @@ const currentSlug = chapterSlug(entry);
                 <span class="n">{String(chapterNumber(ch)).padStart(2, '0')}</span>
                 <span>{chapterTitle(ch)}</span>
               </a>
+              {chapterSlug(ch) === currentSlug && sections.length > 0 && (
+                <ul class="side-sections">
+                  {sections.map((h) => (
+                    <li>
+                      <a href={`#${h.slug}`} data-section={h.slug}>
+                        {h.text}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </li>
           ))
         }
@@ -91,4 +119,87 @@ const currentSlug = chapterSlug(entry);
       </nav>
     </article>
   </div>
+
+  <MermaidRenderer />
+
+  {/* Sidebar collapse. The state lives on <html data-sidebar> so BaseLayout's
+      pre-paint script can restore it without a flash, and persists across
+      chapters via localStorage. */}
+  <script is:inline>
+    (() => {
+      const btn = document.getElementById('sidebar-toggle');
+      if (!btn) return;
+      const root = document.documentElement;
+
+      const sync = () => {
+        btn.setAttribute('aria-expanded', String(root.dataset.sidebar !== 'hidden'));
+      };
+
+      btn.addEventListener('click', () => {
+        const hidden = root.dataset.sidebar === 'hidden';
+        if (hidden) delete root.dataset.sidebar;
+        else root.dataset.sidebar = 'hidden';
+        localStorage.setItem('sidebar', hidden ? 'shown' : 'hidden');
+        sync();
+      });
+
+      sync();
+    })();
+  </script>
+
+  {/* Highlight the sidebar entry for the section currently being read, and keep
+      it inside the sidebar's own scroll viewport. */}
+  <script is:inline>
+    (() => {
+      const links = [...document.querySelectorAll('.side-sections a[data-section]')];
+      if (!links.length) return;
+
+      const sidebar = document.querySelector('.sidebar');
+      const byId = new Map(links.map((a) => [a.dataset.section, a]));
+      const headings = links
+        .map((a) => document.getElementById(a.dataset.section))
+        .filter(Boolean);
+
+      let current = null;
+      const setCurrent = (id) => {
+        if (id === current) return;
+        current = id;
+        for (const a of links) a.classList.toggle('current', a.dataset.section === id);
+        const active = byId.get(id);
+        // Only auto-scroll the sidebar when it actually has its own scrollbar
+        // (on mobile it is a static block and this would scroll the page).
+        if (active && sidebar && sidebar.scrollHeight > sidebar.clientHeight + 1) {
+          const top = active.offsetTop - sidebar.clientHeight / 2;
+          sidebar.scrollTo({ top, behavior: 'smooth' });
+        }
+      };
+
+      // The last heading whose top has passed the reading line is the one we're in.
+      const readingLine = () => window.innerHeight * 0.25;
+      const update = () => {
+        const line = readingLine();
+        let found = headings[0];
+        for (const h of headings) {
+          if (h.getBoundingClientRect().top <= line) found = h;
+          else break;
+        }
+        if (found) setCurrent(found.id);
+      };
+
+      let queued = false;
+      addEventListener(
+        'scroll',
+        () => {
+          if (queued) return;
+          queued = true;
+          requestAnimationFrame(() => {
+            queued = false;
+            update();
+          });
+        },
+        { passive: true },
+      );
+      update();
+    })();
+  </script>
 </BaseLayout>

@@ -1,6 +1,9 @@
 :root {
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  /* Body reading font. --font-source-serif is declared by the <Font> tag in
+     BaseLayout (Astro self-hosts it); the fallbacks cover the load window. */
+  --font-serif: var(--font-source-serif), Charter, "Iowan Old Style", Georgia, serif;
 
   --bg: #ffffff;
   --bg-soft: #f6f7f9;
@@ -14,7 +17,7 @@
   --accent: #2563eb;
   --accent-soft: #e8efff;
   --radius: 12px;
-  --content-width: 46rem;
+  --content-width: 52rem;
 }
 
 :root[data-theme="dark"] {
@@ -184,12 +187,32 @@ code {
 /* ---- Chapter reading layout ---- */
 .chapter-shell {
   display: grid;
-  grid-template-columns: 16rem minmax(0, 1fr);
-  gap: 2.5rem;
-  max-width: 78rem;
+  grid-template-columns: 17rem minmax(0, 1fr);
+  gap: 4.5rem;
+  /* Sidebar + gap + reading measure + the shell's own padding, so the prose
+     column ends where the shell does instead of stranding empty space. */
+  max-width: 76.5rem;
   margin: 0 auto;
   padding: 0 1.5rem;
   align-items: start;
+}
+
+/* Collapsed sidebar: the column disappears and the reading measure recenters in
+   the full shell width. State is on <html> so it survives navigation. */
+:root[data-sidebar="hidden"] .chapter-shell {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+:root[data-sidebar="hidden"] .sidebar { display: none; }
+:root[data-sidebar="hidden"] .prose,
+:root[data-sidebar="hidden"] .pager { margin-inline: auto; }
+
+/* The header toggle reads as "off" while the sidebar is collapsed. */
+.sidebar-toggle[aria-expanded="false"] { color: var(--text-faint); }
+.sidebar-toggle[aria-expanded="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .sidebar {
@@ -199,6 +222,51 @@ code {
   overflow-y: auto;
   padding: 1.5rem 0;
   font-size: 0.9rem;
+  /* Overlay-style scrollbar: invisible at rest, a thin thumb while hovering.
+     `scrollbar-gutter: stable` reserves the track so revealing the thumb does
+     not reflow the list. Firefox/Safari get `scrollbar-width`, Chrome the
+     `::-webkit-scrollbar` rules below. */
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color 0.2s ease;
+}
+/* Below 900px the sidebar goes static and the chapter list becomes the scroller
+   instead, so both need the same treatment. */
+.sidebar ol {
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color 0.2s ease;
+}
+.sidebar:hover, .sidebar:focus-within,
+.sidebar:hover ol, .sidebar:focus-within ol {
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.sidebar::-webkit-scrollbar,
+.sidebar ol::-webkit-scrollbar { width: 8px; }
+.sidebar::-webkit-scrollbar-track,
+.sidebar ol::-webkit-scrollbar-track { background: transparent; }
+.sidebar::-webkit-scrollbar-thumb,
+.sidebar ol::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 99px;
+  /* Inset the thumb from the track edges without shrinking the hit area. */
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+.sidebar:hover::-webkit-scrollbar-thumb,
+.sidebar:focus-within::-webkit-scrollbar-thumb,
+.sidebar:hover ol::-webkit-scrollbar-thumb,
+.sidebar:focus-within ol::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  background-clip: content-box;
+}
+.sidebar::-webkit-scrollbar-thumb:hover,
+.sidebar ol::-webkit-scrollbar-thumb:hover {
+  background: var(--text-faint);
+  background-clip: content-box;
 }
 .sidebar .side-book { font-weight: 700; margin: 0 0 0.25rem; }
 .sidebar .side-back { color: var(--text-faint); font-size: 0.8rem; }
@@ -217,12 +285,41 @@ code {
 .sidebar li a .n { font-family: var(--font-mono); color: var(--text-faint); }
 .sidebar li a.active .n { color: var(--accent); }
 
+/* In-chapter H2 navigation, nested under the active chapter. */
+.side-sections {
+  list-style: none;
+  margin: 0.2rem 0 0.6rem;
+  padding: 0 0 0 0.75rem;
+  border-left: 1px solid var(--border);
+}
+.side-sections li a {
+  display: block;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.82rem;
+  color: var(--text-faint);
+}
+.side-sections li a:hover { color: var(--text); background: var(--bg-soft); }
+.side-sections li a.current {
+  color: var(--accent);
+  font-weight: 600;
+  background: var(--accent-soft);
+}
+
 .chapter-main { min-width: 0; padding: 2rem 0 4rem; }
 
-.prose { max-width: var(--content-width); }
+/* Reading text is set in the serif; the site chrome stays on the sans and code
+   stays on the mono, so the page reads as a document inside an app. */
+.prose {
+  max-width: var(--content-width);
+  font-family: var(--font-serif);
+  font-size: 16px;
+  line-height: 1.7;
+}
 .prose h1 { font-size: clamp(1.9rem, 4vw, 2.5rem); margin: 0 0 1.25rem; }
 .prose h2 { font-size: 1.5rem; margin: 2.5rem 0 1rem; padding-top: 0.5rem; }
 .prose h3 { font-size: 1.2rem; margin: 2rem 0 0.75rem; }
+/* Clear the sticky site header when jumping to an anchor. */
+.prose :where(h1, h2, h3, h4) { scroll-margin-top: 4.5rem; }
 .prose p { margin: 1rem 0; }
 .prose ul, .prose ol { padding-left: 1.4rem; }
 .prose li { margin: 0.35rem 0; }
@@ -272,6 +369,40 @@ code {
   line-height: 1.6;
 }
 .prose pre code { background: none; border: none; padding: 0; font-size: inherit; }
+
+/* Mermaid diagrams — rendered client-side by src/components/MermaidRenderer.astro.
+   The raw source is hidden until rendering succeeds, then revealed as SVG. If
+   rendering fails the block falls back to showing the source as a code block. */
+.prose pre.mermaid {
+  margin: 1.75rem 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  overflow-x: auto;
+  text-align: center;
+  /* Collapse the unrendered source without reserving layout for it. */
+  font-size: 0;
+  line-height: 0;
+  color: transparent;
+}
+.prose pre.mermaid[data-state='ready'] { line-height: normal; }
+.prose pre.mermaid[data-state='ready'] svg {
+  max-width: 100%;
+  height: auto;
+}
+.prose pre.mermaid[data-state='error'] {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: var(--text-soft);
+  text-align: left;
+  padding: 1rem 1.15rem;
+  border: 1px solid var(--border);
+  border-left: 3px solid #d9534f;
+  border-radius: 10px;
+  background: var(--bg-code);
+  white-space: pre;
+}
 
 /* Shiki dual-theme: light is inline; switch to dark vars when data-theme=dark */
 :root[data-theme="dark"] .astro-code,

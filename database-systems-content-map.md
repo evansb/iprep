@@ -1,0 +1,1935 @@
+# Database Systems and Internals — Content Map
+
+## Topic outline
+
+- **I. Database-System Foundations**
+    - **A. Databases and database management systems** — *CMU 01; DI 1; PG 1*
+        - **1.** Database as an organized model of real-world data
+            - **a.** Data versus information versus schema-as-contract
+            - **b.** Persistence, sharing, and multi-user access as defining properties
+            - **c.** Database versus DBMS versus database application
+        - **2.** DBMS responsibilities
+            - **a.** Data definition and schema management
+                - **i.** DDL, catalog updates, and schema evolution
+                - **ii.** Logical, physical, and view-level data independence
+            - **b.** Storage, retrieval, and modification
+                - **i.** Physical layout hidden behind the logical interface
+                - **ii.** Access-path selection performed on the user's behalf
+            - **c.** Integrity, concurrency, durability, and recovery
+                - **i.** Constraints enforced centrally rather than per application
+                - **ii.** Isolation between concurrent sessions
+                - **iii.** Survivability across process, host, and media failure
+            - **d.** Query processing and optimization
+                - **i.** Declarative "what" versus procedural "how"
+                - **ii.** Cost-based plan choice as the payoff of declarativity
+        - **3.** Flat files as a motivating counterexample
+            - **a.** Integrity and consistency problems
+                - **i.** No type or domain enforcement
+                - **ii.** No cross-file referential guarantees
+                - **iii.** Redundancy and update anomalies
+            - **b.** Inefficient access and duplicated implementation
+                - **i.** Full-file scans for point lookups
+                - **ii.** Every application reimplements parsing, indexing, and locking
+            - **c.** Concurrent access and crash-safety problems
+                - **i.** Lost updates from interleaved writers
+                - **ii.** Torn and partially written files after a crash
+    - **B. DBMS architecture** — *DI 1; PG 1*
+        - **1.** Client/server organization and transport layer
+            - **a.** Connection establishment, authentication, and session state
+            - **b.** Wire protocol, message framing, and result streaming
+            - **c.** Connection pooling and per-connection cost
+        - **2.** Query processor
+            - **a.** Parsing, interpretation, and validation
+                - **i.** Lexing, grammar, and parse tree
+                - **ii.** Name resolution against the catalog
+                - **iii.** Type checking and semantic analysis
+            - **b.** Optimization and plan selection
+                - **i.** Rewriting into a logical plan
+                - **ii.** Cost-based physical plan choice
+            - **c.** Execution engine
+                - **i.** Operator tree instantiation and runtime state
+                - **ii.** Memory and work-area management
+        - **3.** Storage engine and access methods
+            - **a.** Table access methods (heap and alternatives)
+            - **b.** Index access methods and their common interface
+            - **c.** Space management and free-space tracking
+        - **4.** Buffer, transaction, lock, and recovery managers
+            - **a.** Buffer manager as the disk/memory boundary
+            - **b.** Transaction manager and visibility rules
+            - **c.** Lock manager and wait/deadlock handling
+            - **d.** Log and recovery manager
+        - **5.** System catalog and metadata
+            - **a.** Catalog stored as ordinary tables
+            - **b.** Bootstrapping and hard-coded catalog layout
+            - **c.** Statistics and planner-visible metadata
+        - **6.** Processes, memory, and client protocols
+            - **a.** Process-per-connection versus thread-per-connection
+            - **b.** Shared versus backend-local memory
+            - **c.** Background workers, launchers, and auxiliary processes
+    - **C. Workloads and system classes** — *CMU 06; DI 1*
+        - **1.** Online transaction processing (OLTP)
+            - **a.** Short, repetitive, write-heavy, point-access transactions
+            - **b.** Narrow tuple footprint and high concurrency
+        - **2.** Online analytical processing (OLAP)
+            - **a.** Long, read-mostly, scan- and aggregate-heavy queries
+            - **b.** Wide tables with few referenced columns per query
+        - **3.** Hybrid transactional/analytical processing (HTAP)
+            - **a.** Freshness versus analytical performance
+            - **b.** Single-engine versus dual-format designs
+        - **4.** Memory-oriented versus disk-oriented systems
+            - **a.** Where the "source of truth" lives
+            - **b.** Which costs dominate: I/O versus cache misses and instruction count
+        - **5.** Centralized, embedded, parallel, and distributed systems
+            - **a.** Embedded/in-process engines and their constraints
+            - **b.** Single-node parallelism versus multi-node distribution
+    - **D. Data models** — *CMU 01*
+        - **1.** Relational
+            - **a.** Logical/physical separation and declarative access
+            - **b.** Normalization and the cost of joins
+        - **2.** Key/value and wide-column
+            - **a.** Opaque values and single-key access paths
+            - **b.** Column families and sparse wide rows
+        - **3.** Document and object
+            - **a.** Nested, self-describing records
+            - **b.** Schema-on-read and impedance mismatch
+        - **4.** Graph
+            - **a.** Nodes, edges, and property graphs
+            - **b.** Traversal workloads versus join-based expression
+        - **5.** Array, matrix, and vector
+            - **a.** Scientific and tensor-shaped data
+            - **b.** Embeddings and similarity as a first-class query
+        - **6.** Hierarchical and network models
+            - **a.** IMS and CODASYL as historical baselines
+            - **b.** Navigational access and why declarativity won
+    - **E. Relational model** — *CMU 01*
+        - **1.** Structure
+            - **a.** Relations, tuples, attributes, and domains
+                - **i.** Attribute atomicity and first normal form
+                - **ii.** Degree and cardinality
+            - **b.** Schemas and data independence
+                - **i.** Physical schema, logical schema, and external views
+                - **ii.** Why the model deliberately omits storage detail
+            - **c.** Sets, bags, ordering, and duplicate values
+                - **i.** Set semantics in theory, bag semantics in SQL
+                - **ii.** Unordered relations versus `ORDER BY` on output
+        - **2.** Integrity
+            - **a.** Primary and unique keys
+                - **i.** Candidate keys and key selection
+                - **ii.** Natural versus surrogate keys
+                - **iii.** Index-backed enforcement
+            - **b.** Foreign keys and referential integrity
+                - **i.** Referential actions (cascade, restrict, set null)
+                - **ii.** Deferred versus immediate checking
+                - **iii.** Locking and performance implications
+            - **c.** Domain, nullability, and user-defined constraints
+                - **i.** Check constraints and domains
+                - **ii.** Three-valued logic and NULL semantics
+                - **iii.** Assertions and trigger-based rules
+        - **3.** Manipulation through declarative interfaces
+            - **a.** Query languages as closed operations over relations
+            - **b.** Set-at-a-time versus record-at-a-time thinking
+    - **F. Relational algebra** — *CMU 01*
+        - **1.** Selection and projection
+            - **a.** Predicate application and duplicate elimination
+            - **b.** Extended projection and computed attributes
+        - **2.** Union, intersection, and difference
+            - **a.** Union compatibility requirements
+            - **b.** Set versus bag variants
+        - **3.** Cartesian product and join
+            - **a.** Theta, equi-, and natural join
+            - **b.** Outer joins and semi/anti joins
+            - **c.** Division and its query idioms
+        - **4.** Operator composition
+            - **a.** Closure and expression trees
+            - **b.** Renaming and self-joins
+        - **5.** Equivalent expressions and their execution costs
+            - **a.** Algebraic identities as the basis for rewriting
+            - **b.** Why the algebra is order-free but execution is not
+        - **6.** Expressive limits
+            - **a.** Aggregation and grouping as extensions
+            - **b.** Transitive closure and recursion outside the algebra
+    - **G. SQL as the relational interface** — *CMU 02; PG 16*
+        - **1.** SQL history and relational-language families
+            - **a.** SEQUEL, QUEL, and the standardization path
+            - **b.** DDL, DML, DCL, and TCL sublanguages
+            - **c.** Standard versus dialect behavior
+        - **2.** Query blocks and output control
+            - **a.** Logical clause evaluation order versus written order
+            - **b.** `DISTINCT`, `ORDER BY`, `LIMIT`/`OFFSET`, and keyset pagination
+            - **c.** NULL ordering and comparison pitfalls
+        - **3.** Aggregation, grouping, and filtering groups
+            - **a.** Aggregate functions and NULL handling
+            - **b.** `GROUP BY` versus `HAVING` versus `WHERE`
+            - **c.** `GROUPING SETS`, `ROLLUP`, and `CUBE`
+            - **d.** `FILTER` clauses and ordered-set aggregates
+        - **4.** String, date, and time operations
+            - **a.** Collations, case folding, and pattern matching
+            - **b.** Timestamp with/without time zone and interval arithmetic
+            - **c.** Immutability of expressions and its indexing consequences
+        - **5.** Nested and correlated subqueries
+            - **a.** Scalar, row, and table subqueries
+            - **b.** `IN`, `EXISTS`, `ANY`/`ALL` and their NULL traps
+            - **c.** Correlation and the decorrelation opportunity
+        - **6.** Lateral joins
+            - **a.** Referencing left-side columns in a right-side subquery
+            - **b.** Top-N-per-group and set-returning-function patterns
+        - **7.** Common table expressions
+            - **a.** Non-recursive CTEs and readability
+            - **b.** Recursive CTEs, working tables, and cycle detection
+            - **c.** Materialization fences and optimization barriers
+        - **8.** Window functions
+            - **a.** `PARTITION BY`, `ORDER BY`, and frame clauses
+            - **b.** Ranking, offset, and aggregate window functions
+            - **c.** Execution as sort/partition plus sequential scan
+        - **9.** Output redirection and materialization
+            - **a.** `CREATE TABLE AS`, temporary tables, and views
+            - **b.** Materialized views and refresh strategies
+            - **c.** `INSERT ... RETURNING` and data-modifying CTEs
+        - **10.** Set-returning functions, type constructors, and JSON
+            - **a.** Arrays, composite types, and `unnest`
+            - **b.** `json`/`jsonb` operators and path expressions
+
+- **II. Physical Storage and Data Representation**
+    - **A. Storage hierarchy and device behavior** — *CMU 03; DI 2*
+        - **1.** CPU caches, DRAM, SSDs, HDDs, and remote storage
+            - **a.** Registers, L1/L2/L3, and cache-line granularity
+            - **b.** DRAM channels, NUMA, and remote-socket cost
+            - **c.** HDD geometry: seek, rotational latency, transfer
+            - **d.** SSD structure: pages, erase blocks, FTL, and wear
+            - **e.** Network/object storage and its latency profile
+        - **2.** Volatile versus non-volatile media
+            - **a.** What survives power loss and what does not
+            - **b.** Device write caches and the honesty of `fsync`
+            - **c.** Persistent memory as an intermediate tier
+        - **3.** Byte-addressable versus block-addressable access
+            - **a.** Read-modify-write amplification on block devices
+            - **b.** Why the page is the DBMS's unit of everything
+        - **4.** Random versus sequential I/O
+            - **a.** Access-pattern cost gap by device class
+            - **b.** Queue depth, parallelism, and I/O merging
+            - **c.** Read-ahead in device, OS, and DBMS
+        - **5.** Latency, capacity, and cost trade-offs
+            - **a.** Order-of-magnitude latency table as a mental model
+            - **b.** Tiering and the "keep the hot set high" principle
+    - **B. Disk-oriented DBMS architecture** — *CMU 03*
+        - **1.** Databases larger than available memory
+            - **a.** Working-set assumption
+            - **b.** Correctness independent of memory size
+        - **2.** Movement of pages between disk and memory
+            - **a.** Page-in on reference, page-out on eviction
+            - **b.** Page identity stable across the boundary
+        - **3.** Storage manager, buffer pool, and execution engine
+            - **a.** Layering and the interfaces between them
+            - **b.** Why higher layers address pages, not bytes
+        - **4.** Maximizing sequential access and hiding I/O stalls
+            - **a.** Prefetching and asynchronous I/O
+            - **b.** Overlapping computation with transfer
+        - **5.** Why the DBMS does not simply use virtual memory
+            - **a.** Loss of control over eviction and flush ordering
+            - **b.** Stalls, page-fault opacity, and error handling
+    - **C. Files and physical database organization** — *CMU 03; DI 1, 3; PG 1*
+        - **1.** Proprietary and portable file formats
+            - **a.** Engine-specific layout versus interchange formats
+            - **b.** Parquet/ORC/Arrow as read-optimized formats
+        - **2.** Operating-system and custom file systems
+            - **a.** Using the filesystem versus raw devices
+            - **b.** Filesystem journaling interacting with DBMS logging
+        - **3.** File allocation and free-space tracking
+            - **a.** Extents, segments, and preallocation
+            - **b.** Free-space maps and visibility maps
+            - **c.** Fragmentation and file growth policy
+        - **4.** Data files, index files, and indirection
+            - **a.** Direct versus indirect (primary-key) references
+            - **b.** Cost of indirection on updates versus lookups
+        - **5.** PostgreSQL relations, files, forks, and tablespaces
+            - **a.** OID, relfilenode, and file naming
+            - **b.** 1 GB segmentation of large relations
+            - **c.** Main, free-space-map, visibility-map, and init forks
+            - **d.** Tablespaces and physical placement
+    - **D. Pages** — *CMU 03; DI 3; PG 1, 3*
+        - **1.** Fixed-size blocks as the unit of transfer
+            - **a.** Page size versus device sector and filesystem block
+            - **b.** Atomicity of a page write and torn-page risk
+        - **2.** Page identifiers and page directories
+            - **a.** Logical page IDs versus physical offsets
+            - **b.** Directory maintenance and its own durability needs
+        - **3.** Page headers, checksums, and versioning
+            - **a.** LSN, flags, and free-space pointers
+            - **b.** Checksum computation and verification points
+            - **c.** Page-layout version fields for upgrades
+        - **4.** Slotted-page layout
+            - **a.** Slot array and tuple area
+                - **i.** Growth from opposite ends toward the middle
+                - **ii.** Slot as the stable identity, offset as the mutable part
+            - **b.** Insert, delete, and compaction
+                - **i.** Slot reuse and dead-slot marking
+                - **ii.** In-place compaction and pointer stability
+            - **c.** Variable-length cells and free-space management
+                - **i.** Fragmented versus contiguous free space
+                - **ii.** Fill factor and leaving room for updates
+        - **5.** Overflow pages and oversized values
+            - **a.** Threshold for moving a value off-page
+            - **b.** Chained overflow and read amplification
+    - **E. Records and tuples** — *CMU 03; DI 3; PG 3*
+        - **1.** Record identifiers
+            - **a.** Page number plus slot index (ctid)
+            - **b.** Stability across updates, vacuum, and rewrite
+        - **2.** Tuple headers and visibility metadata
+            - **a.** Creating/deleting transaction identifiers
+            - **b.** Command IDs and infomask hint bits
+            - **c.** Header overhead as a per-row tax
+        - **3.** Attribute ordering, alignment, and padding
+            - **a.** Type alignment requirements
+            - **b.** Column-order tuning to reduce padding
+        - **4.** Fixed- and variable-length attributes
+            - **a.** Length headers and short-varlena optimization
+            - **b.** Offset computation and the cost of trailing columns
+        - **5.** Null representation
+            - **a.** Null bitmap presence and sizing
+            - **b.** Nulls versus default values in storage cost
+        - **6.** Large values, overflow storage, and PostgreSQL TOAST
+            - **a.** Compression and out-of-line strategies
+            - **b.** TOAST tables, chunking, and the toast index
+            - **c.** Storage strategies: plain, extended, external, main
+            - **d.** Detoasting cost and slicing of large values
+        - **7.** PostgreSQL row-version layout
+            - **a.** Header, null bitmap, and user data
+            - **b.** Why an update creates a new row version
+    - **F. Binary encoding and file-format design** — *DI 3*
+        - **1.** Primitive types and byte order
+            - **a.** Endianness choices and portability
+            - **b.** Integer width, sign, and overflow framing
+        - **2.** Strings and variable-size data
+            - **a.** Length-prefixed versus terminated encodings
+            - **b.** Encoding and collation metadata
+        - **3.** Bit packing, flags, and enumerations
+            - **a.** Bitfields for infomask-style metadata
+            - **b.** Reserved bits for future use
+        - **4.** Pointer and offset representation
+            - **a.** Absolute versus page-relative offsets
+            - **b.** Self-relative structures and relocatability
+        - **5.** Forward and backward compatibility
+            - **a.** Version fields and feature flags
+            - **b.** Skippable/unknown-record handling
+            - **c.** In-place upgrade versus dump-and-reload
+        - **6.** Checksumming and corruption detection
+            - **a.** Checksum scope and algorithm choice
+            - **b.** Detection versus correction; interaction with backups
+    - **G. Table and page organization** — *CMU 03, 05; DI 1*
+        - **1.** Heap-organized tables
+            - **a.** Linked-page heaps
+                - **i.** Free and full page lists
+                - **ii.** Linear-search cost for placement
+            - **b.** Page-directory heaps
+                - **i.** Directory as a free-space index
+                - **ii.** Keeping directory and pages in sync
+        - **2.** Tuple-oriented storage
+            - **a.** In-place update and its consequences
+            - **b.** Insert path and free-space lookup
+        - **3.** Log-structured storage
+            - **a.** Append-only writes and background compaction
+            - **b.** Read cost and the need for filters
+        - **4.** Index-organized storage
+            - **a.** Table stored in primary-key order
+            - **b.** Secondary indexes referencing the primary key
+        - **5.** Data files versus index-organized tables
+            - **a.** Clustering benefits versus update and secondary-index cost
+            - **b.** PostgreSQL's heap-only choice and `CLUSTER` as a one-shot
+    - **H. Row, column, and hybrid layouts** — *CMU 06; DI 1*
+        - **1.** N-ary storage model (NSM)
+            - **a.** Whole-tuple locality and OLTP fit
+            - **b.** Wasted bandwidth on wide scans
+        - **2.** Decomposition storage model (DSM)
+            - **a.** Per-column files and tuple reassembly
+            - **b.** Fixed-length offsets versus explicit tuple IDs
+            - **c.** Compression and vectorization benefits
+        - **3.** Partition Attributes Across (PAX)
+            - **a.** Row groups with column chunks inside a page
+            - **b.** Cache-friendly scanning with single-page tuple locality
+        - **4.** Row-store and column-store access trade-offs
+            - **a.** Point lookup and update versus scan and aggregate
+            - **b.** Insert cost and write amplification
+        - **5.** Late materialization
+            - **a.** Operating on column vectors and position lists
+            - **b.** Deferring tuple reconstruction past filters and joins
+        - **6.** Bifurcated and hybrid storage environments
+            - **a.** Extract-transform-load pipelines
+            - **b.** Fractured mirrors
+            - **c.** Delta stores
+                - **i.** Row-formatted write buffer merged into columnar base
+                - **ii.** Merge scheduling and read-time unification
+    - **I. Database compression** — *CMU 06; DI 4, 7*
+        - **1.** Compression goals and evaluation criteria
+            - **a.** Compression ratio
+            - **b.** Compression and decompression speed
+            - **c.** Random-access support
+            - **d.** Ability to operate directly on compressed data
+        - **2.** Compression granularity
+            - **a.** Block, tuple, attribute, and column level
+            - **b.** Naive (byte-oriented) versus semantic compression
+        - **3.** Run-length encoding
+            - **a.** Triples of value, offset, and run length
+            - **b.** Sort order as an enabler
+        - **4.** Bit packing and bitmap encoding
+            - **a.** Patching/mostly encoding
+            - **b.** Sparse and Roaring bitmaps
+            - **c.** Cardinality conditions that make bitmaps viable
+        - **5.** Delta encoding
+            - **a.** Frame-of-reference and base values
+            - **b.** Combination with bit packing for sorted keys
+        - **6.** Dictionary encoding
+            - **a.** Encoding and decoding
+            - **b.** Order-preserving dictionaries
+            - **c.** Predicate evaluation and joins over codes
+            - **d.** Dictionary scope, growth, and shared dictionaries
+        - **7.** General-purpose block and page compression
+            - **a.** LZ-family algorithms and CPU/ratio trade-off
+            - **b.** Loss of random access within a compressed block
+        - **8.** Prefix, suffix, and key compression
+            - **a.** Common-prefix elision in index nodes
+            - **b.** Suffix truncation in separator keys
+        - **9.** Block compression in log-structured stores
+            - **a.** Per-block compression with an offset index
+            - **b.** Interaction with the block cache
+
+- **III. Storage-Engine Structures**
+    - **A. Design dimensions** — *DI 1; CMU 05–06*
+        - **1.** Buffering
+            - **a.** Deferring writes to batch them
+            - **b.** Buffering inside the structure versus in the buffer pool
+        - **2.** Mutability versus immutability
+            - **a.** In-place update versus append-and-reconcile
+            - **b.** Consequences for concurrency and crash recovery
+        - **3.** Key ordering
+            - **a.** Ordered structures enabling range scans
+            - **b.** Unordered structures optimizing point access
+        - **4.** Read, write, and space amplification
+            - **a.** Definitions and how to measure each
+            - **b.** The RUM conjecture: pick two
+        - **5.** Workload-sensitive trade-offs
+            - **a.** Mapping OLTP/OLAP/write-heavy profiles onto the dimensions
+            - **b.** Why no structure dominates
+    - **B. B-tree foundations** — *DI 2; CMU 08*
+        - **1.** Binary-search trees and balancing
+            - **a.** Degeneration without balancing
+            - **b.** Rotations, AVL/red-black, and their pointer-chasing cost
+            - **c.** Why one comparison per cache miss is unaffordable on disk
+        - **2.** Trees adapted for disk pages
+            - **a.** High fan-out to minimize height
+            - **b.** Node size matched to the page size
+        - **3.** Root, internal, and leaf nodes
+            - **a.** Occupancy invariants and the root exception
+            - **b.** Root pinning and top-level caching
+        - **4.** Separator keys and child pointers
+            - **a.** Separators as boundaries, not necessarily stored data
+            - **b.** Key/pointer count relationship in an internal node
+        - **5.** Lookup complexity and traversal
+            - **a.** Height as log base fan-out
+            - **b.** I/O count for point lookup versus range scan
+        - **6.** Node splits, merges, and redistribution
+            - **a.** Split point selection and median promotion
+            - **b.** Underflow, borrowing from siblings, and merging
+            - **c.** Cascading splits up to a new root
+        - **7.** B-tree versus B+ tree organization
+            - **a.** Values in internal nodes versus leaves only
+            - **b.** Linked leaves and sequential scan efficiency
+    - **C. Implementing disk-resident B-trees** — *DI 4; CMU 08*
+        - **1.** Page headers and magic numbers
+            - **a.** Node type, level, and entry count
+            - **b.** Sanity checks and corruption detection
+        - **2.** Sibling links and rightmost pointers
+            - **a.** Forward/backward leaf links for range scans
+            - **b.** Rightmost child pointer asymmetry
+        - **3.** High keys and navigation boundaries
+            - **a.** Upper bound stored per node
+            - **b.** Detecting a concurrent split during descent
+        - **4.** Overflow pages
+            - **a.** Oversized keys and values
+            - **b.** Duplicate-heavy keys and posting lists
+        - **5.** In-node search
+            - **a.** Linear and binary search
+            - **b.** Indirection arrays
+            - **c.** Cache behavior and branch prediction
+        - **6.** Propagating structural modifications
+            - **a.** Breadcrumb/parent stacks during descent
+            - **b.** Bottom-up propagation versus preemptive splitting
+        - **7.** Rebalancing and underflow handling
+            - **a.** Deferred merging and why many engines skip merges
+            - **b.** Occupancy decay and index bloat
+        - **8.** Right-only appends and bulk loading
+            - **a.** Fast-path for monotonically increasing keys
+            - **b.** Sorted bulk build and fill-factor choice
+        - **9.** Fragmentation, defragmentation, and maintenance
+            - **a.** Page splits leaving half-empty nodes
+            - **b.** `REINDEX`/rebuild and concurrent variants
+    - **D. B-tree design choices and optimizations** — *CMU 08; PG 25*
+        - **1.** Node size and fan-out
+            - **a.** Height versus in-node search cost
+            - **b.** Effect on prefetching and cache lines
+        - **2.** Merge thresholds
+            - **a.** Hysteresis to avoid split/merge thrashing
+            - **b.** Delayed merges as a deliberate choice
+        - **3.** Variable-length and duplicate keys
+            - **a.** Appending the tuple identifier to make keys unique
+            - **b.** Space accounting when key lengths vary
+        - **4.** Prefix compression
+            - **a.** Shared-prefix elision within a node
+            - **b.** Decompression cost on every search
+        - **5.** Deduplication
+            - **a.** Posting-list tuples for repeated keys
+            - **b.** Interaction with unique indexes and vacuum
+        - **6.** Suffix truncation
+            - **a.** Shortest sufficient separator
+            - **b.** Larger fan-out in internal nodes
+        - **7.** Pointer swizzling
+            - **a.** In-memory pointers replacing page IDs
+            - **b.** Unswizzling on eviction
+        - **8.** Write-optimized B+ trees
+            - **a.** Per-node insert buffers (Bε-trees)
+            - **b.** Flushing messages down the tree
+        - **9.** Multicolumn indexes and ordering semantics
+            - **a.** Leading-column rule and prefix usability
+            - **b.** Per-column ASC/DESC and NULLS FIRST/LAST
+            - **c.** Column order versus predicate selectivity
+    - **E. B-tree variants** — *DI 5–6*
+        - **1.** Copy-on-write B-trees
+            - **a.** Shadowing a path to the root
+            - **b.** Atomic root switch and snapshot reads
+            - **c.** Space cost and garbage collection
+        - **2.** Lazy and lazy-adaptive trees
+            - **a.** Node-local update buffers
+            - **b.** Adaptive flushing by workload
+        - **3.** FD-trees and logarithmic runs
+            - **a.** Head tree plus sorted runs
+            - **b.** Fence pointers between levels
+        - **4.** Fractional cascading
+            - **a.** Bridging search positions across levels
+            - **b.** Avoiding repeated binary searches
+        - **5.** Bw-trees
+            - **a.** Update chains
+            - **b.** Compare-and-swap concurrency
+            - **c.** Consolidation and garbage collection
+            - **d.** Mapping table and logical page identity
+        - **6.** B-link trees
+            - **a.** Right-link pointers and half-split state
+            - **b.** Latch-free descent with move-right
+        - **7.** Cache-oblivious B-trees and van Emde Boas layout
+            - **a.** Recursive layout independent of block size
+            - **b.** Asymptotic optimality across all cache levels
+    - **F. Log-structured merge storage** — *DI 7; CMU 05*
+        - **1.** Write-ahead log and in-memory table
+            - **a.** Durability of writes not yet flushed
+            - **b.** Memtable data structure choice (skip list, tree)
+        - **2.** Memtable switching and flushing
+            - **a.** Immutable memtable and background flush
+            - **b.** Write stalls under flush backpressure
+        - **3.** Sorted string tables (SSTables)
+            - **a.** Sorted data blocks plus sparse index
+            - **b.** Immutability and its consequences
+            - **c.** Footer, metadata, and block layout
+        - **4.** Two-component and multicomponent LSM trees
+            - **a.** Level count and size ratio
+            - **b.** Run counts per level
+        - **5.** Lookup and merge iteration
+            - **a.** Newest-to-oldest search order
+            - **b.** Heap-based multi-way merge iterator
+            - **c.** Range scans across overlapping runs
+        - **6.** Updates, deletes, and tombstones
+            - **a.** Deletion as an insert of a marker
+            - **b.** Range tombstones
+            - **c.** Reclaiming tombstones safely
+        - **7.** Compaction
+            - **a.** Leveled compaction
+            - **b.** Size-tiered compaction
+            - **c.** Write versus read versus space amplification per strategy
+            - **d.** Compaction scheduling, throttling, and I/O interference
+        - **8.** Bloom filters and secondary indexes
+            - **a.** Per-SSTable filters to skip files
+            - **b.** Secondary indexes as separate key spaces
+        - **9.** Concurrency and log truncation
+            - **a.** Reference counting live SSTables
+            - **b.** Discarding log segments after flush
+        - **10.** Bitcask, WiscKey, and unordered variants
+            - **a.** In-memory keydir with append-only values
+            - **b.** Key/value separation and garbage collection
+        - **11.** Log stacking, filesystems, and flash translation layers
+            - **a.** Multiple log layers multiplying write amplification
+            - **b.** Aligning DBMS segments with erase blocks
+    - **G. Catalogs and storage metadata** — *CMU 05; PG 1*
+        - **1.** Schema and object metadata
+            - **a.** Relations, attributes, types, and constraints
+            - **b.** Dependency tracking between objects
+        - **2.** Physical-location and statistics metadata
+            - **a.** File/relfilenode mapping and size estimates
+            - **b.** Planner statistics stored alongside definitions
+        - **3.** Bootstrapping the catalog
+            - **a.** Hard-coded layout for the tables that describe tables
+            - **b.** Initialization at cluster creation
+        - **4.** Catalog access and caching
+            - **a.** Per-backend syscache and relcache
+            - **b.** Invalidation on DDL and cache-coherence messages
+
+- **IV. Buffer Management and I/O**
+    - **A. Buffer-pool architecture** — *CMU 04; DI 5; PG 9*
+        - **1.** Frames, pages, and page tables
+            - **a.** Fixed-size frame array carved from shared memory
+            - **b.** Page table (hash table) mapping page ID to frame
+            - **c.** Page table versus page directory: memory versus disk mapping
+        - **2.** Page identifiers and frame lookup
+            - **a.** Buffer tag: relation, fork, block number
+            - **b.** Hash-partitioned lookup and its latches
+        - **3.** Pin/reference counters
+            - **a.** Pinning to prevent eviction while in use
+            - **b.** Pin leaks and their symptoms
+            - **c.** Usage counters distinct from pin counts
+        - **4.** Dirty-page tracking
+            - **a.** Dirty bit set on modification, cleared on write
+            - **b.** WAL-before-page ordering obligation on flush
+        - **5.** Free lists and victim selection
+            - **a.** Free list fast path versus scanning for a victim
+            - **b.** Cost of evicting a dirty page synchronously
+        - **6.** Multiple buffer pools and local caches
+            - **a.** Partitioning by object, database, or hash of page ID
+            - **b.** Reducing latch contention on the page table
+            - **c.** Backend-local buffers for temporary relations
+    - **B. Cache hits, misses, and eviction** — *PG 9*
+        - **1.** Page lookup and pinning
+            - **a.** Hit path: find, pin, return
+            - **b.** Bump usage count on access
+        - **2.** Loading absent pages
+            - **a.** Choose victim, evict, read, insert into page table
+            - **b.** Race handling when two backends want the same page
+        - **3.** Dirty-page writeback
+            - **a.** Background writer versus checkpointer versus backend eviction
+            - **b.** Write-out smoothing to avoid I/O spikes
+        - **4.** Bulk eviction and cache warming
+            - **a.** Cold-start penalty after restart
+            - **b.** Prewarming and retaining cache contents
+    - **C. Replacement policies** — *CMU 04; DI 5*
+        - **1.** FIFO
+            - **a.** Simplicity and ignorance of reuse
+        - **2.** Least recently used (LRU)
+            - **a.** Timestamp/list maintenance cost
+            - **b.** Lock contention on the LRU list
+        - **3.** CLOCK and clock sweep
+            - **a.** Reference bit and circular sweep as LRU approximation
+            - **b.** PostgreSQL's usage-count decrement variant
+        - **4.** LRU-K
+            - **a.** Tracking the K-th most recent reference
+            - **b.** Distinguishing one-time from repeated access
+        - **5.** Least frequently used (LFU)
+            - **a.** Frequency counting and aging
+        - **6.** Most recently used (MRU)
+            - **a.** Cyclic-scan workloads where LRU is worst-case
+        - **7.** Sequential flooding and scan resistance
+            - **a.** Large scan evicting the hot working set
+            - **b.** Ring buffers / bounded strategy rings for bulk operations
+    - **D. Buffer-pool optimizations** — *CMU 04; DI 5*
+        - **1.** Prefetching
+            - **a.** Sequential and index-driven (list) prefetch
+            - **b.** Effective I/O concurrency and queue depth
+        - **2.** Immediate eviction and bypass
+            - **a.** Marking pages for quick reuse after a scan
+            - **b.** Bulk read/write rings for COPY, VACUUM, and seq scans
+        - **3.** Scan sharing
+            - **a.** Attaching a new scan to an in-progress one
+            - **b.** Synchronized scans and wrap-around semantics
+        - **4.** Buffer-pool allocation by workload or object
+            - **a.** Per-tenant or per-index reservation
+            - **b.** Risk of underutilization when partitioned
+        - **5.** Locking pages in cache
+            - **a.** Pinning hot metadata such as the catalog and index roots
+    - **E. DBMS versus operating-system caching** — *CMU 03–04; DI 5*
+        - **1.** Kernel page cache and double buffering
+            - **a.** Same page cached twice, memory wasted
+            - **b.** Two independent eviction policies fighting
+        - **2.** `mmap` and page-fault behavior
+            - **a.** Loss of control over flush timing and ordering
+            - **b.** Unpredictable stalls and transparent I/O errors
+            - **c.** Where `mmap` is acceptable (read-only, fits in memory)
+        - **3.** Direct I/O and bypassing the kernel cache
+            - **a.** Alignment requirements and manual read-ahead
+            - **b.** Trade-off: full control versus reimplementing the cache
+        - **4.** `madvise`, `mlock`, and `msync`
+            - **a.** Advisory hints and why advice is not control
+        - **5.** `fsync` and durable write semantics
+            - **a.** Write versus flush versus barrier
+            - **b.** Error reporting, "fsyncgate", and panic-on-failure
+            - **c.** File-level versus directory-level durability
+
+- **V. Hashing, Indexes, and Filters**
+    - **A. Hash-table fundamentals** — *CMU 07; PG 24*
+        - **1.** Hash functions, collision rate, and speed
+            - **a.** Non-cryptographic hashes (MurmurHash, xxHash, CityHash)
+            - **b.** Avalanche/uniformity versus computation cost
+            - **c.** Seeding and hash-flooding resistance
+        - **2.** Load factor and table sizing
+            - **a.** Space/probe-length trade-off
+            - **b.** Power-of-two sizing and modulo cost
+            - **c.** Resize triggers and rehash cost
+        - **3.** Key/value representation
+            - **a.** Inline storage versus pointers to records
+            - **b.** Cache-line-aware bucket layout
+        - **4.** Unique and non-unique keys
+            - **a.** Separate chains versus repeated entries
+            - **b.** Duplicate handling in join hash tables
+        - **5.** Two design decisions framing everything
+            - **a.** Hash function choice
+            - **b.** Hashing/collision scheme
+    - **B. Static hashing** — *CMU 07*
+        - **1.** Linear probing
+            - **a.** Insert, lookup, and deletion
+            - **b.** Tombstones and clustering
+            - **c.** Robin Hood and backward-shift deletion variants
+        - **2.** Cuckoo hashing
+            - **a.** Multiple hash locations
+            - **b.** Eviction, cycles, and rebuilding
+            - **c.** Constant worst-case lookup as the payoff
+        - **3.** Why static tables need the full size up front
+            - **a.** Resize as a full rebuild
+            - **b.** Fit for join hash tables, not for durable indexes
+    - **C. Dynamic hashing** — *CMU 07*
+        - **1.** Chained hashing
+            - **a.** Bucket chains and overflow pages
+            - **b.** Unbounded chain growth under skew
+        - **2.** Extendible hashing
+            - **a.** Global and local depth
+            - **b.** Bucket splitting and directory growth
+            - **c.** Directory doubling and shared buckets
+        - **3.** Linear hashing
+            - **a.** Split pointer
+            - **b.** Incremental growth and shrinkage
+            - **c.** Splitting independent of which bucket overflowed
+    - **D. Probabilistic filters and alternative indexes** — *CMU 09; DI 7*
+        - **1.** Bloom filters
+            - **a.** False positives and no false negatives
+            - **b.** Hash-count and bitmap-size trade-offs
+            - **c.** No deletion; counting and cuckoo/quotient variants
+            - **d.** Placement: LSM SSTables, join probes, distributed reads
+        - **2.** Skip lists
+            - **a.** Probabilistic levels and expected complexity
+            - **b.** Lock-free friendliness and memtable use
+        - **3.** Tries and adaptive radix trees
+            - **a.** Key-decomposed search independent of comparisons
+            - **b.** Adaptive node sizes and path compression
+        - **4.** Inverted indexes
+            - **a.** Term dictionary and posting lists
+            - **b.** Compression and intersection of postings
+        - **5.** Index-versus-filter selection
+            - **a.** Exact membership versus approximate pre-filtering
+            - **b.** Memory budget as the deciding factor
+    - **E. Vector indexes** — *CMU 01, 09*
+        - **1.** Exact and approximate nearest-neighbor search
+            - **a.** Curse of dimensionality and why exact search degrades
+            - **b.** Recall/latency trade-off as a tunable
+        - **2.** Distance metrics and embeddings
+            - **a.** L2, inner product, and cosine
+            - **b.** Normalization and metric/index compatibility
+        - **3.** Clustered inverted-file indexes (IVFFlat)
+            - **a.** Centroid training and list assignment
+            - **b.** Probe count versus recall
+        - **4.** Preprocessing and quantization
+            - **a.** Scalar and product quantization
+            - **b.** Dimensionality reduction and reranking
+        - **5.** Graph-based search and hierarchical navigable small-world graphs
+            - **a.** Greedy traversal over a proximity graph
+            - **b.** Layered structure, `m`, and `ef_construction`/`ef_search`
+            - **c.** Build cost, memory footprint, and update difficulty
+    - **F. PostgreSQL index access-method framework** — *PG 19*
+        - **1.** Extensible access methods
+            - **a.** `pg_am` and the required support routines
+            - **b.** Index build, insert, scan, and vacuum entry points
+        - **2.** Operator classes and operator families
+            - **a.** Strategy numbers and support functions
+            - **b.** Cross-type comparison within a family
+            - **c.** Default operator class per type
+        - **3.** Access-method, index-level, and column-level properties
+            - **a.** Ordering, backward scan, and index-only capability
+            - **b.** Introspection via `pg_indexam_has_property` and friends
+    - **G. PostgreSQL index families** — *PG 24–29*
+        - **1.** Hash indexes
+            - **a.** Bucket, overflow, and bitmap pages
+            - **b.** Equality-only; WAL-logged since PG 10
+        - **2.** B-tree indexes
+            - **a.** Leaf/internal layout, high keys, and page splits
+            - **b.** Deduplication and bottom-up index deletion
+            - **c.** Ordering, uniqueness, and multicolumn support
+        - **3.** GiST
+            - **a.** R-trees and spatial search
+            - **b.** Nearest-neighbor search
+            - **c.** RD-trees and full-text search
+            - **d.** Consistent, union, penalty, and picksplit methods
+        - **4.** SP-GiST
+            - **a.** Quadtrees
+            - **b.** K-dimensional trees
+            - **c.** Radix trees
+            - **d.** Non-balanced, space-partitioned structure
+        - **5.** GIN
+            - **a.** Full-text search
+            - **b.** Trigrams
+            - **c.** Arrays and JSON
+            - **d.** Entry tree, posting lists/trees, and the pending list
+            - **e.** `fastupdate` and its maintenance trade-off
+        - **6.** BRIN
+            - **a.** Range summaries
+            - **b.** Minmax and minmax-multi
+            - **c.** Inclusion and Bloom operator classes
+            - **d.** `pages_per_range`, summarization, and physical-order dependence
+    - **H. Index scans and access-path selection** — *CMU 13, 15; PG 18–20*
+        - **1.** Sequential scans
+            - **a.** Physical-order read and synchronized scans
+            - **b.** When a full scan beats an index
+        - **2.** Regular index scans
+            - **a.** Descend, scan leaf, fetch heap tuple
+            - **b.** Random-heap-access penalty as selectivity grows
+        - **3.** Index-only scans and included columns
+            - **a.** Visibility-map consultation
+            - **b.** Why vacuum health determines whether it is really index-only
+        - **4.** Bitmap scans and bitmap operations
+            - **a.** Exact versus lossy (page-level) bitmaps and recheck
+            - **b.** Bitmap AND/OR across multiple indexes
+            - **c.** Heap access in physical order
+        - **5.** Parallel index scans
+            - **a.** Shared scan position among workers
+            - **b.** Parallel bitmap heap scan structure
+        - **6.** Correlation and clustering effects
+            - **a.** Physical/logical order correlation in cost formulas
+            - **b.** `CLUSTER` and correlation decay over time
+        - **7.** Scan cost estimation
+            - **a.** Startup versus total cost
+            - **b.** Page-count and tuple-count components
+        - **8.** Combining multiple indexes
+            - **a.** Bitmap combination versus one composite index
+            - **b.** When a composite index is strictly better
+    - **I. Index definition and coverage optimizations** — *CMU 09; PG 17, 20*
+        - **1.** Partial indexes
+            - **a.** Predicate implication and planner usability
+            - **b.** Size and maintenance savings
+        - **2.** Included/non-key columns
+            - **a.** `INCLUDE` payload stored only in leaves
+            - **b.** No ordering or uniqueness contribution
+        - **3.** Covering and index-only queries
+            - **a.** Designing an index around a query's column set
+            - **b.** Write-amplification cost of wide indexes
+        - **4.** Expression statistics and expression indexes
+            - **a.** Indexing a function result and immutability requirement
+            - **b.** Statistics gathered on the expression itself
+        - **5.** Index maintenance and lifecycle
+            - **a.** `CREATE INDEX CONCURRENTLY` and its failure modes
+            - **b.** Invalid, unused, and duplicate indexes
+            - **c.** Index bloat measurement and rebuild strategy
+
+- **VI. Index Concurrency**
+    - **A. Locks versus latches** — *CMU 10; DI 5; PG 12–15*
+        - **1.** Logical transaction protection versus physical structure protection
+            - **a.** Locks protect database contents from other transactions
+            - **b.** Latches protect in-memory structures from other threads
+        - **2.** Duration, scope, and rollback semantics
+            - **a.** Lock held to commit; latch held for a critical section
+            - **b.** Locks are deadlock-detected; latches must be deadlock-avoided
+            - **c.** Locks appear in the lock table; latches usually do not
+        - **3.** Operating-system mutexes and reader/writer latches
+            - **a.** Blocking versus futex-backed implementations
+            - **b.** Reader/writer fairness and writer starvation
+        - **4.** Spinlocks and lightweight locks
+            - **a.** Busy-waiting when critical sections are short
+            - **b.** Backoff, cache-line bouncing, and contention collapse
+        - **5.** Lock-free and latch-free alternatives
+            - **a.** Atomic operations and compare-and-swap
+            - **b.** Memory ordering and safe memory reclamation (epochs, RCU)
+    - **B. Hash-table latching** — *CMU 10*
+        - **1.** Page-level and slot-level latch granularity
+            - **a.** Fewer latches versus more concurrency
+            - **b.** Compare-and-swap on individual slots
+        - **2.** Latch acquisition for probing and resizing
+            - **a.** Ordered acquisition along the probe sequence
+            - **b.** Global reorganization as the hard case
+            - **c.** Why static hash tables are easy and dynamic ones are not
+    - **C. B+ tree latching** — *CMU 10; DI 5*
+        - **1.** Latch crabbing/coupling
+            - **a.** Acquire child, release parent
+            - **b.** Read path versus write path asymmetry
+        - **2.** Safe-node detection
+            - **a.** Node that will not split or merge under this operation
+            - **b.** Releasing all ancestor latches at a safe node
+        - **3.** Optimistic and pessimistic traversal
+            - **a.** Read-latch descent with a write latch only at the leaf
+            - **b.** Restart from the root when the assumption fails
+            - **c.** Version counters and optimistic lock coupling
+        - **4.** Leaf scans and sibling traversal
+            - **a.** No consistent latch order between siblings
+            - **b.** Deadlock avoidance by no-wait plus restart
+        - **5.** Latch upgrading and pointer chasing
+            - **a.** Upgrade deadlock hazards
+            - **b.** Cost of re-descending versus holding stronger latches
+        - **6.** B-link tree concurrency
+            - **a.** Right links making a half-completed split observable-safe
+            - **b.** Move-right on high-key mismatch
+    - **D. In-memory synchronization in PostgreSQL** — *PG 15*
+        - **1.** Spinlocks
+            - **a.** Very short, non-interruptible critical sections
+            - **b.** No deadlock detection; no wait reporting
+        - **2.** Lightweight locks
+            - **a.** Shared and exclusive modes with wait queues
+            - **b.** Named LWLock tranches
+        - **3.** Buffer-cache and WAL-buffer synchronization
+            - **a.** Buffer mapping partitions and content locks
+            - **b.** Pin plus content lock as two separate protections
+            - **c.** WAL insertion locks and the flush path
+        - **4.** Wait monitoring and sampling
+            - **a.** `pg_stat_activity` wait events and their classes
+            - **b.** Sampling-based wait profiling and interpretation
+
+- **VII. Query Execution**
+    - **A. Query lifecycle and protocols** — *CMU 13; PG 16*
+        - **1.** Parse
+            - **a.** Lexer, grammar, and raw parse tree
+            - **b.** Syntax errors before any catalog access
+        - **2.** Bind and transform
+            - **a.** Name and type resolution against the catalog
+            - **b.** Query tree construction and dependency recording
+        - **3.** Rewrite
+            - **a.** View expansion
+            - **b.** Row-level security and rule application
+        - **4.** Plan
+            - **a.** Path generation and cost comparison
+            - **b.** Chosen path converted into a plan tree
+        - **5.** Execute
+            - **a.** Executor state tree and per-node initialization
+            - **b.** Tuple flow and per-node instrumentation
+        - **6.** Return results
+            - **a.** Result formatting, portals, and cursors
+            - **b.** Row-at-a-time delivery versus full buffering
+        - **7.** Simple versus extended query protocol
+            - **a.** Preparation
+            - **b.** Parameter binding
+            - **c.** Plan reuse
+                - **i.** Custom versus generic plans
+                - **ii.** Cost-based switch after repeated executions
+                - **iii.** Parameter-sniffing risks
+        - **8.** Plan caching and invalidation
+            - **a.** Cached plans in prepared statements and PL/pgSQL
+            - **b.** Invalidation on DDL and statistics changes
+    - **B. Query plans** — *CMU 11, 13*
+        - **1.** Logical and physical operators
+            - **a.** One logical operator, many physical implementations
+            - **b.** Plan node properties: cost, rows, width
+        - **2.** Plan trees and dataflow
+            - **a.** Tuples flowing from leaves to root
+            - **b.** Control flowing from root to leaves
+        - **3.** Intermediate results
+            - **a.** Materialization into memory or spill files
+            - **b.** Work-memory budgets per node
+        - **4.** Operator pipelines and pipeline breakers
+            - **a.** Streaming operators versus blocking operators
+            - **b.** Startup cost versus total cost consequences
+        - **5.** Reading plans
+            - **a.** `EXPLAIN` versus `EXPLAIN ANALYZE`, buffers, and timing
+            - **b.** Estimated versus actual rows and loops
+            - **c.** Spotting misestimation and spills
+    - **C. Processing models** — *CMU 13*
+        - **1.** Iterator/Volcano model
+            - **a.** `open`/`next`/`close` interface
+            - **b.** Per-tuple virtual-call overhead
+        - **2.** Materialization model
+            - **a.** Whole result returned at once
+            - **b.** Fit for OLTP and stored procedures
+        - **3.** Vectorized/batch model
+            - **a.** Batches of tuples per `next` call
+            - **b.** SIMD, branch elimination, and cache efficiency
+        - **4.** Model selection by workload and hardware
+            - **a.** Direction of processing: top-down pull versus bottom-up push
+            - **b.** Compilation as an alternative to interpretation
+    - **D. Access and modification operators** — *CMU 13; PG 18–20*
+        - **1.** Table and index access methods
+            - **a.** Scan node types and their inputs
+            - **b.** Visibility checks during access
+        - **2.** Sargable predicates
+            - **a.** Predicates that can drive an index versus filter-only
+            - **b.** Function wrapping and implicit casts that break sargability
+            - **c.** Index conditions versus recheck conditions versus filters
+        - **3.** Insert, update, and delete
+            - **a.** New row versions, index maintenance, and triggers
+            - **b.** `RETURNING`, `ON CONFLICT`, and `MERGE`
+        - **4.** Halloween problem
+            - **a.** Updated rows re-entering the scan
+            - **b.** Separation of read and write phases as the fix
+        - **5.** Expression evaluation
+            - **a.** Interpreted expression trees
+            - **b.** Just-in-time compilation
+                - **i.** What JIT compiles (expressions, tuple deforming)
+                - **ii.** Compilation cost versus query duration
+    - **E. Sorting and aggregation** — *CMU 11; PG 22–23*
+        - **1.** In-memory sorting
+            - **a.** Quicksort
+            - **b.** Top-N heapsort
+            - **c.** Abbreviated keys and comparison-cost reduction
+        - **2.** External merge sort
+            - **a.** Run generation
+            - **b.** Multiway merge
+            - **c.** Double buffering
+            - **d.** Pass count as a function of memory and input size
+        - **3.** Incremental and parallel sorting
+            - **a.** Presorted prefix and per-group sorting
+            - **b.** Worker-local sorts merged by the leader
+        - **4.** Sorted aggregation
+            - **a.** Group boundaries detected in one pass
+            - **b.** Free when input arrives ordered from an index
+        - **5.** Hash aggregation
+            - **a.** Hash table of group keys and transition states
+            - **b.** Spilling to disk when memory is exceeded
+        - **6.** Distinct-value processing
+            - **a.** Sort-based versus hash-based `DISTINCT`
+            - **b.** Approximate distinct counting (HyperLogLog)
+    - **F. Join semantics and physical algorithms** — *CMU 12; PG 21–23*
+        - **1.** Inner, outer, semi, and anti joins
+            - **a.** Null-extension rules for outer joins
+            - **b.** Early exit for semi/anti joins
+        - **2.** Equi-joins and non-equi joins
+            - **a.** Which algorithms require equality
+            - **b.** Range and inequality joins
+        - **3.** Nested-loop joins
+            - **a.** Simple nested loop
+            - **b.** Block nested loop
+            - **c.** Index nested loop
+            - **d.** Parameterization and memoization
+                - **i.** Parameterized inner paths
+                - **ii.** Memoize nodes caching inner results per key
+        - **4.** Sort-merge joins
+            - **a.** Sorting inputs
+            - **b.** Merging sorted sets
+            - **c.** Backtracking on duplicate keys
+            - **d.** Output order as a reusable property
+        - **5.** Hash joins
+            - **a.** Build and probe
+            - **b.** One-pass joins
+            - **c.** Partitioned/two-pass joins
+                - **i.** Partition fan-out and recursive partitioning
+                - **ii.** Skew and partition overflow handling
+            - **d.** Bloom-filter optimization
+            - **e.** Parallel-aware shared hash tables
+        - **6.** Comparing join methods by input, memory, and selectivity
+            - **a.** Cost crossover points between the three families
+            - **b.** Which side should be inner/build and why
+    - **G. Parallel query execution** — *CMU 14; PG 18, 22–23*
+        - **1.** Process-per-worker, process-pool, and thread models
+            - **a.** Isolation and memory cost per model
+            - **b.** Startup latency and worker reuse
+        - **2.** Inter-query parallelism
+            - **a.** Concurrency across independent sessions
+            - **b.** Shared-structure contention as the limit
+        - **3.** Intra-query parallelism
+            - **a.** Intra-operator/horizontal parallelism
+            - **b.** Inter-operator/vertical parallelism
+            - **c.** Exchange operators
+                - **i.** Gather, repartition, and broadcast
+                - **ii.** Order-preserving gather merge
+        - **4.** Parallel scans, joins, sorting, and aggregation
+            - **a.** Shared block-range assignment for scans
+            - **b.** Partial aggregation plus finalize step
+        - **5.** I/O parallelism
+            - **a.** Multi-disk parallelism
+            - **b.** Database and object partitioning
+        - **6.** Parallel-safety restrictions and worker limits
+            - **a.** Parallel-safe/restricted/unsafe function labeling
+            - **b.** Worker count derived from relation size and settings
+            - **c.** Operations that force serial execution
+        - **7.** Partition-aware execution
+            - **a.** Partition pruning at plan time and at run time
+            - **b.** Partitionwise joins and aggregates
+
+- **VIII. Query Optimization**
+    - **A. Optimization goals and architecture** — *CMU 15–16; DI 1; PG 16–17*
+        - **1.** Logical versus physical optimization
+            - **a.** Equivalence-preserving rewrites versus implementation choice
+            - **b.** Why the two stages are often interleaved
+        - **2.** Heuristic/rule-based versus cost-based optimization
+            - **a.** Always-good rules applied unconditionally
+            - **b.** Cost model needed when the answer is workload-dependent
+        - **3.** Search space, transformation rules, and cost model
+            - **a.** Three independent axes of optimizer design
+            - **b.** Interesting/physical properties (sort order, partitioning)
+        - **4.** Search termination and planning-time limits
+            - **a.** Budget, timeout, and pruning heuristics
+            - **b.** Genetic/randomized search for very large joins (GEQO)
+        - **5.** Optimizer limits and escape hatches
+            - **a.** Optimization barriers (CTE fences, `OFFSET 0`, functions)
+            - **b.** Planner cost settings and enable-flags as diagnostics
+    - **B. Relational equivalence and rewriting** — *CMU 01, 15*
+        - **1.** Predicate pushdown
+            - **a.** Through joins, groupings, and subqueries
+            - **b.** Predicate inference from equivalence classes
+        - **2.** Projection pushdown
+            - **a.** Discarding unreferenced columns early
+            - **b.** Larger benefit in column stores and distributed plans
+        - **3.** Join reordering
+            - **a.** Commutativity and associativity as the legal basis
+            - **b.** Outer joins restricting legal reorderings
+        - **4.** Redundant-expression elimination
+            - **a.** Common subexpression detection
+            - **b.** Removing provably-true or provably-false clauses
+        - **5.** Constant folding and expression rewriting
+            - **a.** Compile-time evaluation of immutable expressions
+            - **b.** Inlining stable functions and views
+        - **6.** Subquery decorrelation
+            - **a.** Correlated `EXISTS`/`IN` rewritten as semi/anti joins
+            - **b.** Pull-up of simple subqueries into the parent query
+        - **7.** Join elimination and simplification
+            - **a.** Dropping joins provable-redundant via foreign keys
+            - **b.** Outer-join-to-inner-join conversion under null-rejecting predicates
+    - **C. Statistics** — *CMU 16; PG 17*
+        - **1.** Table and index cardinalities
+            - **a.** `reltuples`/`relpages` and how they are refreshed
+            - **b.** Staleness between analyze runs
+        - **2.** Null fractions
+        - **3.** Number of distinct values
+            - **a.** Sampling-based estimation and its bias
+            - **b.** Negative (per-row-ratio) representation
+        - **4.** Most-common-value lists
+            - **a.** MCVs plus frequencies for skewed columns
+            - **b.** Statistics target and list length
+        - **5.** Histograms
+            - **a.** Equi-depth bucket construction
+            - **b.** Interaction with the MCV list
+        - **6.** Average field width
+        - **7.** Physical-order correlation
+        - **8.** Expression statistics
+        - **9.** Multivariate statistics
+            - **a.** Functional dependencies
+            - **b.** Multivariate distinct counts
+            - **c.** Multivariate most-common values
+        - **10.** Collection mechanics
+            - **a.** Random sampling and sample size
+            - **b.** `ANALYZE`, autoanalyze, and inheritance/partition statistics
+    - **D. Cardinality estimation** — *CMU 16*
+        - **1.** Selectivity estimation
+            - **a.** Equality, range, and pattern predicates
+            - **b.** Fallback constants when statistics are absent
+        - **2.** Uniformity and independence assumptions
+            - **a.** Uniform distribution within histogram buckets
+            - **b.** Independence of predicates and of join keys
+            - **c.** Containment/inclusion assumption for joins
+        - **3.** Predicate conjunction and disjunction
+            - **a.** Multiplying selectivities and the error compounding
+            - **b.** Inclusion–exclusion for disjunctions
+        - **4.** Join-cardinality estimation
+            - **a.** Distinct-value-based formula
+            - **b.** MCV-list-based refinement
+            - **c.** Foreign-key-aware estimation
+        - **5.** Correlated-column errors
+            - **a.** Underestimation cascading through join levels
+            - **b.** Extended statistics and expression indexes as remedies
+        - **6.** Feedback and adaptive approaches
+            - **a.** Execution-feedback-driven re-estimation
+            - **b.** Learned and sampling-based estimators
+    - **E. Cost estimation** — *CMU 15–16; PG 18, 20*
+        - **1.** Sequential and random I/O
+            - **a.** `seq_page_cost` versus `random_page_cost`
+            - **b.** Cache-residency assumptions (`effective_cache_size`)
+        - **2.** CPU and memory costs
+            - **a.** Per-tuple, per-operator, and per-expression costs
+            - **b.** Work memory determining in-memory versus spill plans
+        - **3.** Communication cost
+        - **4.** Intermediate-result size
+            - **a.** Row count times width as the propagated quantity
+            - **b.** Errors propagating upward through the tree
+        - **5.** Pipelining versus materialization
+            - **a.** Startup cost mattering under `LIMIT`
+            - **b.** Materialize nodes inserted to protect a repeated inner scan
+    - **F. Access-path optimization** — *CMU 15; PG 18–20*
+        - **1.** Sequential versus index access
+            - **a.** Selectivity crossover and the random-access penalty
+            - **b.** Bitmap scan as the middle ground
+        - **2.** Predicate and projection placement
+            - **a.** Index condition, recheck, and filter placement
+            - **b.** Evaluating expensive functions as late as possible
+        - **3.** Covering and index-only plans
+        - **4.** Single-relation plan enumeration
+            - **a.** Path collection with pruning by cost and useful properties
+            - **b.** Keeping a more expensive path for its sort order
+    - **G. Join-order optimization** — *CMU 15–16*
+        - **1.** Left-deep, right-deep, and bushy trees
+            - **a.** Pipelining friendliness of left-deep plans
+            - **b.** Bushy plans for parallel and distributed execution
+        - **2.** Dynamic programming
+            - **a.** Building optimal plans by subset size
+            - **b.** Exponential growth and the practical relation limit
+        - **3.** Top-down and bottom-up search
+            - **a.** Goal-driven with branch-and-bound versus enumerate-upward
+        - **4.** System R style enumeration
+            - **a.** Left-deep only, Cartesian products deferred
+            - **b.** Interesting orders retained across subplans
+        - **5.** Volcano/Cascades style memoization
+            - **a.** Memo groups and equivalence classes
+            - **b.** Rule-driven exploration with cost-based pruning
+        - **6.** Exhaustive search versus heuristics
+            - **a.** Thresholds for switching to greedy/randomized search
+            - **b.** Collapse limits for subqueries and explicit joins
+
+- **IX. Transactions, Isolation, and Concurrency Control**
+    - **A. Transaction model** — *CMU 17; DI 5; PG 2*
+        - **1.** Transaction boundaries and state
+            - **a.** Explicit `BEGIN`/`COMMIT` versus implicit single-statement
+            - **b.** Active, partially committed, failed, aborted, committed
+            - **c.** Aborted state and statement failure semantics
+        - **2.** Read and write sets
+            - **a.** What the protocol must track per transaction
+            - **b.** Space cost of tracking at fine granularity
+        - **3.** Commit and abort
+            - **a.** Commit as the durability point
+            - **b.** Abort as a rollback of effects, not of side effects
+        - **4.** Schedules, conflicts, and serial equivalence
+            - **a.** Serial, serializable, and arbitrary interleavings
+            - **b.** Read-write, write-read, and write-write conflicts
+    - **B. ACID properties** — *CMU 17; DI 5*
+        - **1.** Atomicity
+            - **a.** All-or-nothing across failures and aborts
+            - **b.** Implemented via logging or shadow paging
+        - **2.** Consistency
+            - **a.** Database-level constraint preservation
+            - **b.** Application-level invariants left to the application
+        - **3.** Isolation
+            - **a.** Illusion of running alone
+            - **b.** Pessimistic versus optimistic enforcement
+        - **4.** Durability
+            - **a.** Committed effects survive crashes
+            - **b.** Media durability requiring replication or backups
+    - **C. Serializability theory** — *CMU 17; DI 5*
+        - **1.** Conflict serializability
+            - **a.** Swapping non-conflicting adjacent operations
+            - **b.** Relationship to view serializability
+        - **2.** Dependency/precedence graphs
+            - **a.** Nodes as transactions, edges as conflicts
+            - **b.** Acyclicity as the serializability test
+        - **3.** Recoverable, cascadeless, and strict schedules
+            - **a.** Commit ordering to avoid unrecoverable reads
+            - **b.** Avoiding cascading aborts
+        - **4.** Read-only transactions
+            - **a.** Cheap paths and snapshot-only execution
+            - **b.** Read-only anomalies under snapshot isolation
+    - **D. Isolation anomalies and levels** — *CMU 19; DI 5; PG 2*
+        - **1.** Dirty reads
+        - **2.** Non-repeatable reads
+        - **3.** Phantom reads
+        - **4.** Lost updates and write skew
+            - **a.** Lost update as a write-write race on the same row
+            - **b.** Write skew as a constraint violated across disjoint rows
+            - **c.** Read-only anomaly under snapshot isolation
+        - **5.** Read Uncommitted
+        - **6.** Read Committed
+            - **a.** Per-statement snapshot
+            - **b.** Update re-evaluation (EPQ) after a concurrent write
+        - **7.** Repeatable Read
+            - **a.** Per-transaction snapshot
+            - **b.** Serialization failure instead of blocking on conflict
+        - **8.** Serializable
+            - **a.** True serializability versus snapshot isolation
+            - **b.** Cost of predicate/dependency tracking
+        - **9.** PostgreSQL isolation-level behavior
+            - **a.** No dirty reads at any level
+            - **b.** Repeatable Read implemented as snapshot isolation
+            - **c.** Serializable implemented as SSI
+            - **d.** Retry loops as a required application pattern
+    - **E. Lock-based concurrency control** — *CMU 18; DI 5; PG 12–14*
+        - **1.** Shared and exclusive locks
+            - **a.** Compatibility matrix
+            - **b.** Lock table structure and hashing
+        - **2.** Two-phase locking
+            - **a.** Growing and shrinking phases
+            - **b.** Conservative 2PL
+            - **c.** Strict and rigorous 2PL
+            - **d.** Why 2PL guarantees conflict serializability but not deadlock freedom
+        - **3.** Lock conversion
+            - **a.** Upgrade from shared to exclusive
+            - **b.** Upgrade deadlocks and their avoidance
+        - **4.** Lock granularity and intention locks
+            - **a.** IS, IX, and SIX modes
+            - **b.** Lock escalation and its risks
+        - **5.** Table-, page-, row-, and predicate-level locking
+            - **a.** Overhead versus concurrency trade-off
+            - **b.** Where predicate locks become necessary
+        - **6.** PostgreSQL heavyweight and relation-level locks
+            - **a.** Eight table-level modes and their conflicts
+            - **b.** DDL blocking DML and lock-queue pile-ups
+            - **c.** `lock_timeout` and safe migration patterns
+        - **7.** PostgreSQL row locks and multitransactions
+            - **a.** Row-lock modes: FOR UPDATE, NO KEY UPDATE, SHARE, KEY SHARE
+            - **b.** Lock state stored in the tuple header, not the lock table
+            - **c.** MultiXact identifiers and their own SLRU storage
+        - **8.** Advisory and non-object locks
+            - **a.** Session versus transaction advisory locks
+            - **b.** Tuple, transaction-ID, extend, and predicate lock types
+        - **9.** Wait queues and no-wait modes
+            - **a.** FIFO queueing and conflict-aware granting
+            - **b.** `NOWAIT` and `SKIP LOCKED` for queue workloads
+    - **F. Deadlock handling** — *CMU 18; DI 5; PG 13*
+        - **1.** Wait-for graphs and detection
+            - **a.** Cycle detection frequency and cost
+            - **b.** PostgreSQL's `deadlock_timeout`-triggered check
+        - **2.** Timeout-based handling
+            - **a.** Simplicity versus false positives
+        - **3.** Prevention
+            - **a.** Wait-die
+            - **b.** Wound-wait
+            - **c.** Timestamp priority and restart-with-same-timestamp
+        - **4.** Victim selection and rollback
+            - **a.** Selection criteria: age, progress, locks held
+            - **b.** Full rollback versus partial rollback to a savepoint
+            - **c.** Application-side prevention by consistent lock ordering
+    - **G. Timestamp ordering** — *CMU 19*
+        - **1.** Transaction timestamps
+            - **a.** Monotonic counters versus physical clocks
+        - **2.** Read and write timestamps
+            - **a.** Per-object metadata and its storage cost
+        - **3.** Basic timestamp-ordering protocol
+            - **a.** Abort when an operation is "too late"
+            - **b.** No deadlocks; starvation of long transactions instead
+        - **4.** Thomas write rule
+            - **a.** Ignoring obsolete writes rather than aborting
+            - **b.** Loss of conflict serializability
+        - **5.** Recoverability and cascading aborts
+            - **a.** Dirty reads permitted by the basic protocol
+            - **b.** Commit-ordering fixes
+    - **H. Optimistic concurrency control** — *CMU 19; DI 5*
+        - **1.** Read phase
+            - **a.** Private workspace and copy-on-read
+        - **2.** Validation phase
+            - **a.** Backward validation against committed transactions
+            - **b.** Forward validation against active transactions
+        - **3.** Write phase
+            - **a.** Installing the workspace atomically
+            - **b.** Serial versus parallel commit installation
+        - **4.** Validation strategies and conflict windows
+            - **a.** Low-contention fit and high-contention collapse
+            - **b.** Cost of copying and of the validation critical section
+    - **I. Phantom protection** — *CMU 19; PG 14*
+        - **1.** Dynamic databases and predicate reads
+            - **a.** Locking rows cannot lock rows that do not exist yet
+        - **2.** Re-execution scans
+            - **a.** Re-running a scan at commit to detect new matches
+        - **3.** Predicate locking
+            - **a.** Locking a logical predicate rather than a physical object
+            - **b.** Expense of general predicate satisfiability checks
+        - **4.** Index-range locking
+            - **a.** Next-key and gap locks
+            - **b.** Locking index pages as predicate approximations
+        - **5.** Serializable snapshot isolation
+            - **a.** SIREAD locks tracking reads
+            - **b.** Dangerous structures: rw-antidependency pivots
+            - **c.** Aborting the pivot transaction
+            - **d.** False positives and memory-driven lock granularity promotion
+    - **J. Multi-version concurrency control** — *CMU 20–21; DI 5; PG 2–7*
+        - **1.** Multiple physical versions per logical tuple
+            - **a.** Readers never block writers, writers never block readers
+            - **b.** Writers still block writers on the same row
+        - **2.** Version timestamps and visibility
+            - **a.** Begin/end timestamps per version
+            - **b.** Visibility predicate evaluation
+        - **3.** Snapshot construction
+            - **a.** Point-in-time view of committed state
+            - **b.** Active-transaction list versus commit-timestamp approaches
+        - **4.** Version-chain organization
+            - **a.** Newest-to-oldest versus oldest-to-newest ordering
+            - **b.** Chain traversal cost under long-running readers
+        - **5.** Version storage
+            - **a.** Append-only storage
+            - **b.** Time-travel storage
+            - **c.** Delta storage
+                - **i.** Undo/rollback segments
+                - **ii.** Reconstruction cost on read
+        - **6.** Large values and versioning
+            - **a.** Sharing unchanged out-of-line values across versions
+        - **7.** Delete representation and tombstones
+        - **8.** Index management under MVCC
+            - **a.** Indexes pointing to physical versions versus logical rows
+            - **b.** Index entries for every version and the write amplification
+            - **c.** Visibility checks requiring heap access
+        - **9.** Garbage collection
+            - **a.** Transaction-level collection
+            - **b.** Tuple-level collection
+                - **i.** Background vacuuming versus cooperative cleaning
+            - **c.** Determining the oldest visible version (watermark)
+        - **10.** Block compaction
+        - **11.** MVCC design-decision summary
+            - **a.** Concurrency-control protocol, version storage, GC, index management
+            - **b.** How real systems (PostgreSQL, Oracle, MySQL) differ on each
+    - **K. PostgreSQL MVCC internals** — *PG 3–8*
+        - **1.** Tuple operation metadata
+            - **a.** `xmin`, `xmax`, `cmin`/`cmax`, and `ctid`
+            - **b.** Infomask hint bits and commit-status caching
+            - **c.** The commit log (`pg_xact`) as the source of truth
+        - **2.** Transaction snapshots and row visibility
+            - **a.** `xmin`, `xmax`, and the in-progress `xip` list
+            - **b.** Visibility rules applied to each tuple version
+            - **c.** Exported snapshots and `pg_dump` consistency
+        - **3.** Transaction horizons
+            - **a.** Oldest snapshot pinning dead-tuple removal
+            - **b.** Long transactions, idle-in-transaction, replication slots, prepared transactions
+        - **4.** Virtual transactions, subtransactions, and savepoints
+            - **a.** Virtual XIDs avoiding XID consumption for read-only work
+            - **b.** Subtransaction XIDs, `pg_subtrans`, and suboverflow
+            - **c.** Statement-level rollback implemented with savepoints
+        - **5.** Page pruning
+            - **a.** Opportunistic cleanup during reads
+            - **b.** Line-pointer redirection and dead line pointers
+        - **6.** Heap-only tuple (HOT) updates and HOT chains
+            - **a.** Conditions: same page, no indexed column changed
+            - **b.** Index entries reused via the chain head
+            - **c.** Fill factor as an enabler; chain breakage effects
+        - **7.** Vacuum and autovacuum
+            - **a.** Heap and index cleanup
+                - **i.** Two-pass heap scan with a dead-TID list
+                - **ii.** Index vacuum cost and parallel index vacuuming
+            - **b.** Analysis and statistics refresh
+            - **c.** Load management and monitoring
+                - **i.** Cost-based delay parameters
+                - **ii.** Scale-factor and threshold triggers
+                - **iii.** `pg_stat_progress_vacuum` and bloat estimation
+            - **d.** `VACUUM FULL` versus plain vacuum
+        - **8.** Transaction-ID wraparound and tuple freezing
+            - **a.** 32-bit XID space and the modular visibility rule
+            - **b.** Freeze thresholds and aggressive/anti-wraparound vacuum
+            - **c.** Warning and shutdown behavior as the limit approaches
+        - **9.** Table and index rebuilding
+            - **a.** `CLUSTER`, `VACUUM FULL`, and rewrite locking
+            - **b.** `REINDEX CONCURRENTLY`
+            - **c.** Bloat diagnosis and remediation strategy
+
+- **X. Logging, Recovery, and Durability**
+    - **A. Failure model and recovery goals** — *CMU 22–23; DI 5; PG 10*
+        - **1.** Transaction, process, operating-system, and media failures
+            - **a.** What each class can and cannot destroy
+            - **b.** Fail-stop assumption underlying most protocols
+        - **2.** Atomicity after abort
+        - **3.** Durability after commit
+        - **4.** Restoring a consistent database state
+            - **a.** Recovery-time objective versus normal-path overhead
+            - **b.** Idempotence as a requirement for recovery replay
+    - **B. Buffer-management policies** — *CMU 22; DI 5*
+        - **1.** STEAL versus NO-STEAL
+            - **a.** Whether uncommitted changes may reach disk
+            - **b.** STEAL implies undo information is required
+        - **2.** FORCE versus NO-FORCE
+            - **a.** Whether commit must flush all modified pages
+            - **b.** NO-FORCE implies redo information is required
+        - **3.** Undo and redo requirements
+            - **a.** The four policy combinations and their log needs
+            - **b.** Why STEAL + NO-FORCE is fastest at runtime and slowest to recover
+    - **C. Baseline recovery techniques** — *CMU 22*
+        - **1.** NO-STEAL + FORCE
+            - **a.** No logging needed; unusable for large transactions
+        - **2.** Shadow paging
+            - **a.** Copy-on-write pages plus an atomic root swap
+            - **b.** Fragmentation, garbage, and poor concurrency
+        - **3.** Journal files
+            - **a.** Rollback-journal (undo-first) designs
+            - **b.** Contrast with write-ahead (redo-first) designs
+    - **D. Write-ahead logging** — *CMU 22–23; DI 5; PG 10*
+        - **1.** WAL ordering rule
+            - **a.** Log record durable before the corresponding page
+            - **b.** Commit record durable before acknowledging the client
+        - **2.** Log sequence numbers
+            - **a.** Monotonic LSNs and the page LSN field
+            - **b.** `flushedLSN` and the "is this page safe to write" test
+        - **3.** Transaction records
+            - **a.** Begin, update, commit, and abort records
+            - **b.** Per-transaction backward chaining (prevLSN)
+        - **4.** Page-oriented and logical records
+            - **a.** Record header, relation/block identity, and payload
+            - **b.** Redo routines per resource manager
+        - **5.** Physical, physiological, and logical logging
+            - **a.** Byte-level images versus operation-within-a-page
+            - **b.** Logical logging and non-determinism on replay
+        - **6.** Undo and redo information
+            - **a.** Before-images and after-images
+            - **b.** Where undo lives: log versus separate undo store
+        - **7.** Group commit and log flushing
+            - **a.** Batching flushes to amortize `fsync`
+            - **b.** Latency versus throughput tuning
+    - **E. Checkpointing** — *CMU 22–23; PG 10*
+        - **1.** Quiescent and fuzzy checkpoints
+            - **a.** Stopping the world versus checkpointing while running
+            - **b.** Begin/end checkpoint records and consistency
+        - **2.** Active transaction table
+        - **3.** Dirty page table
+            - **a.** `recLSN` as the earliest log record needing redo
+        - **4.** Background writing
+            - **a.** Spreading the flush over the checkpoint interval
+            - **b.** Checkpoint I/O spikes and their mitigation
+        - **5.** Recovery start-point selection
+            - **a.** Redo start from the minimum `recLSN`
+            - **b.** Checkpoint frequency versus recovery time
+    - **F. ARIES** — *CMU 23; DI 5*
+        - **1.** Normal execution
+            - **a.** Transaction table
+            - **b.** Dirty page table
+            - **c.** Compensation log records
+                - **i.** CLR contents and the undoNext pointer
+                - **ii.** Why CLRs are redo-only and never undone
+        - **2.** Analysis phase
+            - **a.** Rebuilding the transaction and dirty page tables
+            - **b.** Identifying losers and the redo start point
+        - **3.** Redo phase
+            - **a.** Repeating history for all transactions, winners and losers
+            - **b.** Page-LSN comparison to skip already-applied records
+        - **4.** Undo phase
+            - **a.** Rolling back losers in reverse LSN order
+            - **b.** Writing CLRs so undo itself is crash-safe
+        - **5.** Repeating history and selective rollback
+            - **a.** Restart-during-recovery correctness
+            - **b.** Partial rollback to savepoints using the same machinery
+    - **G. PostgreSQL WAL and recovery** — *PG 10–11*
+        - **1.** WAL record and segment structure
+            - **a.** Record header, resource manager ID, and block references
+            - **b.** 16 MB segments, LSN-to-filename mapping, and recycling
+            - **c.** Timelines and timeline history files
+        - **2.** Checkpoints and crash recovery
+            - **a.** `pg_control`, the redo point, and startup detection
+            - **b.** Triggering by time, WAL volume, or explicit request
+        - **3.** WAL buffers and background writing
+            - **a.** WAL buffer sizing and insertion locks
+            - **b.** WAL writer versus backend-driven flushes
+        - **4.** Performance modes
+            - **a.** Synchronous and asynchronous commit
+                - **i.** Bounded data-loss window under async commit
+                - **ii.** Per-transaction setting granularity
+            - **b.** Full-page writes
+                - **i.** Torn-page protection after each checkpoint
+                - **ii.** WAL volume cost and `wal_compression`
+        - **5.** Fault-tolerance settings
+            - **a.** Data checksums and `wal_sync_method`
+            - **b.** `fsync`, `full_page_writes` off: what actually breaks
+        - **6.** WAL levels
+            - **a.** Minimal
+            - **b.** Replica
+            - **c.** Logical
+                - **i.** Extra information for logical decoding
+                - **ii.** Replica identity and its effect on WAL contents
+        - **7.** Archiving and point-in-time recovery
+            - **a.** Archive command/library and WAL retention
+            - **b.** Base backups, `pg_basebackup`, and recovery targets
+            - **c.** Replication slots and their retention hazard
+        - **8.** Physical and logical replication
+            - **a.** Streaming replication, WAL sender/receiver, and hot standby
+            - **b.** Synchronous commit modes and quorum sets
+            - **c.** Replay conflicts, feedback, and lag monitoring
+            - **d.** Logical decoding, publications, and subscriptions
+
+- **XI. Distributed Database Systems**
+    - **A. Distributed DBMS goals and architectures** — *CMU 14, 24; DI 8*
+        - **1.** Shared-memory, shared-disk, and shared-nothing systems
+            - **a.** What is shared and where the bottleneck lands
+            - **b.** Compute/storage separation as modern shared-disk
+        - **2.** Homogeneous and heterogeneous clusters
+            - **a.** Uniform nodes versus specialized roles
+        - **3.** Parallel versus distributed execution
+            - **a.** Reliable fast interconnect versus unreliable network
+            - **b.** Failure of a node as an expected event
+        - **4.** Communication cost and data locality
+            - **a.** Network as the dominant cost term
+            - **b.** Colocation and partition-aligned schemas
+        - **5.** Federated and multidatabase systems
+            - **a.** Wrappers, foreign data, and pushdown limits
+    - **B. Partitioning** — *CMU 24; DI 13*
+        - **1.** Horizontal and vertical partitioning
+            - **a.** Sharding rows versus splitting columns
+            - **b.** Logical versus physical partitioning
+        - **2.** Range partitioning
+            - **a.** Range scans preserved; hot-spot risk
+        - **3.** Hash partitioning
+            - **a.** Even spread; range queries broadcast
+            - **b.** Modulo hashing and the rebalancing problem
+        - **4.** Consistent hashing
+            - **a.** Ring placement and virtual nodes
+            - **b.** Minimal movement on membership change
+        - **5.** Rendezvous/highest-random-weight hashing
+        - **6.** Partition selection and rebalancing
+            - **a.** Partition-key choice and skew
+            - **b.** Split/merge and data movement during rebalance
+        - **7.** Distributed secondary indexes
+            - **a.** Local (per-partition) versus global indexes
+            - **b.** Scatter-gather reads versus distributed write cost
+        - **8.** PostgreSQL declarative partitioning
+            - **a.** Range, list, and hash partitions
+            - **b.** Attach/detach, constraint exclusion, and pruning
+            - **c.** Limits: global uniqueness and cross-partition keys
+    - **C. Replication** — *CMU 24; DI 11*
+        - **1.** Replica placement and replication factor
+            - **a.** Rack/zone awareness and correlated failure
+        - **2.** Primary/replica and multi-primary schemes
+            - **a.** Single-writer simplicity versus write availability
+            - **b.** Conflict detection and resolution under multi-primary
+        - **3.** Synchronous and asynchronous replication
+            - **a.** Durability versus latency at commit
+            - **b.** Failover and the data-loss window
+        - **4.** Continuous versus on-commit propagation
+            - **a.** Statement, row, and log-based propagation
+        - **5.** Read and write quorums
+            - **a.** R + W > N and its guarantees
+            - **b.** Sloppy quorums and availability trade-offs
+        - **6.** Witness replicas
+            - **a.** Voting without storing full data
+    - **D. Distributed-system model** — *DI 8*
+        - **1.** Concurrent and parallel execution
+        - **2.** Shared state, message passing, and local state
+            - **a.** No shared memory; only messages
+            - **b.** Local knowledge is always stale
+        - **3.** Clocks, time, and event ordering
+            - **a.** Physical clocks, drift, and NTP bounds
+            - **b.** Lamport clocks and happens-before
+            - **c.** Hybrid/TrueTime-style bounded-uncertainty clocks
+        - **4.** Network partitions and partial failures
+            - **a.** Indistinguishability of slow and dead
+            - **b.** Asymmetric and one-way partitions
+        - **5.** Cascading failures
+            - **a.** Retry storms, thundering herds, and backpressure
+        - **6.** System synchrony assumptions
+            - **a.** Synchronous, partially synchronous, asynchronous models
+            - **b.** Why partial synchrony is the practical assumption
+        - **7.** Failure models
+            - **a.** Crash faults
+            - **b.** Omission faults
+            - **c.** Arbitrary/Byzantine faults
+    - **E. Communication abstractions and impossibility results** — *DI 8*
+        - **1.** Fair-loss and reliable links
+            - **a.** Ladder of link abstractions built by retransmission
+        - **2.** Acknowledgment, retransmission, duplication, and ordering
+            - **a.** Sequence numbers and deduplication
+            - **b.** Idempotence as the practical requirement
+        - **3.** At-most-once, at-least-once, and exactly-once effects
+            - **a.** Exactly-once delivery versus exactly-once effect
+        - **4.** Two Generals problem
+            - **a.** Impossibility of agreement over a lossy channel
+        - **5.** FLP impossibility
+            - **a.** No deterministic consensus in an asynchronous system with one failure
+            - **b.** How real systems escape it (timeouts, randomization)
+    - **F. Failure detection** — *DI 9*
+        - **1.** Heartbeats and pings
+        - **2.** Timeouts and suspicion
+            - **a.** Completeness versus accuracy trade-off
+        - **3.** Timeout-free detectors
+        - **4.** Outsourced heartbeats
+        - **5.** Phi-accrual failure detection
+            - **a.** Suspicion level from the arrival-time distribution
+        - **6.** Gossip-assisted detection
+    - **G. Leader election** — *DI 10*
+        - **1.** Bully algorithm
+            - **a.** Highest-identifier wins; message-storm cost
+        - **2.** Next-in-line failover
+        - **3.** Candidate/ordinary optimization
+        - **4.** Invitation algorithm
+        - **5.** Ring algorithm
+        - **6.** Split brain and fencing
+            - **a.** Leases, epochs/fencing tokens, and stale leaders
+    - **H. Consistency models** — *CMU 25; DI 11*
+        - **1.** CAP theorem and its limits
+            - **a.** The choice only applies during a partition
+            - **b.** Common misreadings of "CA systems"
+        - **2.** PACELC and latency/consistency trade-offs
+        - **3.** Harvest and yield
+        - **4.** Safe, regular, and atomic registers
+        - **5.** Strict consistency
+        - **6.** Linearizability
+            - **a.** Real-time ordering and single-object composability
+            - **b.** Cost: coordination on every operation
+        - **7.** Sequential consistency
+            - **a.** Common order without real-time constraint
+        - **8.** Causal consistency and vector clocks
+            - **a.** Version vectors, dotted versions, and conflict detection
+            - **b.** Concurrent updates and sibling values
+        - **9.** Session guarantees
+            - **a.** Read-your-writes
+            - **b.** Monotonic reads
+            - **c.** Monotonic writes
+            - **d.** Writes-follow-reads
+        - **10.** Eventual and tunable consistency
+            - **a.** Per-request consistency levels
+        - **11.** Strong eventual consistency and CRDTs
+            - **a.** Commutative/convergent replicated data types
+            - **b.** State-based versus operation-based designs
+        - **12.** Isolation levels versus consistency models
+            - **a.** Strict serializability as the combination of both
+            - **b.** Why the two hierarchies are orthogonal
+    - **I. Anti-entropy and dissemination** — *DI 12*
+        - **1.** Read repair
+            - **a.** Blocking versus asynchronous repair
+        - **2.** Digest reads
+        - **3.** Hinted handoff
+        - **4.** Merkle trees
+            - **a.** Hash-tree comparison to localize divergence
+            - **b.** Granularity and recomputation cost
+        - **5.** Bitmap version vectors
+        - **6.** Gossip dissemination
+            - **a.** Gossip mechanics
+            - **b.** Overlay networks
+            - **c.** Hybrid gossip
+            - **d.** Partial views
+    - **J. Distributed transactions** — *CMU 25; DI 13*
+        - **1.** Atomic operations across nodes
+        - **2.** Centralized versus decentralized coordination
+            - **a.** Dedicated coordinator versus participant-driven protocols
+        - **3.** Atomic-commit requirements
+            - **a.** Stability
+            - **b.** Consistency
+            - **c.** Liveness
+        - **4.** Two-phase commit
+            - **a.** Prepare
+            - **b.** Commit or abort
+            - **c.** Coordinator and participant failures
+                - **i.** Blocking window when the coordinator dies after prepare
+                - **ii.** In-doubt transactions holding locks
+            - **d.** Early prepare voting and acknowledgment
+            - **e.** PostgreSQL `PREPARE TRANSACTION` and orphan risk
+        - **5.** Three-phase commit
+            - **a.** Extra round to remove blocking under fail-stop
+            - **b.** Failure under network partition
+        - **6.** Partitioned transaction execution
+            - **a.** Single-partition fast path versus cross-partition cost
+        - **7.** Calvin
+            - **a.** Deterministic execution from a pre-agreed order
+        - **8.** Spanner
+            - **a.** TrueTime uncertainty and commit-wait
+            - **b.** Paxos groups plus 2PC across groups
+        - **9.** Percolator
+            - **a.** Client-driven 2PC over a key/value store with a timestamp oracle
+        - **10.** Coordination avoidance
+            - **a.** Invariant confluence
+            - **b.** Escrow and reservation techniques
+    - **K. Consensus and atomic broadcast** — *DI 14*
+        - **1.** Agreement, validity, and termination
+        - **2.** Atomic broadcast and virtual synchrony
+            - **a.** Equivalence of total-order broadcast and consensus
+        - **3.** ZooKeeper Atomic Broadcast (ZAB)
+        - **4.** Paxos
+            - **a.** Proposers, acceptors, and learners
+            - **b.** Phases and quorums
+                - **i.** Prepare/promise and accept/accepted rounds
+                - **ii.** Quorum intersection as the safety argument
+            - **c.** Failure scenarios
+                - **i.** Dueling proposers and livelock
+        - **5.** Multi-Paxos and Fast Paxos
+            - **a.** Stable leader skipping phase 1
+        - **6.** EPaxos and dependency tracking
+        - **7.** Flexible and Generalized Paxos
+        - **8.** Raft
+            - **a.** Leader election
+            - **b.** Heartbeats
+            - **c.** Log replication
+                - **i.** Log matching property and consistency check
+                - **ii.** Commit index and state-machine application
+            - **d.** Failure handling
+            - **e.** Membership changes and joint consensus
+        - **9.** Byzantine consensus and PBFT
+            - **a.** 3f + 1 requirement
+        - **10.** Recovery and checkpointing
+            - **a.** Log compaction and snapshot installation
+    - **L. Distributed query processing** — *CMU 25*
+        - **1.** Data shipping versus query shipping
+            - **a.** Move the computation to the data when possible
+        - **2.** Semijoin-based reduction
+            - **a.** Shipping keys or filters before rows
+            - **b.** Bloom-filter (bloomjoin) variant
+        - **3.** Distributed nested-loop, sort-merge, and hash joins
+        - **4.** Repartitioning and broadcast joins
+            - **a.** Shuffle both sides versus broadcast the small side
+            - **b.** Colocated joins when partition keys align
+        - **5.** Communication-aware plan selection
+            - **a.** Network volume as a first-class cost term
+            - **b.** Straggler handling and partial-result aggregation
+
+- **XII. Cross-Cutting Design and Operations**
+    - **A. Database selection and benchmarking** — *DI Part I introduction*
+        - **1.** Workload characterization
+            - **a.** Schema and record size
+            - **b.** Client count and concurrency
+            - **c.** Query and access patterns
+            - **d.** Read/write rates and expected growth
+        - **2.** Capacity, scalability, and maintenance requirements
+            - **a.** Working-set size versus memory budget
+            - **b.** Operational burden and failure-recovery expectations
+        - **3.** Representative workload simulation
+            - **a.** Why synthetic benchmarks mislead
+            - **b.** Replaying captured production traffic
+        - **4.** YCSB and TPC-C
+            - **a.** TPC-C/TPC-H/TPC-DS as OLTP and OLAP standards
+            - **b.** Benchmark-specific optimization as an anti-pattern
+        - **5.** Performance, correctness, and operational usability
+            - **a.** Latency percentiles rather than averages
+            - **b.** Correctness testing: Jepsen-style fault injection
+    - **B. Core implementation trade-offs** — *CMU 03–10; DI 1–7; PG 1–15*
+        - **1.** Read latency versus write latency
+        - **2.** Random access versus sequential access
+        - **3.** Space efficiency versus CPU cost
+        - **4.** Mutability versus background maintenance
+        - **5.** Concurrency versus synchronization overhead
+        - **6.** Generality versus specialized data structures
+        - **7.** DBMS control versus operating-system services
+        - **8.** Recurring resolution patterns
+            - **a.** Add a level of indirection
+            - **b.** Batch and amortize
+            - **c.** Defer work to a background process
+            - **d.** Be optimistic and validate later
+            - **e.** Approximate first, verify second
+    - **C. Maintenance and observability** — *DI 4–7; PG 6–11, 15, 17*
+        - **1.** Vacuuming, compaction, and garbage collection
+            - **a.** Bloat measurement and autovacuum tuning
+        - **2.** Index and table rebuilding
+        - **3.** Cache, lock, and wait monitoring
+            - **a.** Hit ratios, `pg_buffercache`, and wait-event sampling
+            - **b.** Blocking-chain and deadlock-log analysis
+        - **4.** Statistics collection and refresh
+            - **a.** `pg_stat_statements` and query-level attribution
+        - **5.** Checkpoint and WAL monitoring
+            - **a.** Timed versus requested checkpoints; WAL generation rate
+        - **6.** Transaction horizon and wraparound monitoring
+            - **a.** Oldest XID, slot lag, and long-running-transaction alerts
+    - **D. End-to-end reasoning path**
+        - **1.** Logical request and declarative query
+        - **2.** Parsing, rewriting, and optimization
+        - **3.** Physical plan and operator execution
+        - **4.** Access method and buffer-pool interaction
+        - **5.** Page, record, and index modification
+        - **6.** Concurrency-control validation
+        - **7.** WAL generation and durable commit
+        - **8.** Replication or distributed coordination
+        - **9.** Maintenance, recovery, and observability
+        - **10.** Worked traces to rehearse the whole path
+            - **a.** A single-row `UPDATE` from parse to durable commit
+            - **b.** A large analytical scan with a spill to disk
+            - **c.** A serialization failure and its retry
+
+---
+
+## Proposed additions
+
+The outline below is *not yet integrated*. Section **0** is preliminary material assumed
+but never stated by the current map; sections **XIII–XVI** are extension topics that the
+CMU/DI/PG sources touch but the map omits.
+
+- **0. Preliminaries** — *assumed background, currently implicit*
+    - **A. Cost models and asymptotics for storage structures**
+        - **1.** I/O model: counting block transfers, not comparisons
+        - **2.** Amortized analysis and why LSM write cost is stated amortized
+        - **3.** Logarithms base fan-out; why B-tree height is 3–4 in practice
+        - **4.** Reading a cost formula: fixed cost, per-page cost, per-tuple cost
+    - **B. Computer-architecture background**
+        - **1.** Cache lines, cache misses, and the memory hierarchy as a cost model
+        - **2.** Branch prediction, pipelining, and SIMD
+        - **3.** Memory ordering, atomics, and compare-and-swap
+        - **4.** NUMA and why "memory access" is not one number
+    - **C. Operating-system background**
+        - **1.** Processes, threads, address spaces, and shared memory
+        - **2.** System-call cost, context switches, and scheduling
+        - **3.** The file API: `read`/`write`/`pread`/`fsync`/`mmap`
+        - **4.** Signals, process supervision, and crash semantics
+    - **D. Data structures assumed by the rest of the map**
+        - **1.** Arrays, linked lists, and their I/O behavior
+        - **2.** Balanced binary trees as the B-tree's ancestor
+        - **3.** Hash tables, heaps/priority queues, and skip lists
+        - **4.** Bitmaps and bitwise operations
+    - **E. Probability and estimation background**
+        - **1.** Uniformity, independence, and why estimators assume them
+        - **2.** Sampling error and confidence in statistics collection
+        - **3.** Histograms, quantiles, and heavy-tailed distributions
+        - **4.** Hash-based sketches: Bloom, HyperLogLog, count-min
+    - **F. Working environment for the notes**
+        - **1.** PostgreSQL source layout and where each subsystem lives
+        - **2.** Inspection extensions: `pageinspect`, `pgstattuple`, `pg_buffercache`, `pg_visibility`, `pg_walinspect`, `amcheck`
+        - **3.** `EXPLAIN`, `pg_stat_*` views, and `pg_stat_statements`
+        - **4.** Building a scratch cluster and reproducing each phenomenon
+
+- **XIII. Schema, Types, and Logical Design** — *missing bridge between SQL and storage*
+    - **A. Normalization and denormalization**
+        - **1.** Functional dependencies and normal forms (1NF–BCNF)
+        - **2.** Denormalization as a physical-design decision
+        - **3.** Effect of schema shape on join count and row width
+    - **B. Type system and its physical consequences**
+        - **1.** Numeric, text, temporal, and domain types
+        - **2.** Fixed versus variable width and alignment cost
+        - **3.** `jsonb`, arrays, ranges, and composite types
+        - **4.** Extensible types, custom operators, and operator classes
+    - **C. Constraints, triggers, and server-side code**
+        - **1.** Declarative constraints versus trigger enforcement
+        - **2.** Trigger firing order and per-row/per-statement costs
+        - **3.** Function volatility (immutable/stable/volatile) and planning
+        - **4.** Stored procedures and transaction control inside them
+    - **D. Views and derived relations**
+        - **1.** Views, rule rewriting, and inlining conditions
+        - **2.** Materialized views and refresh strategies
+        - **3.** Incremental view maintenance
+    - **E. Schema evolution**
+        - **1.** Which DDL rewrites the table and which does not
+        - **2.** Lock strength per DDL operation
+        - **3.** Zero-downtime migration patterns
+
+- **XIV. Modern and Specialized Engine Designs** — *CMU 06, 14, 24; contemporary practice*
+    - **A. Main-memory databases**
+        - **1.** Removing the buffer pool and its indirection
+        - **2.** Index and record layout when everything is resident
+        - **3.** Durability for in-memory systems (logging, checkpointing)
+        - **4.** Anti-caching and cold-data eviction
+    - **B. Query compilation**
+        - **1.** Interpretation overhead as the motivation
+        - **2.** Whole-query code generation versus operator fusion
+        - **3.** Compile-time versus execution-time break-even
+    - **C. Modern concurrency-control implementations**
+        - **1.** Silo, TicToc, and Hekaton-style protocols
+        - **2.** Epoch-based reclamation
+        - **3.** Deterministic execution as a concurrency strategy
+    - **D. Storage/compute separation and cloud engines**
+        - **1.** Shared-disk revival over object storage
+        - **2.** Log-as-the-database (Aurora-style) designs
+        - **3.** Serverless scaling and cold-start behavior
+        - **4.** Caching tiers and their consistency
+    - **E. Hardware acceleration**
+        - **1.** SIMD-aware operators
+        - **2.** GPU and FPGA offload
+        - **3.** Persistent memory and NVMe-oriented designs
+        - **4.** RDMA and its effect on distributed cost models
+    - **F. Specialized workloads**
+        - **1.** Time-series storage and retention/rollup
+        - **2.** Streaming and continuous queries
+        - **3.** Full-text search engines
+        - **4.** Graph and vector engines as embedded specializations
+
+- **XV. Security, Multi-Tenancy, and Correctness Assurance** — *operational completeness*
+    - **A. Access control**
+        - **1.** Roles, privileges, ownership, and default privileges
+        - **2.** Row-level security and its planner interaction
+        - **3.** Column-level privileges and views as a security boundary
+    - **B. Authentication and transport**
+        - **1.** Authentication methods and `pg_hba.conf` matching order
+        - **2.** TLS, certificate authentication, and connection poolers
+    - **C. Data protection**
+        - **1.** Encryption at rest versus in transit versus in use
+        - **2.** Key management and its recovery implications
+        - **3.** Auditing and change data capture for compliance
+    - **D. Multi-tenancy and resource control**
+        - **1.** Schema, database, and cluster-level isolation
+        - **2.** Connection limits, statement timeouts, and resource groups
+        - **3.** Noisy-neighbor effects through shared buffers and I/O
+    - **E. Correctness assurance**
+        - **1.** Corruption detection: checksums, `amcheck`, verification tools
+        - **2.** Backup validation and restore drills
+        - **3.** Fault injection and consistency checking (Jepsen-style)
+        - **4.** Regression and upgrade testing
+
+- **XVI. Performance Methodology** — *how to use everything above*
+    - **A. Measurement discipline**
+        - **1.** Baseline, hypothesis, single-variable change
+        - **2.** Latency distributions, tail behavior, and coordinated omission
+        - **3.** Warm versus cold cache measurement
+    - **B. Diagnosing a slow query**
+        - **1.** Plan reading and estimate-versus-actual comparison
+        - **2.** Buffer counts as the real I/O signal
+        - **3.** Spills, misestimation, and missing statistics
+        - **4.** Index candidacy analysis
+    - **C. Diagnosing a slow system**
+        - **1.** Wait-event profiling as the entry point
+        - **2.** Lock contention, deadlocks, and blocking chains
+        - **3.** Checkpoint, WAL, and autovacuum interference
+        - **4.** Connection saturation and pooling
+    - **D. Capacity and configuration**
+        - **1.** Memory budget split: shared buffers, work memory, OS cache
+        - **2.** Parallelism, I/O concurrency, and cost-parameter tuning
+        - **3.** Sizing from workload characteristics rather than defaults
