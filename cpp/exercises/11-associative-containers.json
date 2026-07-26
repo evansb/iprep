@@ -1,0 +1,431 @@
+{
+  "chapter": 11,
+  "mcq": [
+    {
+      "id": "c11-m01",
+      "section": "Associative lookup and what keys must provide",
+      "difficulty": "easy",
+      "prompt": "A `std::set<int>` is given the comparator `[](int a, int b) { return a <= b; }`. Which requirement of a strict weak ordering does that break?",
+      "choices": [
+        "Transitivity, because <= chains differently from <",
+        "Irreflexivity, because comp(a, a) must be false",
+        "Nothing — <= is a valid ascending comparator",
+        "Asymmetry only, and only for equal keys, which the set already deduplicates"
+      ],
+      "answer": 1,
+      "explain": "A strict weak ordering must report false when a key is compared with itself; `a <= b` reports true, so comp(a, a) is true and irreflexivity fails. Asymmetry fails as a consequence, but irreflexivity is the rule violated first and directly. The result is not merely a wrong order: supplying a comparator that does not meet the requirement makes the container's behaviour undefined."
+    },
+    {
+      "id": "c11-m02",
+      "section": "Associative lookup and what keys must provide",
+      "difficulty": "medium",
+      "prompt": "What is the essential contract a `std::hash` specialization must satisfy for an `std::unordered_map` key?",
+      "choices": [
+        "Distinct keys must produce distinct hash values",
+        "The hash must be uniformly distributed over std::size_t",
+        "The hash must be stable across program runs",
+        "Equal keys must produce equal hash values"
+      ],
+      "answer": 3,
+      "explain": "The required direction is a == b implies hash(a) == hash(b); collisions between unequal keys are legal and are resolved by the equality check. Demanding distinct hashes for distinct keys would be a perfect hash, which is impossible in general because the key space is larger than std::size_t. Uniformity is a quality goal — hashing only one field of a composite key is still correct, just slow."
+    },
+    {
+      "id": "c11-m03",
+      "section": "Associative lookup and what keys must provide",
+      "difficulty": "medium",
+      "prompt": "Why does `std::map<std::string, int, std::less<>>` allow `m.find(some_string_view)` while `std::map<std::string, int>` does not?",
+      "choices": [
+        "std::less<> is faster, so the library enables extra overloads for it",
+        "std::less<> carries an is_transparent marker that opts the container into heterogeneous lookup",
+        "std::string_view implicitly converts to std::string only when the comparator is std::less<>",
+        "The default std::less<std::string> rejects string_view because it is not null-terminated"
+      ],
+      "answer": 1,
+      "explain": "The nested `is_transparent` type on std::less<> is the opt-in that exposes the templated find/lower_bound overloads, so the argument is compared directly without being converted to the key type. With the default std::less<std::string>, the call still compiles — it constructs a temporary std::string first, which is exactly the allocation and character copy transparent lookup removes from every find."
+    },
+    {
+      "id": "c11-m04",
+      "section": "Ordered maps and sets in practice",
+      "difficulty": "easy",
+      "prompt": "`counts` is a `std::map<std::string, int>` that does not contain \"GOOG\". What does the expression `counts[\"GOOG\"]` do?",
+      "choices": [
+        "Returns 0 and leaves the map unchanged",
+        "Throws std::out_of_range",
+        "Inserts {\"GOOG\", 0} and returns a reference to that mapped value",
+        "Returns a reference to a value-initialised temporary that is discarded"
+      ],
+      "answer": 2,
+      "explain": "operator[] is lookup and mutation in one: on a miss it inserts the key with a value-initialised mapped value and returns a reference to it, so a read-looking expression grows the map. `at` is the operation that throws, and `contains` or `find` are the operations that only query. operator[] also requires the mapped type to be default-constructible."
+    },
+    {
+      "id": "c11-m05",
+      "section": "Ordered maps and sets in practice",
+      "difficulty": "hard",
+      "prompt": "What is wrong with `for (const std::pair<std::string, int>& entry : counts)` over a `std::map<std::string, int>`?",
+      "choices": [
+        "The element type is std::pair<const std::string, int>, so every iteration constructs a converted temporary",
+        "Nothing; that is the element type of the map",
+        "A const reference cannot bind to a map element",
+        "It fails to compile because the key is const"
+      ],
+      "answer": 0,
+      "explain": "A map element is std::pair<const Key, T>. The loop's declared type differs, so each element is converted into a temporary pair — copying and possibly allocating a std::string per iteration — and the const reference binds to that temporary. It compiles, which is what makes it hard to spot. Write `const auto&`, or spell the exact `const std::pair<const std::string, int>&`."
+    },
+    {
+      "id": "c11-m06",
+      "section": "Lookup, insertion, and node transfer",
+      "difficulty": "medium",
+      "prompt": "A `std::map<std::string, OrderBook>` should gain a book for a symbol only when that symbol is absent, and the OrderBook constructor is expensive. Which operation states that?",
+      "choices": [
+        "try_emplace(key, args...)",
+        "operator[](key)",
+        "insert_or_assign(key, OrderBook{args...})",
+        "insert({key, OrderBook{args...}})"
+      ],
+      "answer": 0,
+      "explain": "try_emplace constructs the mapped object only when insertion actually happens, and it never touches an existing value. insert and emplace with a fully built value require the OrderBook to exist before the call, so the expensive construction happens even on a duplicate; insert_or_assign deliberately overwrites, which is the opposite contract; operator[] default-constructs on a miss and so needs a default constructor it may not have."
+    },
+    {
+      "id": "c11-m07",
+      "section": "Lookup, insertion, and node transfer",
+      "difficulty": "medium",
+      "prompt": "`limits.insert_or_assign(\"XNAS\", Limits{25'000})` is called on a map that already contains \"XNAS\". What does it return and what happens to the stored value?",
+      "choices": [
+        "A pair whose bool is true; the old value is kept",
+        "A pair whose bool is false; the stored value is kept",
+        "An iterator only; the stored value is replaced",
+        "A pair whose bool is false; the stored value is replaced by assignment"
+      ],
+      "answer": 3,
+      "explain": "insert_or_assign returns pair<iterator, bool> where the bool reports whether a new element was inserted, and it assigns over an existing mapped value. False therefore means 'this was an update' — which is precisely how the caller distinguishes a new venue from a limit change. try_emplace is the operation that leaves the old value alone and also returns false."
+    },
+    {
+      "id": "c11-m08",
+      "section": "Lookup, insertion, and node transfer",
+      "difficulty": "hard",
+      "prompt": "Why is `active.extract(\"FB\")` followed by `node.key() = \"META\"` legal when `it->first = \"META\"` on an ordinary map iterator is not?",
+      "choices": [
+        "extract returns a copy of the element, so mutating it is harmless",
+        "node_type stores the key in a mutable member as an optimisation",
+        "The extracted node is outside the tree, so changing its key cannot break the ordering invariant",
+        "Node handles bypass const because they are implementation-defined types"
+      ],
+      "answer": 2,
+      "explain": "Stored keys are const because the tree's ordering depends on them; changing one in place would silently corrupt the search structure. An extracted node still owns the key and mapped object but is no longer part of any tree, so key() is writable, and the subsequent insert re-searches under the new key and restores the invariant. Nothing is copied — the whole point of extract is that the existing allocation is reused."
+    },
+    {
+      "id": "c11-m09",
+      "section": "Lookup, insertion, and node transfer",
+      "difficulty": "medium",
+      "prompt": "`destination.merge(source)` is called on two `std::map`s with several keys in common. What happens to the colliding nodes?",
+      "choices": [
+        "They overwrite the destination's values",
+        "They remain in source; only non-colliding nodes are transferred",
+        "They are erased from source and discarded",
+        "The call throws std::invalid_argument"
+      ],
+      "answer": 1,
+      "explain": "merge attempts a node transfer for every source node; on a unique-key destination a colliding node simply stays where it was, so after the call source holds exactly the keys that could not be inserted. Nodes that do move are relinked rather than copied, which is why merge allocates nothing when the allocators are compatible. Overwriting would be insert_or_assign semantics, which merge does not have."
+    },
+    {
+      "id": "c11-m10",
+      "section": "Latency Lens",
+      "difficulty": "medium",
+      "prompt": "A `std::map` with a million elements is looked up. Why is the real cost usually worse than 'twenty comparisons' suggests?",
+      "choices": [
+        "Red-black rebalancing runs on every lookup",
+        "The comparator is called O(n) times in the worst case",
+        "Each of the roughly twenty steps is a dependent load into a separately allocated node, so cache misses cannot overlap",
+        "The tree must be rebalanced lazily before the search can begin"
+      ],
+      "answer": 2,
+      "explain": "The next node's address is only known after the current node has been loaded, so the misses serialise instead of overlapping — twenty dependent cache misses, not twenty cheap compares. Rebalancing is an insertion and erasure cost, not a lookup cost, and the comparison count really is logarithmic. This dependent-load chain is exactly what a sorted contiguous layout removes."
+    },
+    {
+      "id": "c11-m11",
+      "section": "The tree underneath and what it costs",
+      "difficulty": "medium",
+      "prompt": "Which statement about `std::map` iterator, pointer, and reference stability is correct?",
+      "choices": [
+        "Insertion invalidates all iterators, as with std::vector growth",
+        "Erasure invalidates all iterators after the erased position",
+        "Both insertion and erasure invalidate everything, because the tree rebalances",
+        "Insertion invalidates nothing; erasure invalidates only what denotes the erased element"
+      ],
+      "answer": 3,
+      "explain": "Elements live in their own nodes and never move, so rebalancing only rewires pointers between nodes: an insertion invalidates nothing, and an erasure invalidates only the iterators, pointers and references that denote the destroyed element. That strong stability, plus the absence of any occasional whole-container rehash, is part of what the tree's pointer chasing buys."
+    },
+    {
+      "id": "c11-m12",
+      "section": "Unordered maps and sets: buckets and chains",
+      "difficulty": "easy",
+      "prompt": "A test asserts that iterating a `std::unordered_map<std::string, int>` yields insertion order. What is true of that assertion?",
+      "choices": [
+        "It holds, because chained buckets preserve insertion order within a chain",
+        "It holds until the first erase",
+        "Iteration order is unspecified and may change after a rehash, so the assertion is unfounded",
+        "It holds only when reserve was called first"
+      ],
+      "answer": 2,
+      "explain": "The container places elements by hash value, so traversal order reflects bucket layout, not insertion history, and a rehash relinks every node and can change it again. reserve prevents a rehash during the inserts but still says nothing about the resulting order. Sort a copy, or look up individual keys, if a test needs a deterministic result."
+    },
+    {
+      "id": "c11-m13",
+      "section": "Unordered maps and sets: buckets and chains",
+      "difficulty": "hard",
+      "prompt": "In an interview, what is the strongest explanation for why `std::unordered_map` is often slower than a modern flat hash map?",
+      "choices": [
+        "Its stability guarantees push implementations to separate chaining, costing a node allocation per element and a pointer chase per lookup",
+        "Hashing std::string is inherently expensive",
+        "It uses a worse hash function than Abseil does",
+        "Its worst-case complexity is O(n) rather than O(1)"
+      ],
+      "answer": 0,
+      "explain": "The API is the cause: pointers and references must survive a rehash and an erase must not disturb other elements, and separate chaining with individually allocated nodes is how implementations deliver that. The consequences are an allocation per element, at least one dependent load per lookup, and more on collision. Both containers hash the key and both have O(n) worst cases, so neither of those distinguishes them."
+    },
+    {
+      "id": "c11-m14",
+      "section": "Load factor and rehashing",
+      "difficulty": "medium",
+      "prompt": "An insertion into `std::unordered_map` triggers a rehash. Which of the caller's saved handles remain usable?",
+      "choices": [
+        "All of them — a rehash only reallocates the bucket array",
+        "Pointers and references remain valid; iterators are invalidated",
+        "Iterators remain valid; pointers and references are invalidated",
+        "None of them, exactly as with std::vector growth"
+      ],
+      "answer": 1,
+      "explain": "A rehash allocates a new bucket array and relinks the existing nodes into it. The nodes themselves are not moved, so pointers and references to elements stay valid, while iterators — which are tied to the bucket structure — are not. This is the precise point of difference from std::vector growth, which moves the elements and therefore invalidates all three."
+    },
+    {
+      "id": "c11-m15",
+      "section": "Load factor and rehashing",
+      "difficulty": "medium",
+      "prompt": "What does `values.reserve(1000)` request on a `std::unordered_map`?",
+      "choices": [
+        "Exactly 1000 buckets",
+        "Enough buckets to hold at least 1000 elements without exceeding max_load_factor()",
+        "A permanent ceiling of 1000 elements, after which insertion throws",
+        "A rehash to the next prime above 1000, ignoring the load factor"
+      ],
+      "answer": 1,
+      "explain": "reserve is stated in elements: it prepares capacity for at least n elements under the current maximum load factor, so the resulting bucket count is generally larger than n and is implementation-specific. rehash(b) is the call that speaks in buckets. It is capacity planning rather than a ceiling — inserting beyond the prepared count can still grow the table later, so it must be called before the latency-sensitive phase, not during it."
+    },
+    {
+      "id": "c11-m16",
+      "section": "Open addressing",
+      "difficulty": "medium",
+      "prompt": "Why must an open-addressed table mark an erased slot with a tombstone rather than simply marking it empty?",
+      "choices": [
+        "To let the table report an accurate size() without rescanning",
+        "Because destroying the element in place would leak its allocation",
+        "Because a lookup for a key placed later in the same probe run would stop early at the empty slot",
+        "To keep the load factor stable so growth policy stays predictable"
+      ],
+      "answer": 2,
+      "explain": "A probe sequence terminates at the first empty slot, so a key that was displaced past the erased position would become unreachable if that position were marked empty. A tombstone preserves the search path while recording that the slot holds no element. The cost is that accumulated tombstones lengthen probe runs until a rehash cleans them away."
+    },
+    {
+      "id": "c11-m17",
+      "section": "Open addressing",
+      "difficulty": "medium",
+      "prompt": "Linear probing suffers from primary clustering, yet it frequently beats double hashing in practice. Why?",
+      "choices": [
+        "Consecutive probes usually land in the same or the next cache line, where hardware prefetch helps",
+        "Linear probing needs fewer probes on average",
+        "Double hashing requires the table size to be prime, which wastes memory",
+        "Linear probing does not need tombstones"
+      ],
+      "answer": 0,
+      "explain": "Complexity models count probes; hardware pays for cache lines. A linear run walks adjacent slots, so several probes are often already resident, while double hashing scatters each additional probe to an unrelated address and can turn it into an independent cache miss. Double hashing does have the better probe distribution — it just spends the difference on misses, and both schemes need tombstones."
+    },
+    {
+      "id": "c11-m18",
+      "section": "Robin Hood and the modern flat tables",
+      "difficulty": "medium",
+      "prompt": "What does the Robin Hood displacement rule actually improve?",
+      "choices": [
+        "The average-case complexity, from O(1) amortised to O(1) worst case",
+        "The memory footprint, by removing the need for tombstones",
+        "The hash quality, by rehashing displaced keys with a second function",
+        "The variance of probe lengths, which tightens the latency tail"
+      ],
+      "answer": 3,
+      "explain": "Giving the contested slot to the element that is farther from its home bucket pulls long probe runs toward the mean, so the worst lookups get shorter while the average barely moves. That is a tail-latency win, not a change of complexity class — the label stays average O(1). It also permits an early lookup exit once the current probe distance exceeds the resident element's, because the sought key could not lie further along under the invariant."
+    },
+    {
+      "id": "c11-m19",
+      "section": "Sorted vectors: `flat_map` and `flat_set`",
+      "difficulty": "medium",
+      "prompt": "A symbol table is built by calling `insert` once per row on a `std::flat_map` while reading a reference-data file. What is the defect?",
+      "choices": [
+        "flat_map has no insert; only bulk construction is supported",
+        "Each insertion shifts a tail of elements, so building n entries this way is O(n²)",
+        "Insertion invalidates the comparator, so later lookups are undefined",
+        "Nothing — flat_map insertion is O(log n) like a tree's"
+      ],
+      "answer": 1,
+      "explain": "Lookup is a binary search in O(log n), but insertion and erasure have to move the elements after the insertion point in contiguous storage, so each is O(n) and the loop degrades to quadratic. Bulk-construct from the rows, or range-insert once, which sorts and merges in one pass. The ideal flat_map workload is exactly this shape: built once at startup, then queried without intraday mutation."
+    },
+    {
+      "id": "c11-m20",
+      "section": "Choosing ordered versus hash-based containers",
+      "difficulty": "medium",
+      "prompt": "A risk service needs all symbols whose key falls in a given range, returned in sorted order, from data that is rebuilt nightly and never mutated during the day. Which container fits best?",
+      "choices": [
+        "std::unordered_map, for its average O(1) lookup",
+        "A flat hash map such as absl::flat_hash_map, for its dense storage",
+        "std::flat_map, whose sorted contiguous storage answers range queries by binary search",
+        "std::multimap, because range queries need equal_range"
+      ],
+      "answer": 2,
+      "explain": "Range queries require sorted iteration, which immediately rules out both hash tables — a hash map has no order to walk. Between the two ordered options, the read-mostly, bulk-built profile is exactly what flat_map is for: it gives the tree's O(log n) comparisons over contiguous keys, without the tree's dependent node loads, and its O(n) insertion never happens on this workload. multimap is for duplicate keys, which is a different requirement."
+    }
+  ],
+  "reading": [
+    {
+      "id": "c11-r01",
+      "section": "Ordered maps and sets in practice",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n#include <map>\n#include <string>\n\nint main() {\n    std::map<std::string, int> counts{{\"AAPL\", 4}, {\"IBM\", 2}};\n    const auto before = counts.size();\n\n    if (counts[\"GOOG\"] != 0) {\n        std::cout << \"traded\\n\";\n    }\n\n    std::cout << before << ' ' << counts.size() << ' '\n              << counts.count(\"GOOG\") << '\\n';\n}",
+      "kind": "value",
+      "accept": ["2 3 1"],
+      "explain": "The comparison looks like a pure query, but operator[] inserts {\"GOOG\", 0} on the miss and returns a reference to that value, so the map grows from two entries to three and now genuinely contains the key. Had the test been written with `contains` or `find`, the size would still be 2. This is the standard way a map silently accumulates keys that were only ever asked about."
+    },
+    {
+      "id": "c11-r02",
+      "section": "Lookup, insertion, and node transfer",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n#include <map>\n#include <string>\n\nint main() {\n    std::map<std::string, int> limits{{\"XNAS\", 10}};\n\n    auto [kept, inserted_a] = limits.try_emplace(\"XNAS\", 99);\n    std::cout << std::boolalpha << inserted_a << ' ' << kept->second << ' ';\n\n    auto [updated, inserted_b] = limits.insert_or_assign(\"XNAS\", 77);\n    std::cout << inserted_b << ' ' << updated->second << '\\n';\n}",
+      "kind": "value",
+      "accept": ["false 10 false 77"],
+      "explain": "Both calls find the key already present, so both report false. They then diverge: try_emplace leaves the existing mapped value untouched at 10 and never constructs the 99, while insert_or_assign exists to overwrite and assigns 77 in place. Reading the Boolean alone would not distinguish them — the contract difference is entirely in what happens to the stored value. Note that the first print has to happen before the second call: both iterators denote the same element, so `kept->second` would read 77 as well if it were evaluated afterwards."
+    },
+    {
+      "id": "c11-r03",
+      "section": "Associative lookup and what keys must provide",
+      "prompt": "What does this print?",
+      "code": "#include <functional>\n#include <iostream>\n#include <map>\n#include <string>\n#include <string_view>\n\nint main() {\n    std::map<std::string, int, std::less<>> venues{\n        {\"IBM\", 1}, {\"MSFT\", 2}, {\"AAPL\", 3}};\n\n    auto found = venues.find(std::string_view{\"MSFT\"});\n    auto bound = venues.lower_bound(std::string_view{\"B\"});\n\n    std::cout << found->second << ' ' << bound->first << '\\n';\n}",
+      "kind": "value",
+      "accept": ["2 IBM"],
+      "explain": "std::less<> is transparent, so both calls compare the string_view against the keys directly and no temporary std::string is built. The map iterates in comparator order — AAPL, IBM, MSFT — and lower_bound returns the first key not less than \"B\", which is IBM. Note that lower_bound answers with a position rather than a match: \"B\" is not in the map at all."
+    },
+    {
+      "id": "c11-r04",
+      "section": "Ordered maps and sets in practice",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <iostream>\n#include <map>\n#include <string>\n\nint main() {\n    std::map<std::string, int> counts{{\"AAPL\", 4}, {\"IBM\", 2}};\n\n    auto it = counts.begin();\n    it->first = \"MSFT\";\n\n    std::cout << it->first << '\\n';\n}",
+      "kind": "no-compile",
+      "explain": "A map element has type std::pair<const Key, T>, so `first` is a const std::string and has no viable assignment operator. The key is const precisely because changing it in place would leave the element in the wrong position in the tree. When a key genuinely must change, extract the node, assign through node.key(), and insert it back so the container re-searches under the new key."
+    },
+    {
+      "id": "c11-r05",
+      "section": "The tree underneath and what it costs",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <iostream>\n#include <map>\n#include <string>\n\nint main() {\n    std::map<std::string, int> counts{{\"AAPL\", 4}, {\"IBM\", 2}};\n\n    auto it = counts.find(\"AAPL\");\n    counts.erase(it);\n\n    std::cout << it->second << '\\n';\n}",
+      "kind": "ub",
+      "explain": "A map insertion invalidates nothing, which makes it easy to assume erasure is equally forgiving. It is not: erase invalidates exactly the iterators, pointers and references that denote the erased element, and the node holding that pair has been destroyed and deallocated. Dereferencing `it` afterwards reads freed storage — ASan reports a heap-use-after-free. Capture erase's return value if the next element is what you wanted."
+    },
+    {
+      "id": "c11-r06",
+      "section": "Unordered maps and sets: buckets and chains",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n#include <string>\n#include <unordered_map>\n\nint main() {\n    std::unordered_map<std::string, int> counts;\n    counts.reserve(8);\n\n    counts.emplace(\"AAPL\", 4);\n    counts.emplace(\"IBM\", 2);\n    counts.emplace(\"AAPL\", 9);\n\n    std::cout << counts.size() << ' ' << counts.at(\"AAPL\") << ' '\n              << counts.count(\"MSFT\") << '\\n';\n}",
+      "kind": "value",
+      "accept": ["2 4 0"],
+      "explain": "emplace on a unique-key container leaves an existing element alone, so the third call is a no-op and AAPL keeps its original 4 — the 9 is discarded, not assigned. size is therefore 2 and count for an absent key is 0. Note what this snippet deliberately does not do: printing the container by iteration, because the traversal order of an unordered container is unspecified and would make the expected output unpredictable."
+    }
+  ],
+  "writing": [
+    {
+      "id": "c11-w01",
+      "section": "Associative lookup and what keys must provide",
+      "minutes": 10,
+      "prompt": "Define a `Symbol` struct with a `std::uint16_t exchange` and a `std::uint32_t id` that can be used as an `std::unordered_map` key. Supply defaulted equality and a `std::hash<Symbol>` specialization that combines both fields, then declare an `std::unordered_map<Symbol, double>` and insert one entry.",
+      "checklist": [
+        "operator== is provided (defaulted is fine) — the container needs equality as well as a hash",
+        "std::hash<Symbol> is specialized and its operator() is const and noexcept",
+        "The hash combines both fields rather than returning only one of them",
+        "Equal Symbols provably produce equal hashes — the combination reads only the members",
+        "The map is declared with no explicit third argument, relying on the std::hash specialization"
+      ],
+      "solution": "#include <cstdint>\n#include <functional>\n#include <unordered_map>\n\nstruct Symbol {\n    std::uint16_t exchange;\n    std::uint32_t id;\n\n    bool operator==(const Symbol&) const = default;\n};\n\ntemplate <>\nstruct std::hash<Symbol> {\n    std::size_t operator()(const Symbol& symbol) const noexcept {\n        const auto h1 = std::hash<std::uint16_t>{}(symbol.exchange);\n        const auto h2 = std::hash<std::uint32_t>{}(symbol.id);\n        return h1 * 0x9e3779b1U ^ h2;\n    }\n};\n\nvoid use_symbol_map() {\n    std::unordered_map<Symbol, double> prices;\n    prices.emplace(Symbol{7, 42}, 101.25);\n}",
+      "notes": "Hashing only `exchange` would satisfy the contract — equal keys would still hash equally — but every symbol on one venue would land in the same bucket and lookup would degrade to a linear chain walk. Hash quality is a latency control, not a correctness one."
+    },
+    {
+      "id": "c11-w02",
+      "section": "Lookup, insertion, and node transfer",
+      "minutes": 10,
+      "prompt": "Write three small functions over a `std::map<std::string, int, std::less<>>& counts`: `ensure(key)` that inserts a zero only when the key is absent and never disturbs an existing count; `overwrite(key, value)` that replaces an existing count or inserts a new one and reports which happened; and `bump(key)` that increments an existing count and does nothing at all when the key is missing.",
+      "checklist": [
+        "ensure uses try_emplace (or insert), not operator[]",
+        "overwrite uses insert_or_assign and returns or reports its bool",
+        "bump uses find and compares against end() before touching the value",
+        "bump does not use operator[], which would insert on a miss",
+        "The map is taken by non-const reference"
+      ],
+      "solution": "#include <functional>\n#include <map>\n#include <string>\n#include <string_view>\n\nusing Counts = std::map<std::string, int, std::less<>>;\n\nvoid ensure(Counts& counts, std::string_view key) {\n    counts.try_emplace(std::string{key}, 0);\n}\n\nbool overwrite(Counts& counts, std::string_view key, int value) {\n    auto [position, inserted] =\n        counts.insert_or_assign(std::string{key}, value);\n    (void)position;\n    return inserted;  // true means a new key, false means an update\n}\n\nvoid bump(Counts& counts, std::string_view key) {\n    auto found = counts.find(key);  // transparent: no temporary string\n    if (found != counts.end()) {\n        ++found->second;\n    }\n}",
+      "notes": "Only `bump` gets to use the transparent lookup, because only it never inserts: the insertion operations must materialise a real std::string key to store. That asymmetry is the usual reason a hot read path and a cold write path end up with different key handling."
+    },
+    {
+      "id": "c11-w03",
+      "section": "Ordered maps and sets in practice",
+      "minutes": 8,
+      "prompt": "Write `print_range(const std::map<std::string, int>& counts, const std::string& low, const std::string& high)` that prints every key-value pair whose key lies in the half-open interval [low, high), in sorted order, using the map's own boundary operations rather than scanning the whole container.",
+      "checklist": [
+        "Uses lower_bound for the start of the range",
+        "Uses lower_bound (not upper_bound) for the exclusive end, giving a half-open interval",
+        "Iterates from the first boundary to the second with a plain iterator loop or range-for over the subrange",
+        "Binds elements with const auto& or the exact const std::pair<const std::string, int>& type",
+        "Prints nothing when the interval is empty, with no special case needed"
+      ],
+      "solution": "#include <iostream>\n#include <map>\n#include <string>\n\nvoid print_range(const std::map<std::string, int>& counts,\n                 const std::string& low,\n                 const std::string& high) {\n    const auto first = counts.lower_bound(low);   // first key >= low\n    const auto last = counts.lower_bound(high);   // first key >= high\n\n    for (auto it = first; it != last; ++it) {\n        std::cout << it->first << \": \" << it->second << '\\n';\n    }\n}",
+      "notes": "The half-open pair of boundaries needs no emptiness test: when nothing falls in the interval the two iterators are equal and the loop simply does not run. A hash container cannot answer this question at all — there is no order to walk — which is the clearest reason to keep a tree or a flat_map when range queries exist."
+    },
+    {
+      "id": "c11-w04",
+      "section": "Load factor and rehashing",
+      "minutes": 8,
+      "prompt": "Write a function that fills a `std::unordered_map<int, int>` with `count` entries with no rehash occurring during the fill, and verifies that claim by comparing the bucket count before and after. Add a comment explaining why saving an iterator across the loop would be wrong even so.",
+      "checklist": [
+        "Calls reserve(count) before the insertion loop",
+        "Captures bucket_count() after reserve and compares it after the loop",
+        "Comment states that a rehash invalidates iterators but not pointers or references",
+        "reserve is described in elements, not buckets",
+        "No iterator is retained across an insertion"
+      ],
+      "solution": "#include <iostream>\n#include <unordered_map>\n\nbool fill_without_rehash(std::unordered_map<int, int>& values,\n                         int count) {\n    values.reserve(static_cast<std::size_t>(count));  // elements, not buckets\n    const auto prepared = values.bucket_count();\n\n    for (int key = 0; key < count; ++key) {\n        values.emplace(key, key);\n    }\n\n    // Even here, holding an iterator across the loop would be a bad habit:\n    // any insertion that exceeded max_load_factor() would rehash, and a\n    // rehash invalidates every iterator (though pointers and references to\n    // elements survive, because the nodes are relinked rather than moved).\n    return values.bucket_count() == prepared;\n}",
+      "notes": "reserve(n) prepares for at least n elements under the current maximum load factor, so the bucket count it chooses is implementation-specific and generally larger than n. Never infer a safe insertion budget from one library's observed growth sequence."
+    },
+    {
+      "id": "c11-w05",
+      "section": "Sorted vectors: `flat_map` and `flat_set`",
+      "minutes": 8,
+      "prompt": "Given a `std::vector<std::pair<std::uint32_t, int>>` of symbol-id and position-limit rows loaded from reference data, build a `std::flat_map<std::uint32_t, int>` in one bulk step and write a lookup returning `std::optional<int>` for a symbol id. Comment on the complexity of the build and of the lookup.",
+      "checklist": [
+        "Constructs the flat_map from the row range in one call, not by looping insert",
+        "Comment gives the build as O(n log n) and the lookup as O(log n)",
+        "Lookup uses find (or contains/at), and checks the result against end() before dereferencing",
+        "Returns std::nullopt for an absent id",
+        "Includes <flat_map> and <optional>"
+      ],
+      "solution": "#include <cstdint>\n#include <flat_map>\n#include <optional>\n#include <utility>\n#include <vector>\n\nusing Rows = std::vector<std::pair<std::uint32_t, int>>;\nusing Limits = std::flat_map<std::uint32_t, int>;\n\nLimits build_limits(const Rows& rows) {\n    // One bulk construction: O(n log n) sorting, one pair of allocations.\n    // Inserting the rows one at a time would shift a tail each time, O(n^2).\n    return Limits(rows.begin(), rows.end());\n}\n\nstd::optional<int> limit_for(const Limits& limits, std::uint32_t id) {\n    // O(log n) binary search over contiguous keys: no dependent node loads.\n    const auto found = limits.find(id);\n    if (found == limits.end()) {\n        return std::nullopt;\n    }\n    return found->second;\n}",
+      "notes": "std::flat_map is standard C++23 but shipped in different library releases at different times, so a compiler that accepts -std=c++23 may still lack <flat_map>. Note also that it stores keys and values in two separate contiguous containers — a structure-of-arrays layout — so the key search touches only the key array."
+    },
+    {
+      "id": "c11-w06",
+      "section": "Lookup, insertion, and node transfer",
+      "minutes": 10,
+      "prompt": "Write `rename(std::map<std::string, int>& books, const std::string& from, const std::string& to)` that changes a key without destroying and rebuilding the element. It must return false when `from` is absent and when `to` already exists, and in the latter case must not lose the element.",
+      "checklist": [
+        "Uses extract to obtain a node handle",
+        "Checks node.empty() to detect the missing source key",
+        "Assigns through node.key() while the node is outside the tree",
+        "Inserts the node back and checks the returned .inserted flag",
+        "On a failed insertion, reinstates the element (or otherwise does not drop it) rather than letting the node handle die"
+      ],
+      "solution": "#include <map>\n#include <string>\n#include <utility>\n\nbool rename(std::map<std::string, int>& books,\n            const std::string& from,\n            const std::string& to) {\n    auto node = books.extract(from);\n    if (node.empty()) {\n        return false;  // nothing by that name\n    }\n\n    node.key() = to;  // legal: the node is outside the tree\n    auto result = books.insert(std::move(node));\n\n    if (!result.inserted) {\n        // result.node still owns the element; put it back under its old key\n        // so the rename fails without losing data.\n        result.node.key() = from;\n        books.insert(std::move(result.node));\n        return false;\n    }\n    return true;\n}",
+      "notes": "The mapped object is never copied, moved or reconstructed — the same allocation leaves the tree and rejoins it. If the failed-insert branch simply returned, the node handle would be destroyed at the end of the function and the element would be silently lost, which is why insert's result hands the node back to you."
+    }
+  ]
+}

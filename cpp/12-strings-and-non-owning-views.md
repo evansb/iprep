@@ -24,7 +24,7 @@ String literals are C strings: `"IBM"` has type `const char[4]`, including its t
 
 **Pitfall.** Passing `char raw[3]{'F', 'I', 'X'};` to `std::strlen` or another C-string API causes undefined behavior: the function reads past the array while searching for a zero. The same lost-size interface made unchecked functions such as `std::strcpy` a recurring source of buffer overflow.
 
-## std::string: vector<char> with benefits
+## std::string: `vector<char>` with benefits
 
 `std::string` is an owning, contiguous, resizable character sequence. Apply the `std::vector` model from Chapter 10: it has a size and capacity, grows geometrically, offers unchecked `operator[]` and checked `at`, and invalidates pointers and iterators when it reallocates.
 

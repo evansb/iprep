@@ -1,0 +1,431 @@
+{
+  "chapter": 15,
+  "mcq": [
+    {
+      "id": "c15-m01",
+      "section": "A Map of I/O",
+      "difficulty": "easy",
+      "prompt": "The chapter describes three independent axes of an I/O design. Which set is it?",
+      "choices": [
+        "Synchronous / asynchronous, blocking / non-blocking, local / remote",
+        "Representation (text or binary), transfer (formatted or raw), buffering (buffered or unbuffered)",
+        "Stream / stdio, locale / locale-free, checked / unchecked",
+        "Latency, throughput, durability"
+      ],
+      "answer": 1,
+      "explain": "Representation, transfer and buffering are independent choices, and each has its own cost driver: conversion work, per-value formatting, and the number of write system calls. The synchronous/blocking/remote triple describes concurrency and transport, which are real concerns but orthogonal to how bytes are produced. Deferred-format logging is what you get when you pick binary, raw and buffered on all three axes at once."
+    },
+    {
+      "id": "c15-m02",
+      "section": "A Map of I/O",
+      "difficulty": "medium",
+      "prompt": "What does choosing a binary representation over text actually buy, and what does it cost?",
+      "choices": [
+        "It is always smaller, and costs nothing but readability",
+        "It removes the need for buffering, at the cost of portability",
+        "It guarantees a fixed record size, at the cost of extensibility",
+        "It removes per-value conversion work, at the cost of schema, versioning and decoder obligations"
+      ],
+      "answer": 3,
+      "explain": "Text pays a conversion per value at write time; binary defers or eliminates that work but pushes an encoding contract onto both ends — someone must own the schema, its versions, and a decoder. Binary is not automatically smaller: a padded struct can easily exceed the text form of the same fields. Buffering is a separate axis and applies to both representations."
+    },
+    {
+      "id": "c15-m03",
+      "section": "Streams, Buffers, and the Price of Iostreams",
+      "difficulty": "easy",
+      "prompt": "A helper writes `std::cout << std::hex << order_id;` and returns. What happens to output written later by unrelated code?",
+      "choices": [
+        "Nothing; the manipulator applies only to the insertion it precedes",
+        "The next insertion is hexadecimal, and then the stream reverts to decimal",
+        "Every later integer insertion on std::cout is hexadecimal until something resets the base",
+        "The behaviour depends on whether the stream is tied to std::cin"
+      ],
+      "answer": 2,
+      "explain": "Base, width, precision, fill and alignment are sticky stream state, not per-insertion arguments, and std::cout is process-wide. The only per-insertion manipulator is width, which is consumed by the next formatted output; everything else persists. Saving and restoring stream.flags() contains the damage, but a self-contained std::format call avoids the shared state entirely."
+    },
+    {
+      "id": "c15-m04",
+      "section": "Streams, Buffers, and the Price of Iostreams",
+      "difficulty": "medium",
+      "prompt": "A loop writes 100 lines with `std::cout << row << std::endl;`. What is the cost relative to using '\\n'?",
+      "choices": [
+        "std::endl also flushes, which can turn one batched write into a write system call per line",
+        "Identical; std::endl is spelled differently but compiles to the same thing",
+        "std::endl allocates a temporary string for the newline",
+        "std::endl is cheaper, because it lets the stream reuse its buffer"
+      ],
+      "answer": 0,
+      "explain": "std::endl inserts '\\n' and then calls flush, which asks the library to push its buffer toward the operating system — defeating exactly the batching the stream buffer exists to provide. Writing '\\n' lets the buffer fill and drain in whole chunks. The extra work is the flush, not any allocation."
+    },
+    {
+      "id": "c15-m05",
+      "section": "Streams, Buffers, and the Price of Iostreams",
+      "difficulty": "medium",
+      "prompt": "Which classic stream should carry batched diagnostic output, and why?",
+      "choices": [
+        "std::cerr, because it is the error stream",
+        "std::cout, because it shares the buffer with normal output",
+        "std::clog, because std::cerr has unitbuf set and flushes on every insertion",
+        "std::clog, because it writes to a different file descriptor than std::cerr"
+      ],
+      "answer": 2,
+      "explain": "std::cerr has the unitbuf flag set, so an ordinary insertion flushes eagerly — that is deliberate for a message you must see before a crash, and wasteful for a stream of diagnostics. std::clog is buffered and is the classic choice for batched logging. Both go to the same standard-error destination; the difference is flushing policy, not the descriptor."
+    },
+    {
+      "id": "c15-m06",
+      "section": "File and String Streams",
+      "difficulty": "easy",
+      "prompt": "`std::ifstream input{\"ticks.csv\"};` and the file does not exist. What happens by default?",
+      "choices": [
+        "The constructor throws std::ios_base::failure",
+        "The constructor succeeds and the stream tests false, so you must check it",
+        "The constructor throws std::filesystem::filesystem_error",
+        "The program aborts"
+      ],
+      "answer": 1,
+      "explain": "Stream constructors do not throw on an ordinary open failure unless an exception mask was installed with .exceptions(); the failure is recorded in the state bits, so `if (!input) return {};` is mandatory. Skipping the check is how a missing file silently becomes an empty result set. Destruction still closes the handle correctly either way, since the stream owns it through RAII."
+    },
+    {
+      "id": "c15-m07",
+      "section": "File and String Streams",
+      "difficulty": "medium",
+      "prompt": "Why does the chapter's CSV reader use std::getline for transport and std::from_chars for conversion, rather than `input >> value`?",
+      "choices": [
+        "Because operator>> cannot read doubles",
+        "Because getline is the only way to detect end of file",
+        "Because from_chars can read directly from a file descriptor",
+        "Because from_chars is locale-free and keeps parsing separate from transport, while stream extraction drags in locale and sticky formatting state"
+      ],
+      "answer": 3,
+      "explain": "Stream extraction consults the stream's locale for the decimal point and grouping, and it inherits whatever formatting flags a previous caller left behind — both are hazards for machine data. from_chars takes a character range, is locale-independent, and reports how far it got. Stream extraction can certainly read doubles; the objection is what it drags along while doing so."
+    },
+    {
+      "id": "c15-m08",
+      "section": "C Stdio and the Two-Worlds Problem",
+      "difficulty": "medium",
+      "prompt": "`std::printf(\"%d\\n\", some_long)` where some_long is a `long`. What is the status of this call?",
+      "choices": [
+        "It is undefined behaviour; the variadic call carries no static argument types",
+        "It prints the truncated low 32 bits, which is well-defined",
+        "It is ill-formed, since the compiler checks literal format strings",
+        "It is fine on LP64 systems where long and int have the same representation"
+      ],
+      "answer": 0,
+      "explain": "The format string is data, not a type declaration: the variadic call passes a long and %d instructs printf to read an int, which is undefined behaviour rather than a defined truncation. Compilers do warn when the format string is a literal, but a warning is a diagnostic quality-of-implementation feature, not the language making the call well-formed. On LP64 long is 8 bytes and int is 4, so they do not share a representation either."
+    },
+    {
+      "id": "c15-m09",
+      "section": "C Stdio and the Two-Worlds Problem",
+      "difficulty": "medium",
+      "prompt": "After calling `std::ios::sync_with_stdio(false)`, what must you avoid?",
+      "choices": [
+        "Using std::cin at all, since untied input can no longer block",
+        "Mixing std::printf and std::cout on the same destination and expecting program-order output",
+        "Using std::format, which relies on the synchronised buffers",
+        "Calling std::cout.flush(), which is now undefined"
+      ],
+      "answer": 1,
+      "explain": "Synchronisation is what makes the C++ and C sides share one buffering view of a destination; removing it gives each an independent buffer, so their flushes can interleave in an order unrelated to the order the calls were made. std::cin still works — the separate `std::cin.tie(nullptr)` call only removes the implicit flush of cout before each read. flush and std::format are unaffected."
+    },
+    {
+      "id": "c15-m10",
+      "section": "`std::format` and `std::print`: The Modern Default",
+      "difficulty": "easy",
+      "prompt": "What is the difference between std::format and std::println?",
+      "choices": [
+        "std::format is locale-aware; std::println is not",
+        "std::format is a C++23 addition; std::println has been available since C++17",
+        "std::println can format user-defined types; std::format cannot",
+        "std::format returns a std::string; std::println writes formatted output plus a newline to stdout or a FILE*"
+      ],
+      "answer": 3,
+      "explain": "std::format (C++20) produces an owning string the caller then does something with; std::print and std::println (C++23) send the formatted characters straight to a destination and skip the intermediate string. Both are locale-independent by default and both use the same std::formatter machinery, so a user-defined formatter works with either."
+    },
+    {
+      "id": "c15-m11",
+      "section": "`std::format` and `std::print`: The Modern Default",
+      "difficulty": "medium",
+      "prompt": "`std::format(\"{:d}\", \"text\")` — what happens?",
+      "choices": [
+        "It prints the address of the string literal in decimal",
+        "It throws std::format_error at runtime",
+        "It is ill-formed: a literal format string is checked at compile time against its argument types",
+        "It formats the string and ignores the unusable 'd' specifier"
+      ],
+      "answer": 2,
+      "explain": "A literal format string is a consteval-checked object, so the mismatch between the integer presentation type 'd' and a string argument is reported at compile time — the whole reason to prefer format over printf. std::format_error is the runtime failure mode, and it applies to format strings supplied at runtime, which must go through std::vformat and cannot get the compile-time check."
+    },
+    {
+      "id": "c15-m12",
+      "section": "`std::format` and `std::print`: The Modern Default",
+      "difficulty": "medium",
+      "prompt": "What does `std::format(\"{:*>8.2f}\", 201.25)` produce?",
+      "choices": [
+        "\"201.25**\"",
+        "\"**201.25\"",
+        "\"201.25\" followed by two spaces",
+        "\"*201.250*\""
+      ],
+      "answer": 1,
+      "explain": "Read the spec left to right: `*` is the fill character, `>` means right-align, `8` is the field width, `.2` is the precision and `f` is fixed notation. 201.25 renders as six characters, so two fill characters pad it on the left. Getting `<` and `>` backwards is the usual slip — `>` pushes the text to the right, so the padding lands on the left."
+    },
+    {
+      "id": "c15-m13",
+      "section": "`std::format` and `std::print`: The Modern Default",
+      "difficulty": "hard",
+      "prompt": "A format string is read from a configuration file at startup. Which statement is correct?",
+      "choices": [
+        "Pass it to std::format directly; the check is only skipped for non-literals",
+        "Runtime format strings are rejected outright and must be converted to literals",
+        "std::format silently ignores replacement fields it cannot validate",
+        "It cannot receive the compile-time check; use std::vformat with std::make_format_args, and be ready for std::format_error"
+      ],
+      "answer": 3,
+      "explain": "std::format's parameter is a consteval-constructed format string, so a runtime std::string does not satisfy it — the code will not compile rather than silently skipping the check. std::vformat takes an unchecked format string with type-erased arguments and throws std::format_error when parsing fails, which becomes an ordinary error path you must handle. C++26's std::runtime_format is a convenience spelling for the same thing."
+    },
+    {
+      "id": "c15-m14",
+      "section": "Formatting into caller-owned storage",
+      "difficulty": "medium",
+      "prompt": "`std::format_to_n(begin, 8, \"price={:.2f}\", 101.25)` — what do the two members of the returned result mean?",
+      "choices": [
+        "`out` is the number of characters written and `size` is the buffer capacity",
+        "Both report 8, since that is the limit",
+        "`size` is the number of characters the complete output required (12 here); `out` marks the end of what was actually written",
+        "`size` is the number of characters written and `out` points at the null terminator"
+      ],
+      "answer": 2,
+      "explain": "format_to_n writes at most n characters but still reports the full size the output would have needed, which is what lets the caller detect truncation with `result.size > capacity`. Reading `size` as the written count is the dangerous misreading: it turns an overflow into a silently accepted partial record. No terminator is written, so the caller must carry the length itself."
+    },
+    {
+      "id": "c15-m15",
+      "section": "Formatting into caller-owned storage",
+      "difficulty": "hard",
+      "prompt": "When is `std::formatted_size(fmt, args...)` followed by `std::format_to` the right shape, and when is it not?",
+      "choices": [
+        "Always, since it produces exactly one allocation",
+        "Never; it is strictly slower than std::format",
+        "It suits a cold path that wants one exactly sized allocation, but not a hot path, because it processes the format twice",
+        "It suits a hot path, because sizing is free at compile time"
+      ],
+      "answer": 2,
+      "explain": "formatted_size performs the whole format pass just to count characters, so the write pass repeats that work — one exact allocation bought with double the conversion cost. That trade makes sense on a cold path building a large message; on a hot path with a known upper bound, format_to_n into fixed caller-owned storage does the job in one pass. The sizing is a runtime computation, not a compile-time one."
+    },
+    {
+      "id": "c15-m16",
+      "section": "Locales: The Hidden Tax",
+      "difficulty": "easy",
+      "prompt": "A service formats prices with `stream << value` and is deployed to a host whose locale renders 42.5 as \"42,5\". A downstream parser breaks. What is the correct diagnosis?",
+      "choices": [
+        "Classic-stream numeric output is locale-dependent, so machine-consumed output should use locale-free conversion such as std::format or std::to_chars",
+        "The downstream parser is wrong to assume a decimal point",
+        "The host's locale data is corrupt",
+        "The stream needed a wider precision setting"
+      ],
+      "answer": 0,
+      "explain": "Both programs were individually obeying their locale settings; the defect is that a machine-to-machine interface was routed through a human-presentation facility at all. std::format is locale-independent by default, and to_chars/from_chars are locale-free, which makes the bytes identical on every host. Localisation should be an explicit opt-in at the point where a human reads the output."
+    },
+    {
+      "id": "c15-m17",
+      "section": "Locales: The Hidden Tax",
+      "difficulty": "medium",
+      "prompt": "Under the default \"C\" locale, what does classic-stream numeric output still pay for?",
+      "choices": [
+        "Nothing; the \"C\" locale short-circuits the locale machinery entirely",
+        "Only a single branch checking whether the locale is \"C\"",
+        "A full string allocation per formatted value",
+        "Facet lookup and virtual conversion calls, which remain part of the path"
+      ],
+      "answer": 3,
+      "explain": "The stream still consults its imbued locale's num_put facet through a virtual call and applies grouping and decimal-point rules — the \"C\" locale makes those rules trivial, not absent. That residual machinery is one of the reasons a std::format call is cheaper for the same output. Constructing std::locale{\"\"} is a separate hazard: it reads the environment and can throw std::runtime_error for a locale the host does not have installed."
+    },
+    {
+      "id": "c15-m18",
+      "section": "Stream Errors and Partial I/O",
+      "difficulty": "medium",
+      "prompt": "Why is `while (!input.eof()) { input >> value; use(value); }` wrong?",
+      "choices": [
+        "eofbit is only set for file streams, never for string streams",
+        "End of file is discovered by attempting a read, so the last iteration processes a value the extraction never produced",
+        "eof() clears the failbit as a side effect",
+        "It is correct, but slower than the extraction-in-condition form"
+      ],
+      "answer": 1,
+      "explain": "eofbit is set as a consequence of a read that ran out of input, so the flag is still clear when the final, failing extraction is attempted — the loop body then runs once more on a value the stream did not write. `while (input >> value)` tests the extraction itself and stops on either malformed input or exhaustion. eof() has no side effects; it only reports the bit."
+    },
+    {
+      "id": "c15-m19",
+      "section": "Stream Errors and Partial I/O",
+      "difficulty": "medium",
+      "prompt": "A stream's failbit is set by a malformed token. What must happen before extraction can resume?",
+      "choices": [
+        "Nothing; the next extraction retries automatically",
+        "The stream must be closed and reopened",
+        "Call .clear() to reset the state, then consume the offending characters",
+        "Call .exceptions(std::ios::failbit) so the failure surfaces as an exception"
+      ],
+      "answer": 2,
+      "explain": "Once a failure bit is set, later operations do nothing until the state is reset — and clearing alone is not enough, because the offending characters are still sitting in the stream and will fail the same way. The chapter's recovery reads the bad token into a std::string to consume it. Installing an exception mask changes how the failure is reported, not how the input is resynchronised."
+    },
+    {
+      "id": "c15-m20",
+      "section": "Asynchronous Logging: Formatting Off the Hot Path",
+      "difficulty": "medium",
+      "prompt": "In the chapter's deferred-format design, what does the hot-path `log_event` actually do?",
+      "choices": [
+        "Reads a steady_clock timestamp and stores fixed-size fields plus a site id into an already-allocated slot",
+        "Formats a short message and appends it to a preallocated string",
+        "Enqueues a std::string built with std::format so the consumer only writes",
+        "Writes the record with fwrite to a buffered FILE* so no system call happens"
+      ],
+      "answer": 0,
+      "explain": "The producer's entire job is one clock read and a few fixed-size stores into storage the constructor already allocated — no formatting, no allocation, no output system call. The consumer maps the site id to a format schema and pays the conversion cost off the critical path. Storing a formatted or arbitrary-length string in the event is the pitfall the design exists to avoid: it reintroduces allocation and variable-size copying on the hot thread."
+    }
+  ],
+  "reading": [
+    {
+      "id": "c15-r01",
+      "section": "Streams, Buffers, and the Price of Iostreams",
+      "prompt": "What does this print?",
+      "code": "#include <iomanip>\n#include <iostream>\n\nint main() {\n    std::cout << std::hex << 255 << '\\n';\n    std::cout << 42 << '\\n';\n    std::cout << std::dec << 42 << '\\n';\n}",
+      "kind": "value",
+      "accept": ["ff 2a 42", "ff\n2a\n42"],
+      "explain": "std::hex sets sticky state on the stream, so 255 prints as ff and the *next* insertion is still hexadecimal: 42 becomes 2a. Only the explicit std::dec restores decimal. The second line is the bug this pattern causes in real code, where the helper that set hex and the code that printed 42 are in different files."
+    },
+    {
+      "id": "c15-r02",
+      "section": "`std::format` and `std::print`: The Modern Default",
+      "prompt": "What does this print?",
+      "code": "#include <format>\n#include <iostream>\n\nint main() {\n    std::cout << std::format(\"{:*>8.2f}|{:.<5}|{:x}\", 201.25, 50, 255)\n              << '\\n';\n}",
+      "kind": "value",
+      "accept": ["**201.25|50...|ff"],
+      "explain": "`{:*>8.2f}` fills with '*', right-aligns in width 8, and prints 201.25 in fixed notation with two decimals, so two stars pad the left. `{:.<5}` fills with '.', left-aligns 50 in width 5, giving three trailing dots. `{:x}` prints 255 in lowercase hexadecimal. Unlike the stream manipulators, none of this leaks into the next call."
+    },
+    {
+      "id": "c15-r03",
+      "section": "Formatting into caller-owned storage",
+      "prompt": "What does this print?",
+      "code": "#include <array>\n#include <format>\n#include <iostream>\n#include <string_view>\n\nint main() {\n    std::array<char, 8> buffer{};\n    auto result = std::format_to_n(buffer.begin(), buffer.size(),\n                                   \"price={:.2f}\", 101.25);\n    auto written = static_cast<std::size_t>(result.out - buffer.begin());\n\n    std::cout << result.size << ' ' << written << ' '\n              << std::string_view{buffer.data(), written} << '\\n';\n}",
+      "kind": "value",
+      "accept": ["12 8 price=10"],
+      "explain": "\"price=101.25\" needs 12 characters, so result.size is 12 — the full required length, not the written length. Only 8 characters fit, so result.out lands at buffer.end() and the record is truncated to \"price=10\". Testing `result.size > buffer.size()` is what turns that truncation into a visible policy decision instead of a corrupt log line."
+    },
+    {
+      "id": "c15-r04",
+      "section": "Stream Errors and Partial I/O",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n#include <sstream>\n#include <string>\n#include <vector>\n\nint main() {\n    std::istringstream input{\"101.5 102.0 bad 103.0\"};\n    std::vector<double> prices;\n    double price = 0.0;\n\n    while (input >> price) {\n        prices.push_back(price);\n    }\n\n    std::cout << prices.size() << ' ' << input.eof() << ' '\n              << input.fail() << '\\n';\n\n    input.clear();\n    std::string token;\n    input >> token;\n    std::cout << token << '\\n';\n}",
+      "kind": "value",
+      "accept": ["2 0 1 bad"],
+      "explain": "Two doubles extract successfully; \"bad\" sets failbit and ends the loop, so eof() is still false and fail() is true — the stream stopped on malformed input, not on exhaustion. Distinguishing those two is why the chapter checks eof() before fail(). After .clear(), the offending characters are still queued, so the string extraction consumes \"bad\" and parsing could resume."
+    },
+    {
+      "id": "c15-r05",
+      "section": "`std::format` and `std::print`: The Modern Default",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <format>\n#include <iostream>\n\nint main() {\n    std::cout << std::format(\"{:d}\", \"text\") << '\\n';\n}",
+      "kind": "no-compile",
+      "explain": "A literal format string is a consteval-constructed object, so the library validates the replacement fields against the argument types during compilation: 'd' is an integer presentation type and the argument is a string. The tempting wrong answer is std::format_error — that is the *runtime* failure mode, and it only applies to format strings supplied at runtime through std::vformat, which cannot be checked this way."
+    },
+    {
+      "id": "c15-r06",
+      "section": "`std::format` and `std::print`: The Modern Default",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <format>\n#include <iostream>\n#include <string>\n#include <string_view>\n\nint main() {\n    auto* owned = new std::string(\"AAPL\");\n    std::string_view symbol{*owned};\n    delete owned;\n\n    std::cout << std::format(\"[{}]\", symbol) << '\\n';\n}",
+      "kind": "ub",
+      "explain": "std::string_view is a non-owning view; deleting the string ends the lifetime of the characters it points at, so formatting it reads freed memory. ASan reports heap-use-after-free. A safer formatting API cannot repair a lifetime error in its argument — the check that matters is whether the viewed storage outlives every use of the view."
+    }
+  ],
+  "writing": [
+    {
+      "id": "c15-w01",
+      "section": "Streams, Buffers, and the Price of Iostreams",
+      "minutes": 8,
+      "prompt": "Write a `FormatGuard` RAII type that saves a std::ostream's formatting flags, fill character and precision on construction and restores them on destruction, so a helper that sets std::hex cannot leak state to later callers. Then show the equivalent one-liner with std::format.",
+      "checklist": [
+        "Constructor stores flags(), fill() and precision() from the stream",
+        "Destructor restores all three",
+        "The stream is held by reference, and copying is disabled",
+        "A comment or accompanying code shows the std::format alternative that needs no guard",
+        "No stream state is modified by the guard itself"
+      ],
+      "solution": "#include <format>\n#include <iomanip>\n#include <ios>\n#include <iostream>\n\nclass FormatGuard {\npublic:\n    explicit FormatGuard(std::ostream& stream)\n        : stream_(stream),\n          flags_(stream.flags()),\n          fill_(stream.fill()),\n          precision_(stream.precision()) {}\n\n    ~FormatGuard() {\n        stream_.flags(flags_);\n        stream_.fill(fill_);\n        stream_.precision(precision_);\n    }\n\n    FormatGuard(const FormatGuard&) = delete;\n    FormatGuard& operator=(const FormatGuard&) = delete;\n\nprivate:\n    std::ostream& stream_;\n    std::ios_base::fmtflags flags_;\n    char fill_;\n    std::streamsize precision_;\n};\n\nvoid print_id_hex(int order_id) {\n    FormatGuard guard{std::cout};\n    std::cout << std::hex << std::setw(8) << std::setfill('0')\n              << order_id << '\\n';\n}  // flags, fill and precision restored here\n\nvoid print_id_hex_modern(int order_id) {\n    // Self-contained: nothing to save, nothing to restore.\n    std::cout << std::format(\"{:08x}\\n\", order_id);\n}",
+      "notes": "The guard is the right tool when you must work through an existing iostream-based API. It cannot help with anything a callee flushes or writes; it only restores presentation state. New code should reach for the format call and delete the guard."
+    },
+    {
+      "id": "c15-w02",
+      "section": "File and String Streams",
+      "minutes": 12,
+      "prompt": "Write `parse_ticks(std::istream&)` returning `std::vector<Tick>` for lines of the form `sequence,price`. Use std::getline for transport and std::from_chars for both conversions, skip malformed lines rather than throwing, and require each field to be consumed completely.",
+      "checklist": [
+        "Transport is std::getline in the loop condition",
+        "Both fields are converted with std::from_chars, not operator>> or std::stod",
+        "Each conversion checks ec == std::errc{}",
+        "Each conversion also checks that the result pointer reached the end of its field, so a numeric prefix with trailing garbage is rejected",
+        "A line without a separator is skipped rather than causing an exception"
+      ],
+      "solution": "#include <charconv>\n#include <istream>\n#include <string>\n#include <string_view>\n#include <vector>\n\nstruct Tick {\n    long sequence;\n    double price;\n};\n\nnamespace {\n\ntemplate<class T>\nbool parse_field(std::string_view field, T& out) {\n    const char* first = field.data();\n    const char* last = field.data() + field.size();\n    auto [next, error] = std::from_chars(first, last, out);\n    return error == std::errc{} && next == last;\n}\n\n}  // namespace\n\nstd::vector<Tick> parse_ticks(std::istream& input) {\n    std::vector<Tick> ticks;\n    std::string line;\n\n    while (std::getline(input, line)) {\n        std::string_view view{line};\n        std::size_t comma = view.find(',');\n        if (comma == std::string_view::npos) {\n            continue;\n        }\n\n        Tick tick{};\n        if (parse_field(view.substr(0, comma), tick.sequence) &&\n            parse_field(view.substr(comma + 1), tick.price)) {\n            ticks.push_back(tick);\n        }\n    }\n    return ticks;\n}",
+      "notes": "The `next == last` check is the part most implementations forget: from_chars happily reports success after consuming \"101\" from \"101abc\". Because the function takes std::istream&, the same code parses a file, a std::istringstream in a unit test, or standard input."
+    },
+    {
+      "id": "c15-w03",
+      "section": "`std::format` and `std::print`: The Modern Default",
+      "minutes": 10,
+      "prompt": "Give an `Order` type (symbol, price, quantity) a std::formatter specialization so that `std::format(\"{}\", order)` yields something like `AAPL 201.25@50`. Follow the cookbook shape from the chapter: a parse member that accepts no custom specification, and a format member writing through the context's output iterator.",
+      "checklist": [
+        "Specializes std::formatter for the user type",
+        "parse takes a std::format_parse_context& and returns an iterator",
+        "format is a const member taking std::format_context&",
+        "format writes through context.out(), typically with std::format_to",
+        "The price is rendered with an explicit precision rather than the default"
+      ],
+      "solution": "#include <format>\n#include <string_view>\n\nstruct Order {\n    std::string_view symbol;\n    double price;\n    int quantity;\n};\n\ntemplate<>\nstruct std::formatter<Order> {\n    constexpr auto parse(std::format_parse_context& context) {\n        return context.begin();  // no custom specification accepted\n    }\n\n    auto format(const Order& order, std::format_context& context) const {\n        return std::format_to(context.out(), \"{} {:.2f}@{}\",\n                              order.symbol, order.price, order.quantity);\n    }\n};",
+      "notes": "Returning context.begin() from parse means the specifier must be empty; anything between the colon and the closing brace would be left unconsumed and reported as a format error. Once this exists, the type works with std::format, std::format_to, std::format_to_n and std::println alike, because they all route through the same formatter."
+    },
+    {
+      "id": "c15-w04",
+      "section": "Formatting into caller-owned storage",
+      "minutes": 10,
+      "prompt": "Write `make_fill_line(std::string_view symbol, int quantity, double price)` returning `std::optional<LogLine>`, where LogLine holds a fixed `std::array<char, 128>` and a size. Format into the array with std::format_to_n and return std::nullopt when the record would not fit.",
+      "checklist": [
+        "Storage is a fixed-size array inside the record; no std::string is built",
+        "Formatting uses std::format_to_n with the array's capacity as the limit",
+        "Overflow is detected by comparing result.size against the capacity",
+        "Overflow returns std::nullopt rather than a truncated record",
+        "The stored size is computed from result.out, and no null terminator is assumed"
+      ],
+      "solution": "#include <array>\n#include <cstddef>\n#include <format>\n#include <optional>\n#include <string_view>\n\nstruct LogLine {\n    std::array<char, 128> bytes;\n    std::size_t size;\n};\n\nstd::optional<LogLine> make_fill_line(std::string_view symbol,\n                                      int quantity,\n                                      double price) {\n    LogLine line{};\n    auto result = std::format_to_n(\n        line.bytes.begin(), line.bytes.size(),\n        \"fill symbol={} quantity={} price={:.2f}\\n\",\n        symbol, quantity, price);\n\n    if (result.size > static_cast<std::ptrdiff_t>(line.bytes.size())) {\n        return std::nullopt;  // complete record did not fit\n    }\n\n    line.size = static_cast<std::size_t>(result.out - line.bytes.begin());\n    return line;\n}",
+      "notes": "format_to_n reports the size the *complete* output required, which is the only reason overflow is detectable at all — result.out alone would just sit at the end of the buffer and look like success. No terminator is written, so the size member is the record boundary; passing line.bytes.data() to anything expecting a C string would be a bug."
+    },
+    {
+      "id": "c15-w05",
+      "section": "Stream Errors and Partial I/O",
+      "minutes": 10,
+      "prompt": "Write `read_prices(std::istream&)` that extracts doubles until the stream is exhausted, but recovers from a malformed token by clearing the state, consuming the bad token, and continuing. Return the prices and a count of skipped tokens.",
+      "checklist": [
+        "Extraction appears in the loop condition, never a !eof() test before reading",
+        "eof() and fail() are distinguished after the loop stops",
+        "Recovery calls .clear() and then consumes the offending token as a string",
+        "The outer loop resumes extraction after recovery rather than giving up",
+        "Termination is guaranteed: the loop exits once eof() is set"
+      ],
+      "solution": "#include <istream>\n#include <string>\n#include <vector>\n\nstruct PriceScan {\n    std::vector<double> prices;\n    int skipped = 0;\n};\n\nPriceScan read_prices(std::istream& input) {\n    PriceScan scan;\n    double price = 0.0;\n\n    for (;;) {\n        while (input >> price) {\n            scan.prices.push_back(price);\n        }\n\n        if (input.eof()) {\n            break;  // clean exhaustion\n        }\n\n        // failbit: the offending characters are still queued.\n        input.clear();\n        std::string bad_token;\n        if (!(input >> bad_token)) {\n            break;  // could not even read a token; give up\n        }\n        ++scan.skipped;\n    }\n    return scan;\n}",
+      "notes": "The guard on the recovery extraction matters: without it a badbit stream would spin forever, because clear() succeeds but no characters are ever consumed. Checking eof() before fail() is the right order — reaching the end is the expected outcome and malformed input is the exception."
+    },
+    {
+      "id": "c15-w06",
+      "section": "Asynchronous Logging: Formatting Off the Hot Path",
+      "minutes": 12,
+      "prompt": "Write a deferred-format logging pair: a fixed-size `LogEvent`, a preallocated `EventBuffer` whose `log_event` is noexcept and performs no formatting or allocation, and a cold `drain` that turns the recorded events into text with std::format. Make a full buffer an explicit false return rather than a growth.",
+      "checklist": [
+        "LogEvent holds only a timestamp, a site id and fixed-size scalar fields — no string",
+        "EventBuffer allocates its slots in the constructor, before the hot path",
+        "log_event is noexcept, writes into an existing slot, and never calls push_back",
+        "A full buffer returns false instead of growing",
+        "Formatting and the output call appear only in drain, never in log_event"
+      ],
+      "solution": "#include <chrono>\n#include <cstdint>\n#include <cstdio>\n#include <format>\n#include <span>\n#include <string>\n#include <vector>\n\nstruct LogEvent {\n    std::chrono::steady_clock::time_point timestamp;\n    std::uint32_t site;\n    double price;\n    std::uint32_t quantity;\n};\n\nclass EventBuffer {\npublic:\n    explicit EventBuffer(std::size_t capacity) : slots_(capacity) {}\n\n    bool log_event(std::uint32_t site, double price,\n                   std::uint32_t quantity) noexcept {\n        if (size_ == slots_.size()) {\n            return false;  // explicit loss policy, not silent growth\n        }\n        slots_[size_++] = {std::chrono::steady_clock::now(), site,\n                           price, quantity};\n        return true;\n    }\n\n    std::span<const LogEvent> events() const noexcept {\n        return {slots_.data(), size_};\n    }\n\nprivate:\n    std::vector<LogEvent> slots_;\n    std::size_t size_ = 0;\n};\n\nvoid drain(const EventBuffer& buffer, std::FILE* output) {\n    for (const LogEvent& event : buffer.events()) {\n        std::string line = std::format(\n            \"site={} price={:.2f} quantity={}\\n\",\n            event.site, event.price, event.quantity);\n        std::fwrite(line.data(), 1, line.size(), output);\n    }\n}",
+      "notes": "The producer's cost is one steady_clock read and a fixed-size store; every conversion, allocation and write lives in drain. A production version puts a bounded single-producer/single-consumer queue between the two so the consumer runs on its own thread, and the site id is resolved through a versioned table of format strings rather than an if-chain."
+    }
+  ]
+}

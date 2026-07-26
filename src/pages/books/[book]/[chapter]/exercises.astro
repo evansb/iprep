@@ -1,0 +1,86 @@
+---
+import { render } from 'astro:content';
+import BaseLayout from '../../../../layouts/BaseLayout.astro';
+import Quiz from '../../../../components/Quiz.astro';
+import { books } from '../../../../books';
+import { chapterNumber, chapterTitle, chapterSlug, getBookChapters } from '../../../../lib/chapters';
+import {
+  counts,
+  exerciseChapterSlug,
+  getBookExercises,
+  sectionKey,
+} from '../../../../lib/exercises';
+import { href } from '../../../../lib/url';
+
+export async function getStaticPaths() {
+  const paths = [];
+  for (const book of books) {
+    const sets = await getBookExercises(book.slug);
+    if (!sets.length) continue;
+    const chapters = await getBookChapters(book.slug);
+    for (const ex of sets) {
+      const slug = exerciseChapterSlug(ex);
+      const entry = chapters.find((c) => chapterSlug(c) === slug);
+      // An exercise file with no matching chapter is an authoring mistake; skip
+      // it rather than emitting a page that links nowhere.
+      if (!entry) continue;
+      paths.push({ params: { book: book.slug, chapter: slug }, props: { book, ex, entry } });
+    }
+  }
+  return paths;
+}
+
+const { book, ex, entry } = Astro.props;
+const { headings } = await render(entry);
+
+// Exercises name the chapter section they came from; map that text to the real
+// anchor slug Astro generated so the quiz can link back to it.
+const sectionSlugs = Object.fromEntries(
+  headings.filter((h) => h.depth === 2).map((h) => [sectionKey(h.text), h.slug]),
+);
+
+const n = counts(ex);
+const slug = chapterSlug(entry);
+const title = chapterTitle(entry);
+---
+
+<BaseLayout
+  title={`Exercises — ${title} — ${book.title}`}
+  description={`Self-test exercises for ${book.title}, chapter ${chapterNumber(entry)}: ${title}.`}
+>
+  <div class="container quiz-page">
+    <div class="quiz-page-head">
+      <a class="quiz-back" href={href(`/books/${book.slug}/${slug}/`)}>← {title}</a>
+      <h1>Exercises</h1>
+      <p class="quiz-page-sub">
+        Chapter {chapterNumber(entry)} · {n.mcq} multiple choice · {n.reading} code reading ·{' '}
+        {n.writing} code writing
+      </p>
+    </div>
+
+    <Quiz
+      bookSlug={book.slug}
+      storageKey={`quiz:${book.slug}:${slug}`}
+      sources={[
+        {
+          ex,
+          chapter: chapterNumber(entry),
+          chapterSlug: slug,
+          chapterTitle: title,
+          sectionSlugs,
+        },
+      ]}
+    />
+
+    <nav class="pager" aria-label="Exercise navigation">
+      <a class="prev" href={href(`/books/${book.slug}/${slug}/`)}>
+        <span class="pager-label">← Back to</span>
+        <span class="pager-title">{title}</span>
+      </a>
+      <a class="next" href={href(`/books/${book.slug}/exercises/`)}>
+        <span class="pager-label">All exercises →</span>
+        <span class="pager-title">{book.title}</span>
+      </a>
+    </nav>
+  </div>
+</BaseLayout>

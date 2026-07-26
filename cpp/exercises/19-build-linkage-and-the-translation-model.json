@@ -1,0 +1,558 @@
+{
+  "chapter": 19,
+  "mcq": [
+    {
+      "id": "c19-m01",
+      "section": "From text to executable",
+      "difficulty": "easy",
+      "prompt": "What exactly is a translation unit?",
+      "choices": [
+        "One source file as written on disk",
+        "One source file after preprocessing, with every #include pasted in and every macro expanded",
+        "All source files of one library, seen together",
+        "One object file after assembly"
+      ],
+      "answer": 1,
+      "explain": "A translation unit is the post-preprocessing text: the .cpp plus the contents of everything it included, with macros expanded. That is the only thing the compiler ever sees at once — it never sees 'the project'. Confusing the file on disk with the translation unit is what makes header changes feel like they should be free."
+    },
+    {
+      "id": "c19-m02",
+      "section": "From text to executable",
+      "difficulty": "medium",
+      "prompt": "Which stage reports `undefined reference to spread_bps(Order const&)`?",
+      "choices": [
+        "Preprocessing",
+        "Compilation",
+        "Assembly",
+        "Linking"
+      ],
+      "answer": 3,
+      "explain": "The compiler is satisfied once a declaration gives it the name and type; whether a definition exists anywhere in the program is a question only the linker, holding every selected object file, can answer. That is the chapter's rule in practice: a compile error belongs to one translation unit, a linker error is a disagreement among translation units or libraries."
+    },
+    {
+      "id": "c19-m03",
+      "section": "From text to executable",
+      "difficulty": "medium",
+      "prompt": "`pricing.hpp` is edited. `main.cpp` is not. Why must main.o be rebuilt anyway?",
+      "choices": [
+        "Because main.cpp's translation unit contains the pasted header text, so its input has changed",
+        "Because the linker compares timestamps and refuses stale objects",
+        "Because the header's include guard macro changes on every edit",
+        "It need not be; separate compilation exists precisely to avoid that"
+      ],
+      "answer": 0,
+      "explain": "Separate compilation saves work in the other direction — editing main.cpp does not force pricing.cpp to be recompiled. But every translation unit that included the header contains a pasted copy of it, so a header edit changes their input text. Reusing a stale object can preserve an old class layout or an old declaration, and the linker will not notice: it matches symbol names, not source-level intent."
+    },
+    {
+      "id": "c19-m04",
+      "section": "Headers, guards, and the preprocessor",
+      "difficulty": "easy",
+      "prompt": "How far does an include guard's protection reach?",
+      "choices": [
+        "Until the guard macro is #undef'd anywhere in the program",
+        "The whole program, so a header is pasted at most once per build",
+        "One preprocessing run, so each translation unit still gets its own copy",
+        "One directory of source files"
+      ],
+      "answer": 2,
+      "explain": "Guard state is macro state, and macro state lasts only for the current preprocessing run. Both pricing.cpp and main.cpp independently paste one guarded copy of pricing.hpp, so the class definition and the inline function definitions really do appear in both translation units. What makes that legal is the ODR's allowance for classes, inline entities and templates — not the guard."
+    },
+    {
+      "id": "c19-m05",
+      "section": "Headers, guards, and the preprocessor",
+      "difficulty": "medium",
+      "prompt": "`#define SQUARE(x) x * x` and `SQUARE(a + b)` with a = 2, b = 3. What is the result?",
+      "choices": [
+        "25, as a function would give",
+        "11, because the expansion is a + b * a + b",
+        "A compile error from the missing parentheses",
+        "Unspecified, because the order of evaluation is not fixed"
+      ],
+      "answer": 1,
+      "explain": "The preprocessor substitutes tokens before the compiler knows anything about types or precedence, so the call expands to a + b * a + b — that is 2 + 3*2 + 3, or 11. Parenthesising the parameters and the whole expansion fixes this particular defect, but it does not fix repeated evaluation of an argument with side effects. A constexpr function has neither problem."
+    },
+    {
+      "id": "c19-m06",
+      "section": "Headers, guards, and the preprocessor",
+      "difficulty": "medium",
+      "prompt": "A non-inline free function is defined in a header included by three .cpp files. What happens?",
+      "choices": [
+        "The linker reports multiple definition, because each translation unit emits a definition",
+        "The compiler rejects the second inclusion",
+        "The linker silently keeps one, as it does for inline functions",
+        "Nothing; the include guard prevents duplicates"
+      ],
+      "answer": 0,
+      "explain": "Each of the three translation units emits a strong definition of the same linker-visible name, and the ODR permits only one for a non-inline function, so the linker cannot choose. Marking it inline is what changes the emitted symbol into a weak/COMDAT definition the linker is allowed to deduplicate; the include guard only stops a second copy inside one translation unit."
+    },
+    {
+      "id": "c19-m07",
+      "section": "Declarations, definitions, and the ODR",
+      "difficulty": "easy",
+      "prompt": "Which of these at namespace scope is a declaration but NOT a definition?",
+      "choices": [
+        "extern int tick_count = 0;",
+        "inline int tick_count = 0;",
+        "int tick_count;",
+        "extern int tick_count;"
+      ],
+      "answer": 3,
+      "explain": "extern with no initialiser only announces that a definition with external linkage exists elsewhere. Plain `int tick_count;` at namespace scope both declares and defines. Adding an initialiser makes even the extern form a definition, and an inline variable is a definition that may legally appear in every translation unit that includes it."
+    },
+    {
+      "id": "c19-m08",
+      "section": "Declarations, definitions, and the ODR",
+      "difficulty": "medium",
+      "prompt": "What does the `inline` keyword primarily mean in modern C++?",
+      "choices": [
+        "That the function is emitted into every caller's object file and never called indirectly",
+        "That the optimiser must substitute the function body at each call site",
+        "That identical definitions may appear in several translation units and denote one entity",
+        "That the function has internal linkage"
+      ],
+      "answer": 2,
+      "explain": "inline is an ODR permission, not an optimisation directive: it says the same definition may legally appear in many translation units. The optimiser inlines functions that lack the keyword and declines to inline functions that carry it. An inline function keeps external linkage — that is exactly what lets all those definitions denote one entity, which is the opposite of internal linkage."
+    },
+    {
+      "id": "c19-m09",
+      "section": "Declarations, definitions, and the ODR",
+      "difficulty": "hard",
+      "prompt": "Two .cpp files each define a `struct Helper` with different members plus an out-of-class `inline void Helper::normalize()`. They are compiled and linked together. What is the most likely outcome?",
+      "choices": [
+        "It links cleanly, one weak definition is retained, and the program has undefined behaviour",
+        "It links cleanly and each file uses its own version, which is well-defined",
+        "The compiler rejects one of the files",
+        "The linker reports multiple definition of Helper::normalize"
+      ],
+      "answer": 0,
+      "explain": "Both inline member definitions become weak or COMDAT symbols with the same mangled name, so the linker retains one and discards the other without comparing bodies. Whichever survives is used by both callers — one of which believes in a different layout. No diagnostic is required, and the symptom can change with optimisation level or link order. Weak binding is what makes the ODR violation silent; it is not what makes it legal."
+    },
+    {
+      "id": "c19-m10",
+      "section": "Declarations, definitions, and the ODR",
+      "difficulty": "medium",
+      "prompt": "An inline function is defined in two headers as `return rate * 2;` and `return 2 * rate;`. Both are included in different translation units. What is the verdict?",
+      "choices": [
+        "Fine, because multiplication is commutative and the results agree",
+        "An ODR violation, because the token sequences differ",
+        "Fine, because inline functions are exempt from the ODR",
+        "A compile error in whichever translation unit is compiled second"
+      ],
+      "answer": 1,
+      "explain": "The ODR's allowance for multiple inline definitions requires them to be the same definition — matching token sequences, with names looking up to the same entities. 'Produces equal results' is not the test. The two translation units are compiled independently, so nothing compares them; the program is simply ill-formed with no diagnostic required."
+    },
+    {
+      "id": "c19-m11",
+      "section": "Three orthogonal properties",
+      "difficulty": "medium",
+      "prompt": "A function-local `static unsigned long call_count = 0;` — what are its storage duration, scope and linkage?",
+      "choices": [
+        "Static duration, namespace scope, internal linkage",
+        "Thread duration, block scope, no linkage",
+        "Static duration, block scope, no linkage",
+        "Automatic duration, block scope, internal linkage"
+      ],
+      "answer": 2,
+      "explain": "The object lives for the whole program, its name is visible only inside the enclosing block, and no declaration elsewhere can denote it — three independent answers to three independent questions. Reading 'static' as one concept is the trap: at block scope the keyword grants storage duration, at namespace scope it grants internal linkage, and inside a class it declares a member shared by all instances."
+    },
+    {
+      "id": "c19-m12",
+      "section": "Three orthogonal properties",
+      "difficulty": "medium",
+      "prompt": "What does the keyword `static` do at namespace scope?",
+      "choices": [
+        "Makes the variable const",
+        "Makes the definition inline",
+        "Gives the entity static storage duration, which it would not otherwise have",
+        "Gives the name internal linkage"
+      ],
+      "answer": 3,
+      "explain": "A namespace-scope object already has static storage duration; what the keyword adds there is internal linkage, so no other translation unit can denote the same entity. Granting storage duration is what the same keyword does at block scope. Ask which property the context changes rather than treating the word as one concept."
+    },
+    {
+      "id": "c19-m13",
+      "section": "Three orthogonal properties",
+      "difficulty": "medium",
+      "prompt": "A function is defined inside an anonymous namespace. What is true of it?",
+      "choices": [
+        "It has no linkage, like a block-scope name",
+        "It has internal linkage, and it has no storage duration because it is not an object",
+        "It has internal linkage and automatic storage duration",
+        "It has external linkage but hidden visibility"
+      ],
+      "answer": 1,
+      "explain": "An anonymous-namespace name has internal linkage, so another translation unit may spell the same function without denoting it. Storage duration classifies objects and references, not functions, so the question simply does not apply. Visibility is a third, separate thing — a shared library's export table — and is not what an anonymous namespace controls."
+    },
+    {
+      "id": "c19-m14",
+      "section": "Internal linkage and language linkage",
+      "difficulty": "medium",
+      "prompt": "Why does the chapter prefer an anonymous namespace over namespace-scope `static` for translation-unit-local helpers?",
+      "choices": [
+        "An anonymous namespace also localises types, which static cannot do",
+        "static gives external linkage to types",
+        "An anonymous namespace has no runtime cost, unlike static",
+        "static is deprecated in C++23"
+      ],
+      "answer": 0,
+      "explain": "Namespace-scope static gives internal linkage to functions and variables only; there is no way to apply it to a class. An anonymous namespace covers types as well, which is exactly what the two-file Helper collision needed. Both spellings remain legal — static survives mainly as C-compatible style — and neither has a runtime cost."
+    },
+    {
+      "id": "c19-m15",
+      "section": "Internal linkage and language linkage",
+      "difficulty": "medium",
+      "prompt": "Why can two `extern \"C\"` functions not overload the same name?",
+      "choices": [
+        "Because C++ forbids overloading of free functions in general",
+        "Because extern \"C\" functions must be declared in a namespace",
+        "Because C linkage forces every parameter to be a pointer",
+        "Because C linkage suppresses mangling, so both would need the same flat symbol"
+      ],
+      "answer": 3,
+      "explain": "Overload resolution is a compile-time feature that survives to the linker only because mangling encodes parameter types into the symbol name. C linkage removes that encoding, so two overloads would claim one flat symbol; the compiler rejects the second declaration. Putting them in different namespaces does not help either, because the exported C symbol does not encode the namespace."
+    },
+    {
+      "id": "c19-m16",
+      "section": "Internal linkage and language linkage",
+      "difficulty": "hard",
+      "prompt": "A header declares `extern \"C\" double mid_c(double, double);` but mid_c.cpp defines the function without including that header. What is the symptom?",
+      "choices": [
+        "The definition silently gets C linkage anyway, and everything works",
+        "A compile error in mid_c.cpp",
+        "The linker reports an undefined reference to the unmangled name mid_c",
+        "The program links and calls the wrong function"
+      ],
+      "answer": 2,
+      "explain": "Language linkage is part of a declaration, so a definition compiled without seeing the extern \"C\" declaration gets an ordinary mangled C++ name. Callers that did see the header emit a reference to the flat name, and nothing defines it. Each translation unit compiles happily on its own — nm on the two objects makes the mismatch obvious, and including the header in the defining file is the fix."
+    },
+    {
+      "id": "c19-m17",
+      "section": "Inside the object file",
+      "difficulty": "medium",
+      "prompt": "`nm main.o` shows `U _Z10spread_bpsRK5Order`. What does that tell you?",
+      "choices": [
+        "main.o references spread_bps but does not define it; some other object must supply it",
+        "spread_bps was inlined and no longer exists",
+        "spread_bps has internal linkage in main.o",
+        "main.o defines spread_bps with a weak binding"
+      ],
+      "answer": 0,
+      "explain": "U marks an undefined symbol — a reference the linker must resolve against a definition elsewhere, carried alongside a relocation at the call site. T would be a global definition in .text and W a weak one, typically an emitted inline function; t is the lowercase local form an anonymous-namespace function produces. An `undefined reference` error is simply a U that survived the link."
+    },
+    {
+      "id": "c19-m18",
+      "section": "Inside the object file",
+      "difficulty": "medium",
+      "prompt": "In pricing.o, where does `int tick_count = 0;` normally live on a common ELF toolchain?",
+      "choices": [
+        ".rodata",
+        ".bss, with only its size recorded and no zero bytes stored",
+        ".data, with eight zero bytes stored in the object",
+        ".text"
+      ],
+      "answer": 1,
+      "explain": "A zero-initialised global goes to .bss, whose contribution to the file is a size, not bytes — the loader supplies the zeros. A nonzero initialiser would normally move it to .data, where the bytes really are stored. These are common ELF conventions rather than C++ requirements, and an optimiser may fold, relocate or delete the object entirely."
+    },
+    {
+      "id": "c19-m19",
+      "section": "Libraries: static vs dynamic",
+      "difficulty": "medium",
+      "prompt": "`g++ -L. -lpricing main.o -o pricer` fails with an undefined reference, while `g++ main.o -L. -lpricing -o pricer` succeeds. Why?",
+      "choices": [
+        "The archive index is only built when the archive is listed last",
+        "Static archives must always precede object files",
+        "The linker scans inputs left to right and extracts an archive member only for a symbol that is unresolved at that moment",
+        "-L must come after all object files"
+      ],
+      "answer": 2,
+      "explain": "Named object files are always included; archive members are demand-loaded. When libpricing.a is scanned first, nothing is unresolved yet, so pricing.o is never extracted — and main.o introduces the reference too late. Put an archive after the objects that need it, and use repetition or --start-group/--end-group for circular archive dependencies."
+    },
+    {
+      "id": "c19-m20",
+      "section": "Libraries: static vs dynamic",
+      "difficulty": "medium",
+      "prompt": "What does a call into an ELF shared library normally cost that a call into a statically linked object does not?",
+      "choices": [
+        "A copy of the arguments through the dynamic loader",
+        "Nothing; the two are identical after relocation",
+        "A system call per invocation",
+        "PLT/GOT indirection, plus loss of inlining because the symbol can be interposed"
+      ],
+      "answer": 3,
+      "explain": "After resolution the call goes indirectly through a GOT entry, and lazy binding puts the loader itself on the first call. The subtler cost is that an exported, interposable symbol constrains the optimiser: it cannot inline or bind directly to something LD_PRELOAD might replace. That is why -fvisibility=hidden buys speed as well as a smaller symbol table."
+    },
+    {
+      "id": "c19-m21",
+      "section": "Libraries: static vs dynamic",
+      "difficulty": "medium",
+      "prompt": "Does linking statically give the optimiser a cross-translation-unit view?",
+      "choices": [
+        "No, not by itself — ordinary .o files have already lost the information, so both compilation and the final link must enable LTO",
+        "Yes, but only for functions declared inline",
+        "No, and LTO cannot help either, because the linker only sees machine code",
+        "Yes; that is the main reason to link statically"
+      ],
+      "answer": 0,
+      "explain": "An ordinary object file holds machine code from which most source-level information is gone; the linker merging those files does not recover it. Cross-file optimisation needs -flto at compile time so the objects carry intermediate representation, and at link time so the linker plugin hands that IR back to the optimiser. Static linking makes LTO possible over the whole program; it does not perform it."
+    },
+    {
+      "id": "c19-m22",
+      "section": "PImpl and opaque ABI boundaries",
+      "difficulty": "medium",
+      "prompt": "Why must a PImpl class define its destructor in the .cpp file rather than letting the compiler generate it in the header?",
+      "choices": [
+        "Because the destructor must be virtual for the idiom to work",
+        "Because unique_ptr's destructor requires a complete Impl, which the header deliberately does not have",
+        "Because the header would otherwise need to include <memory>",
+        "Because an implicitly declared destructor is not noexcept"
+      ],
+      "answer": 1,
+      "explain": "Destroying a std::unique_ptr<Impl> needs Impl to be complete so the deleter can call its destructor. In the header Impl is only declared, so the destructor — and for the same reason the move operations — must be defined in the source file where the class is complete. Writing `= default` there is enough; what matters is where the definition lives, not what it contains."
+    },
+    {
+      "id": "c19-m23",
+      "section": "PImpl and opaque ABI boundaries",
+      "difficulty": "medium",
+      "prompt": "For which kind of class is PImpl the wrong choice?",
+      "choices": [
+        "A class whose private members change frequently",
+        "A class whose header currently drags in <string> and <vector>",
+        "A coarse service object at a shared-library boundary",
+        "A compact Price or Order value type used in an inner loop"
+      ],
+      "answer": 3,
+      "explain": "PImpl buys build isolation and ABI stability with a pointer chase and, usually, an allocation per object — a bad trade for a small value type that wants inline storage, trivial movement and compiler-visible members. The other three are exactly the cases it is for. Hide representation deliberately at binary boundaries, and keep hot-path value types transparent to the optimiser."
+    },
+    {
+      "id": "c19-m24",
+      "section": "Visibility and weak symbols",
+      "difficulty": "medium",
+      "prompt": "How do linkage and visibility differ?",
+      "choices": [
+        "Visibility applies to functions, linkage to variables",
+        "They are two names for the same property",
+        "Linkage decides whether declarations in different translation units denote one entity; visibility decides whether the symbol appears in a shared library's dynamic symbol table",
+        "Linkage is an ELF concept; visibility is a C++ standard concept"
+      ],
+      "answer": 2,
+      "explain": "Linkage is a C++ language property resolved at translation and static link time. Visibility is a shared-object export property: a function can keep external linkage and still be hidden from the dynamic symbol table with -fvisibility=hidden. Hidden symbols also cannot be interposed, which is why the flag helps the optimiser — and why it breaks a dlopen consumer expecting an unexported name."
+    },
+    {
+      "id": "c19-m25",
+      "section": "Visibility and weak symbols",
+      "difficulty": "medium",
+      "prompt": "`nm` shows `W mid(double, double)` in both pricing.o and main.o and the program links cleanly. What has happened?",
+      "choices": [
+        "Both are weak/COMDAT definitions of the header-defined inline function; the linker retains one compatible copy and discards the duplicate",
+        "The two definitions have internal linkage and are separate entities in the final program",
+        "One of them was actually inlined away and the W is a leftover",
+        "The linker merged the two bodies into one combined function"
+      ],
+      "answer": 0,
+      "explain": "mid is defined in pricing.hpp, so every translation unit that includes the header can emit it — as a weak or COMDAT symbol rather than a strong one. The linker keeps one and drops the rest, which is how common toolchains implement the ODR's inline allowance. It compares names and binding strength, never token sequences, which is exactly why genuinely different weak definitions also link cleanly and leave you with undefined behaviour."
+    }
+  ],
+  "reading": [
+    {
+      "id": "c19-r01",
+      "section": "Headers, guards, and the preprocessor",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n\n#define SQUARE(x) x * x\n\nint main() {\n    const int a = 2;\n    const int b = 3;\n    std::cout << SQUARE(a + b) << '\\n';\n}\n",
+      "kind": "value",
+      "accept": [
+        "11"
+      ],
+      "explain": "The preprocessor performs token substitution before the compiler knows anything about precedence, so SQUARE(a + b) becomes a + b * a + b — that is 2 + (3*2) + 3, or 11. A function called square(a + b) would evaluate the argument first and give 25. Parenthesising the parameter and the whole expansion fixes this defect; it does not fix an argument that is evaluated twice."
+    },
+    {
+      "id": "c19-r02",
+      "section": "Headers, guards, and the preprocessor",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n\n#define GREATER(a, b) ((a) > (b) ? (a) : (b))\n\nint main() {\n    int sequence = 0;\n    const int result = GREATER(++sequence, -1);\n    std::cout << result + sequence << '\\n';\n}\n",
+      "kind": "value",
+      "accept": [
+        "4"
+      ],
+      "explain": "Every parameter is parenthesised, so precedence is safe — but a macro has no parameter objects, and ++sequence is substituted into both places where a appears. The condition increments sequence to 1 and is true, then the selected branch increments it again to 2, so result is 2 and result + sequence is 4. An equivalent function evaluates each argument exactly once and would print 3."
+    },
+    {
+      "id": "c19-r03",
+      "section": "Internal linkage and language linkage",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "extern \"C\" double mid_c(double bid, double ask);\nextern \"C\" double mid_c(int bid, int ask);\n\nint main() {\n    return 0;\n}\n",
+      "kind": "no-compile",
+      "explain": "C language linkage suppresses name mangling, so both declarations would have to claim the same flat symbol mid_c — and the compiler rejects the second as a conflicting declaration. Overloading only survives to the linker because mangling encodes parameter types into the symbol name. Moving one declaration into a namespace does not rescue it either: the exported C symbol does not encode the namespace."
+    },
+    {
+      "id": "c19-r04",
+      "section": "Three orthogonal properties",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n\nint next_sequence() {\n    static int call_count = 0;\n    return ++call_count;\n}\n\nint main() {\n    std::cout << next_sequence() << ' '\n              << next_sequence() << ' '\n              << next_sequence() << '\\n';\n}\n",
+      "kind": "value",
+      "accept": [
+        "1 2 3"
+      ],
+      "explain": "The object has static storage duration, so it is created once and lives for the whole program; the initialiser runs only on the first pass through the declaration. Its name has block scope and no linkage, so nothing outside the function can reach it. Reading `static` here as 'a fresh zero each call' is the misconception — that would be an ordinary automatic variable."
+    },
+    {
+      "id": "c19-r05",
+      "section": "Declarations, definitions, and the ODR",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n\nstruct LegacyLimits {\n    static constexpr int max_orders = 100;\n};\n\nint main() {\n    constexpr int copied = LegacyLimits::max_orders;\n    static_assert(copied == 100);\n\n    const int* address = &LegacyLimits::max_orders;\n    std::cout << copied << ' ' << *address << '\\n';\n}\n",
+      "kind": "value",
+      "accept": [
+        "100 100"
+      ],
+      "explain": "Reading the constant only needs its value, but taking its address odr-uses it — a use that requires the entity's identity and therefore a definition somewhere. Before C++17 that line needed an out-of-class `constexpr int LegacyLimits::max_orders;` and produced an undefined reference without it. Since C++17 a static constexpr data member is implicitly inline, so the definition is already there and this code is complete."
+    },
+    {
+      "id": "c19-r06",
+      "section": "Headers, guards, and the preprocessor",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <algorithm>\n#include <iostream>\n\n#define max(a, b) ((a) < (b) ? (b) : (a))\n\nint main() {\n    std::cout << std::max(2, 3) << '\\n';\n}\n",
+      "kind": "no-compile",
+      "explain": "Macro names ignore namespaces and scopes entirely. The preprocessor sees the token max followed by an argument list and rewrites std::max(2, 3) into std::((2) < (3) ? (3) : (2)), which is not valid C++. This is exactly the historical Windows-header min/max collision: the qualification that would protect a function name is invisible to the preprocessor, which is why macro names need long, project-unique spellings — or, better, are replaced by constexpr functions."
+    },
+    {
+      "id": "c19-r07",
+      "section": "Three orthogonal properties",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <iostream>\n\nint cached_limit(int level);\n\nint compute(int level) {\n    if (level > 0) {\n        return cached_limit(level - 1);\n    }\n    return 100;\n}\n\nint cached_limit(int level) {\n    static int limit = compute(level);\n    return limit;\n}\n\nint main() {\n    std::cout << cached_limit(2) << '\\n';\n}\n",
+      "kind": "ub",
+      "explain": "Initialising the function-local static calls compute, which calls cached_limit again and re-enters the declaration while its initialisation is still in progress. That is undefined behaviour. Implementations guard a dynamically initialised local static with a once-only flag, and libc++'s guard detects the recursive entry and terminates the program rather than silently returning a half-built value. The tempting answer is that the inner call simply sees the not-yet-assigned zero."
+    },
+    {
+      "id": "c19-r08",
+      "section": "PImpl and opaque ABI boundaries",
+      "prompt": "What does this print?",
+      "code": "#include <cstddef>\n#include <iostream>\n#include <memory>\n#include <string>\n#include <string_view>\n#include <vector>\n\nclass Session {\npublic:\n    explicit Session(std::string_view endpoint);\n    ~Session();\n    void send(int order_id);\n    std::size_t pending() const;\n\nprivate:\n    class Impl;\n    std::unique_ptr<Impl> impl_;\n};\n\nclass Session::Impl {\npublic:\n    explicit Impl(std::string_view endpoint) : endpoint_(endpoint) {}\n    void send(int order_id) { pending_.push_back(order_id); }\n    std::size_t pending() const { return pending_.size(); }\n\nprivate:\n    std::string endpoint_;\n    std::vector<int> pending_;\n};\n\nSession::Session(std::string_view endpoint)\n    : impl_(std::make_unique<Impl>(endpoint)) {}\nSession::~Session() = default;\nvoid Session::send(int order_id) { impl_->send(order_id); }\nstd::size_t Session::pending() const { return impl_->pending(); }\n\nint main() {\n    Session session{\"tcp://feed\"};\n    session.send(1);\n    session.send(2);\n    std::cout << sizeof(Session) << ' ' << session.pending() << '\\n';\n}\n",
+      "kind": "value",
+      "accept": [
+        "8 2"
+      ],
+      "explain": "Whatever Impl grows to hold, Session itself is one unique_ptr, so sizeof(Session) is the size of a pointer — 8 on this 64-bit target — and stays that size when a member is added to Impl. That stability is the point of the idiom: users compile against a class containing one pointer rather than against std::string and std::vector internals. Note where the destructor is defined: in the header Impl is incomplete, so the compiler cannot generate a destructor that destroys it there."
+    }
+  ],
+  "writing": [
+    {
+      "id": "c19-w01",
+      "section": "From text to executable",
+      "minutes": 10,
+      "prompt": "Write the header and source halves of a small pricing component: a header publishing a struct, an inline function, a non-inline function declaration and an extern variable declaration, and a source file supplying the two definitions. Put both halves in one file separated by comments, and add an include guard.",
+      "checklist": [
+        "The header half has an include guard with a project-unique macro name",
+        "The inline function is defined in the header; the non-inline function is only declared there",
+        "The global variable is declared extern in the header and defined exactly once in the source half",
+        "The source half re-includes nothing it does not need and defines both entities",
+        "A comment states which half every including translation unit gets a copy of"
+      ],
+      "solution": "// ---------- pricing.hpp ----------\n#ifndef LOWLATENCY_PRICING_HPP\n#define LOWLATENCY_PRICING_HPP\n\nstruct Order {\n    double bid;\n    double ask;\n};\n\n// Defined here: every including translation unit gets a copy, and the ODR\n// allows that for an inline function as long as the definitions match.\ninline double mid(double bid, double ask) {\n    return (bid + ask) / 2.0;\n}\n\n// Declared only: exactly one translation unit may define it.\ndouble spread_bps(const Order& order);\n\n// Declaration, not a definition: no storage is allocated here.\nextern int tick_count;\n\n#endif\n\n// ---------- pricing.cpp ----------\n#include <cmath>\n\nint tick_count = 0;  // the one definition in the program\n\ndouble spread_bps(const Order& order) {\n    ++tick_count;\n    return 10'000.0 * std::abs(order.ask - order.bid)\n           / mid(order.bid, order.ask);\n}\n",
+      "notes": "Moving the spread_bps definition into the header would make every including translation unit emit a strong symbol with that name, and the linker would report multiple definition. Marking it inline instead would be legal but would put a hot function's body in every user's rebuild path — the trade the chapter's header/source split is balancing."
+    },
+    {
+      "id": "c19-w02",
+      "section": "Headers, guards, and the preprocessor",
+      "minutes": 8,
+      "prompt": "Replace two macros with safe C++: `#define SQUARE(x) x * x` and `#define GREATER(a, b) ((a) > (b) ? (a) : (b))`. Then write the one conditional-compilation macro use the chapter keeps, and say in comments what each replacement fixes.",
+      "checklist": [
+        "square is a constexpr function, not a macro",
+        "The maximum is a function template (or a constrained function) that evaluates each argument once",
+        "A comment names the precedence bug SQUARE has and the double-evaluation bug GREATER has",
+        "An #ifdef NDEBUG block defines an inline constexpr bool for diagnostics",
+        "No object-like macro is used where a constant would do"
+      ],
+      "solution": "// SQUARE(a + b) expanded to a + b * a + b: the preprocessor substitutes\n// tokens before the compiler knows about precedence. A function evaluates\n// its argument first.\nconstexpr int square(int value) {\n    return value * value;\n}\n\n// GREATER(++sequence, -1) substituted ++sequence into two places and\n// incremented twice. A function has parameter objects, so each argument is\n// evaluated exactly once.\ntemplate<class T>\nconstexpr const T& greater_of(const T& lhs, const T& rhs) {\n    return lhs > rhs ? lhs : rhs;\n}\n\n// Conditional compilation is the use the preprocessor keeps: there is no\n// language-level way to select this at translation time.\n#ifdef NDEBUG\ninline constexpr bool diagnostics_enabled = false;\n#else\ninline constexpr bool diagnostics_enabled = true;\n#endif\n",
+      "notes": "inline on the constexpr variable is what lets a header define it once for the whole program instead of giving every translation unit a private copy. NDEBUG is also what <cassert> reads to decide whether assert checks anything, so the same switch already governs more than your own diagnostics."
+    },
+    {
+      "id": "c19-w03",
+      "section": "Declarations, definitions, and the ODR",
+      "minutes": 9,
+      "prompt": "Write a configuration header fragment that publishes four things correctly: a compile-time constant usable in every translation unit, a mutable global whose single definition lives elsewhere, a class definition, and an inline function. Comment each with whether it is a declaration, a definition, or both, and how many the program may contain.",
+      "checklist": [
+        "The compile-time constant is an inline constexpr variable (or a static constexpr member)",
+        "The mutable global appears as extern with no initialiser, and its one definition is shown separately",
+        "The class definition is present in the header and the comment notes it may be repeated per translation unit",
+        "The inline function is defined in the header with a comment about matching token sequences",
+        "Each item's comment says declaration, definition, or both"
+      ],
+      "solution": "// ---------- limits.hpp ----------\n#ifndef LOWLATENCY_LIMITS_HPP\n#define LOWLATENCY_LIMITS_HPP\n\n// Definition. inline (C++17) makes every including translation unit refer to\n// one entity rather than each getting a private copy.\ninline constexpr int max_symbols = 4096;\n\n// Declaration only. Exactly one definition may exist in the whole program.\nextern int tick_count;\n\n// Definition. A class may be defined in many translation units provided\n// every definition is the same one.\nstruct Order {\n    double bid;\n    double ask;\n};\n\n// Definition. May appear in many translation units, but the token sequences\n// must match: `return (bid + ask) / 2.0;` and `return (ask + bid) / 2.0;`\n// in two headers would be an ODR violation even though the results agree.\ninline double mid(double bid, double ask) {\n    return (bid + ask) / 2.0;\n}\n\n#endif\n\n// ---------- limits.cpp ----------\nint tick_count = 0;  // the program's one definition of tick_count\n",
+      "notes": "A missing definition for tick_count is not a compile error: each translation unit had a usable declaration, so the check necessarily waits until linking, where it surfaces as an undefined reference. Two definitions produce the opposite failure, multiple definition — two strong symbols claiming one name."
+    },
+    {
+      "id": "c19-w04",
+      "section": "Three orthogonal properties",
+      "minutes": 8,
+      "prompt": "Write a translation unit that demonstrates three different combinations of storage duration, scope and linkage: a call counter that persists but is unreachable from outside its function, a process-wide counter other translation units may denote, and a helper that no other translation unit can denote. Comment each with all three properties.",
+      "checklist": [
+        "A function-local static: static duration, block scope, no linkage",
+        "A namespace-scope non-static definition plus an extern declaration comment: static duration, namespace scope, external linkage",
+        "An anonymous-namespace helper: internal linkage, and the comment notes a function has no storage duration",
+        "Each comment states all three properties explicitly",
+        "No entity relies on a name being invisible to imply that it is unreachable"
+      ],
+      "solution": "#include <cstddef>\n\n// static duration, namespace scope, external linkage. Another translation\n// unit that writes `extern std::size_t total_messages;` denotes this object.\nstd::size_t total_messages = 0;\n\nnamespace {\n\n// Internal linkage: another .cpp may spell `normalize` too, and it will be a\n// different function. Functions have no storage duration at all — that\n// classification applies to objects and references.\ndouble normalize(double price) {\n    return price < 0.0 ? 0.0 : price;\n}\n\n}  // namespace\n\ndouble record(double price) {\n    // static duration (lives for the whole program), block scope (the name is\n    // visible only here), no linkage (nothing elsewhere can denote it).\n    static std::size_t call_count = 0;\n    ++call_count;\n\n    ++total_messages;\n    return normalize(price);\n}\n",
+      "notes": "The three properties are genuinely independent: a block-scope name can denote an external-linkage global, and a namespace-scope name can have internal linkage. Visibility in the source text tells you nothing by itself about lifetime or about whether another translation unit can reach the entity."
+    },
+    {
+      "id": "c19-w05",
+      "section": "Internal linkage and language linkage",
+      "minutes": 8,
+      "prompt": "Two .cpp files each need a small helper struct called Helper and a clamp function. Rewrite one of them so the pair cannot collide with the other file's version, and add a comment explaining what would happen without the change.",
+      "checklist": [
+        "Both the type and the function are inside an anonymous namespace",
+        "A comment states that namespace-scope static cannot localise a type",
+        "A comment states that without the change the two definitions are an ODR violation that may link silently",
+        "The public entry point stays outside the anonymous namespace",
+        "Nothing in the anonymous namespace is referenced from another translation unit"
+      ],
+      "solution": "namespace {\n\n// Anonymous namespace: internal linkage for the type as well as the\n// function. Namespace-scope `static` would localise clamp_price but has no\n// way to localise the class — and two .cpp files each defining their own\n// `struct Helper` at namespace scope is an ODR violation that commonly\n// links clean and misbehaves at run time.\nstruct Helper {\n    int value;\n\n    void normalize() { value = 0; }\n};\n\ndouble clamp_price(double price) {\n    return price < 0.0 ? 0.0 : price;\n}\n\n}  // namespace\n\n// The only name this translation unit publishes.\ndouble normalized_price(double price) {\n    Helper helper{1};\n    helper.normalize();\n    return clamp_price(price) + helper.value;\n}\n",
+      "notes": "The silent failure mode is the reason for the rule. Out-of-class inline member definitions become weak or COMDAT symbols with the same mangled name, so the linker keeps one and discards the other without comparing bodies — and the file whose layout lost may then write past the end of its own object."
+    },
+    {
+      "id": "c19-w06",
+      "section": "Internal linkage and language linkage",
+      "minutes": 10,
+      "prompt": "Write a flat C-linkage wrapper over a C++ class so a Python ctypes consumer can drive it: an opaque handle type, create/send/destroy functions, and the __cplusplus guard pattern a shared header needs. Say in comments why the API takes what it takes.",
+      "checklist": [
+        "The handle is an incomplete struct type in the API, not the C++ class",
+        "Every exported function is inside an extern \"C\" block guarded by #ifdef __cplusplus",
+        "The API passes C-compatible values and pointers, not references or C++ class types",
+        "The creating side also supplies the destroy function, so ownership does not cross inconsistently",
+        "A comment notes that these names cannot be overloaded"
+      ],
+      "solution": "#include <string>\n#include <vector>\n\n// ---------- session_c.h (shared with C consumers) ----------\n#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n// Opaque handle: the concrete layout stays on the library's side.\ntypedef struct session_handle session_handle;\n\n// C linkage means one flat symbol per name — these cannot be overloaded,\n// and they must trade in C-compatible values and pointers rather than\n// references or classes with constructors and destructors.\nsession_handle* session_create(const char* endpoint);\nvoid session_send(session_handle* handle, int order_id);\nvoid session_destroy(session_handle* handle);\n\n#ifdef __cplusplus\n}\n#endif\n\n// ---------- session_c.cpp ----------\nstruct session_handle {\n    std::string endpoint;\n    std::vector<int> pending;\n};\n\nextern \"C\" session_handle* session_create(const char* endpoint) {\n    return new session_handle{endpoint, {}};\n}\n\nextern \"C\" void session_send(session_handle* handle, int order_id) {\n    handle->pending.push_back(order_id);\n}\n\n// The library that created the object must also destroy it, so allocation\n// and runtime-library ownership never cross the boundary inconsistently.\nextern \"C\" void session_destroy(session_handle* handle) {\n    delete handle;\n}\n",
+      "notes": "If the definitions were compiled without seeing the extern \"C\" declarations they would get mangled C++ names, and the linker would report undefined references to the unmangled ones — which is why the source file includes the same header (or repeats extern \"C\") rather than trusting the declarations to match."
+    },
+    {
+      "id": "c19-w07",
+      "section": "PImpl and opaque ABI boundaries",
+      "minutes": 12,
+      "prompt": "Convert a class whose header currently exposes a std::string and a std::vector member into a PImpl class. Show the header half and the source half, get the special member functions right, and comment on why each one is where it is.",
+      "checklist": [
+        "The header declares a nested Impl class without defining it and holds a std::unique_ptr<Impl>",
+        "The destructor is declared in the header and defined in the source file where Impl is complete",
+        "Move operations are declared in the header and defaulted in the source file; copy is deleted or implemented deliberately",
+        "The header no longer includes <string> or <vector>",
+        "Public member functions forward to impl_"
+      ],
+      "solution": "// ---------- session.hpp ----------\n#pragma once\n\n#include <memory>\n#include <string_view>\n\nclass Session {\npublic:\n    explicit Session(std::string_view endpoint);\n\n    // Declared here, defined in the .cpp: destroying a unique_ptr<Impl>\n    // needs Impl to be complete, and it deliberately is not complete here.\n    ~Session();\n\n    Session(Session&&) noexcept;\n    Session& operator=(Session&&) noexcept;\n\n    Session(const Session&) = delete;\n    Session& operator=(const Session&) = delete;\n\n    void send(int order_id);\n\nprivate:\n    class Impl;                   // declaration only\n    std::unique_ptr<Impl> impl_;  // stable outer size\n};\n\n// ---------- session.cpp ----------\n#include <string>\n#include <utility>\n#include <vector>\n\nclass Session::Impl {\npublic:\n    explicit Impl(std::string_view endpoint) : endpoint_(endpoint) {}\n\n    void send(int order_id) { pending_.push_back(order_id); }\n\nprivate:\n    std::string endpoint_;\n    std::vector<int> pending_;\n};\n\nSession::Session(std::string_view endpoint)\n    : impl_(std::make_unique<Impl>(endpoint)) {}\n\n// Defined where Impl is complete; `= default` is enough.\nSession::~Session() = default;\nSession::Session(Session&&) noexcept = default;\nSession& Session::operator=(Session&&) noexcept = default;\n\nvoid Session::send(int order_id) {\n    impl_->send(order_id);\n}\n",
+      "notes": "Users now compile against a class containing one pointer, so a private member change recompiles session.cpp instead of every translation unit that includes the header — and sizeof(Session) does not move, which is what makes the boundary ABI-stable. The price is a pointer chase and an allocation per object, so keep this off per-event value types."
+    },
+    {
+      "id": "c19-w08",
+      "section": "Visibility and weak symbols",
+      "minutes": 8,
+      "prompt": "Write the export-macro header fragment for a shared library built with -fvisibility=hidden: a macro that marks the public surface, applied to one function and one variable, plus a comment giving the build flags and the command that checks the result.",
+      "checklist": [
+        "The macro expands to __attribute__((visibility(\"default\"))) when building the library and to nothing otherwise",
+        "The build-side branch is selected by a macro defined only for the library's own build",
+        "The macro is applied to both a function declaration and an extern variable declaration",
+        "A comment gives the -DPRICING_BUILD -fvisibility=hidden build flags",
+        "A comment gives an nm -D command to inspect the actual dynamic export surface"
+      ],
+      "solution": "// Build the library with: -DPRICING_BUILD -fvisibility=hidden\n// Consumers compile without PRICING_BUILD.\n#if defined(PRICING_BUILD)\n#define PRICING_API __attribute__((visibility(\"default\")))\n#else\n#define PRICING_API\n#endif\n\nstruct Order;\n\nPRICING_API double spread_bps(const Order& order);\nPRICING_API extern int tick_count;\n\n// Verify the export surface rather than assuming the attribute worked:\n//   nm -D --defined-only libpricing.so | c++filt\n// A smaller dynamic symbol table means less loader lookup and relocation\n// work, and a hidden function cannot be interposed, so the optimiser is\n// free to inline it or bind calls to it directly.\n",
+      "notes": "Visibility is not linkage: these entities keep external linkage and still link normally inside the library. Treat the macro as part of the ABI contract — hiding a symbol a plugin or dlopen consumer expects to find is a breaking change, and it will surface only at run time."
+    }
+  ]
+}

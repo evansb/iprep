@@ -1,0 +1,670 @@
+{
+  "chapter": 23,
+  "mcq": [
+    {
+      "id": "c23-m01",
+      "section": "Concurrency, Parallelism, and the Units of Execution",
+      "difficulty": "easy",
+      "prompt": "What distinguishes concurrency from parallelism?",
+      "choices": [
+        "Concurrency requires multiple cores; parallelism does not",
+        "They are two names for the same property, one from the language and one from the hardware",
+        "Concurrency structures a program as independently progressing activities; parallelism executes activities physically at the same time",
+        "Concurrency describes processes; parallelism describes threads"
+      ],
+      "answer": 2,
+      "explain": "Concurrency is a structuring property — a concurrent program can interleave its activities on a single core. Parallelism is a physical property and needs multiple processing resources. Treating them as synonyms is the mistake that leads people to expect a speedup from adding threads on a one-core machine, where the structure is unchanged but no work overlaps."
+    },
+    {
+      "id": "c23-m02",
+      "section": "Concurrency, Parallelism, and the Units of Execution",
+      "difficulty": "medium",
+      "prompt": "A task suspends inside a thread pool and is later resumed. What does that imply for `thread_local` state?",
+      "choices": [
+        "The task resumes on the worker that started it, so thread-local state follows the task",
+        "The task may resume on a different worker, so thread-local state belongs to the execution thread, not to the logical request",
+        "Tasks always own a thread for their lifetime, so the question does not arise",
+        "The pool copies thread-local state to the new worker when a task migrates"
+      ],
+      "answer": 1,
+      "explain": "A task is an application-level unit of work assigned to a thread; a pool can run thousands of tasks on a fixed set of workers and a resumed task may land on a different one. Nothing copies thread-local state across that boundary, so request-scoped data stored in TLS silently belongs to whichever worker happens to be running. Storing request semantics in TLS is only safe when tasks are deliberately pinned."
+    },
+    {
+      "id": "c23-m03",
+      "section": "Starting Threads: `std::thread` and `std::jthread`",
+      "difficulty": "easy",
+      "prompt": "A `std::thread` object is destroyed while it is still joinable. What happens?",
+      "choices": [
+        "It joins automatically, waiting for the thread to finish",
+        "It detaches automatically and the thread runs on",
+        "The behaviour is undefined",
+        "It calls std::terminate"
+      ],
+      "answer": 3,
+      "explain": "The destructor of a joinable std::thread calls std::terminate — a deliberate design choice, because neither silently joining (an unexpected blocking wait) nor silently detaching (an unexpected lifetime escape) is safe to guess. This is not undefined behaviour: it is a defined, loud failure. std::jthread exists precisely so that the automatic answer can be 'request stop, then join'."
+    },
+    {
+      "id": "c23-m04",
+      "section": "Starting Threads: `std::thread` and `std::jthread`",
+      "difficulty": "medium",
+      "prompt": "What does the destructor of `std::jthread` do?",
+      "choices": [
+        "It requests a cooperative stop through its stop source, then joins",
+        "It joins first, then requests stop for any other threads sharing the token",
+        "It detaches the thread so the destructor never blocks",
+        "It forcibly terminates the running thread"
+      ],
+      "answer": 0,
+      "explain": "The order matters: requesting stop first gives a cooperating worker the chance to notice and return, and only then does the destructor block in join(). Joining first would deadlock against a worker looping until it is asked to stop. Nothing about jthread is preemptive — a worker that never polls its token still makes the destructor wait indefinitely."
+    },
+    {
+      "id": "c23-m05",
+      "section": "Starting Threads: `std::thread` and `std::jthread`",
+      "difficulty": "medium",
+      "prompt": "A class holds a `std::mutex`, a `std::queue`, and a `std::jthread` worker that uses both. Where should the jthread member be declared?",
+      "choices": [
+        "First, so the worker is constructed before the state it uses",
+        "Anywhere — member destruction order does not affect a jthread",
+        "Last, so it is destroyed first and joins while the mutex and queue are still alive",
+        "Last, so that it is constructed first and can prime the queue"
+      ],
+      "answer": 2,
+      "explain": "Members are destroyed in reverse declaration order, so the last-declared member is destroyed first. Declaring the jthread last makes its automatic join run while the mutex and queue it touches are still constructed. Declaring it first inverts that: the queue and mutex are destroyed while a worker may still be using them, which is a use-after-destruction bug the compiler will not diagnose."
+    },
+    {
+      "id": "c23-m06",
+      "section": "Starting Threads: `std::thread` and `std::jthread`",
+      "difficulty": "hard",
+      "prompt": "Passing `counter` directly to a thread whose callable takes `int&` fails to compile; wrapping it as `std::ref(counter)` fixes that. Which problem does `std::ref` NOT solve?",
+      "choices": [
+        "Binding the thread's stored argument to an `int&` parameter",
+        "The requirement that `counter` outlive the worker's use of it",
+        "Making the argument storable in the thread's internal argument tuple",
+        "The decay-copy that would otherwise hand the callable a copy"
+      ],
+      "answer": 1,
+      "explain": "std::ref produces a copyable reference_wrapper, which both satisfies the decay-copy requirement and converts back to int& at the call — so it fixes the invocability problem. It says nothing about lifetime. If counter is a local and the thread is detached, or joined after the enclosing scope has already returned, the worker still holds a dangling reference. Reference semantics and lifetime are separate obligations."
+    },
+    {
+      "id": "c23-m07",
+      "section": "Thread-Local Storage",
+      "difficulty": "easy",
+      "prompt": "How many instances does a `thread_local std::mt19937 engine` have, and when is each destroyed?",
+      "choices": [
+        "One per process, destroyed at program exit",
+        "One per thread, destroyed when that thread exits",
+        "One per call to the enclosing function, destroyed at end of scope",
+        "One per thread, all destroyed together at program exit"
+      ],
+      "answer": 1,
+      "explain": "A thread_local object has exactly one instance per thread, constructed on first odr-use when dynamic initialization is required and destroyed during that thread's teardown — not at process exit. That per-thread teardown is why thread-local destructors can recreate destruction-order hazards against other thread-local or static objects."
+    },
+    {
+      "id": "c23-m08",
+      "section": "Thread-Local Storage",
+      "difficulty": "medium",
+      "prompt": "Which statement about the cost of thread-local storage is accurate?",
+      "choices": [
+        "Access is always a single fixed offset from a thread register",
+        "Dynamic initialization runs once per process, like a namespace-scope static",
+        "A large `thread_local` buffer costs the same as one global buffer of the same size",
+        "A dynamically initialized thread-local needs a per-thread guard check on access, and a large one multiplies footprint by the number of participating threads"
+      ],
+      "answer": 3,
+      "explain": "Both halves matter. The guard check is per thread because the constructor must run once for every thread that reaches the declaration — an expensive constructor is paid N times, not once. And N threads means N copies of the object, so a worst-case-sized scratch buffer silently becomes N worst-case buffers. The fixed-offset access model applies to static TLS in the main executable; dynamic TLS in a shared library may go through a helper such as __tls_get_addr."
+    },
+    {
+      "id": "c23-m09",
+      "section": "Data Races and the Mutex Family",
+      "difficulty": "medium",
+      "prompt": "Two threads run this concurrently on a single available permit and both return true. Classify the defect.",
+      "code": "#include <atomic>\n\nstd::atomic<int> available{1};\n\nbool reserve_broken() {\n    if (available.load() > 0) {\n        available.fetch_sub(1);\n        return true;\n    }\n    return false;\n}",
+      "choices": [
+        "A data race, because two threads touch the same memory location and one writes",
+        "Neither — atomic operations make the sequence correct by construction",
+        "A race condition without a data race: every access is race-free, but check-then-act is not one transaction",
+        "A data race only if the atomic operations use relaxed ordering"
+      ],
+      "answer": 2,
+      "explain": "A data race is specifically the undefined-behaviour case of unsynchronized access, and there is none here — every access goes through std::atomic. The bug is a race condition: an incorrect result produced by an unfortunate interleaving. Both threads observe 1, both subtract, and the permit count goes negative. Making individual operations atomic never makes a compound decision atomic; that needs a single read-modify-write such as a compare-exchange loop."
+    },
+    {
+      "id": "c23-m10",
+      "section": "Data Races and the Mutex Family",
+      "difficulty": "medium",
+      "prompt": "Two threads each execute `++counter` a million times on a plain `int` with no synchronization. What does the standard say the program does?",
+      "choices": [
+        "It has undefined behaviour — no valid final value is guaranteed",
+        "It prints some value between 1,000,000 and 2,000,000, chosen by the interleaving",
+        "It prints exactly 2,000,000, because an increment compiles to a single instruction",
+        "It is implementation-defined, but always prints a value the hardware actually produced"
+      ],
+      "answer": 0,
+      "explain": "The tempting answer is the 'lost updates' story — that you get some plausible number between one and two million. That describes a hardware outcome, not the language rule. A data race is undefined behaviour, so the compiler may hoist the increment out of the loop, keep counter in a register, or assume the race cannot happen; the printed value need not correspond to any interleaving at all. ThreadSanitizer, not reasoning about instructions, is the tool that finds these."
+    },
+    {
+      "id": "c23-m11",
+      "section": "Data Races and the Mutex Family",
+      "difficulty": "medium",
+      "prompt": "Which mutex lets the same thread acquire it again without deadlocking, and what does reaching for it usually indicate?",
+      "choices": [
+        "std::timed_mutex; that the caller needs a bounded wait",
+        "std::recursive_mutex; that the locking boundary is unclear and a public/private split would state it better",
+        "std::shared_mutex; that reads dominate writes",
+        "std::mutex; relocking from the owning thread is permitted by default"
+      ],
+      "answer": 1,
+      "explain": "std::recursive_mutex tracks an owner and a count so the holder may relock. It is legal but usually a symptom: the code cannot tell whether a given function is entered with the lock held. The standard fix is a public function that locks once and private helpers whose names or contracts state that the lock is already held. Relocking a plain std::mutex from the owning thread is undefined behaviour, not a permitted operation."
+    },
+    {
+      "id": "c23-m12",
+      "section": "RAII Lock Wrappers and Multi-Lock Deadlock Avoidance",
+      "difficulty": "easy",
+      "prompt": "Which lock wrapper can be used with `condition_variable::wait`?",
+      "choices": [
+        "std::lock_guard",
+        "std::scoped_lock",
+        "std::unique_lock",
+        "Any of the three — the condition variable only needs the mutex"
+      ],
+      "answer": 2,
+      "explain": "wait() must atomically release the mutex, park, and reacquire before returning, so the wrapper has to track whether it currently owns the mutex and support unlocking and relocking. Only std::unique_lock does. lock_guard and scoped_lock are deliberately minimal: they acquire at construction and release at destruction with no state in between, which is why they compile to less but cannot express a wait."
+    },
+    {
+      "id": "c23-m13",
+      "section": "RAII Lock Wrappers and Multi-Lock Deadlock Avoidance",
+      "difficulty": "medium",
+      "prompt": "What does `std::scoped_lock lock{from.mutex, to.mutex};` provide over locking the two mutexes one after the other?",
+      "choices": [
+        "It is faster, because it takes both locks in one atomic operation",
+        "It orders the mutexes by address, which the standard requires it to do",
+        "It converts both mutexes into shared locks so readers are not excluded",
+        "It uses a deadlock-avoidance algorithm rather than holding one mutex while blocking indefinitely on the next"
+      ],
+      "answer": 3,
+      "explain": "Sequential locking creates hold-and-wait: a caller holding `from` and blocking on `to` can deadlock against a caller doing the reverse. scoped_lock avoids that by never waiting indefinitely for the second mutex while retaining the first — conceptually acquire, fail, release, retry. Address ordering is one possible implementation, but the standard specifies the deadlock-avoidance result, not the algorithm, and there is no hardware operation that locks two mutexes at once."
+    },
+    {
+      "id": "c23-m14",
+      "section": "RAII Lock Wrappers and Multi-Lock Deadlock Avoidance",
+      "difficulty": "medium",
+      "prompt": "Which of these belongs OUTSIDE the critical section?",
+      "choices": [
+        "Formatting the copied state into a log line",
+        "Reading the guarded field",
+        "Updating the guarded field",
+        "Copying the guarded field into a local"
+      ],
+      "answer": 0,
+      "explain": "The critical section should cover exactly the guarded state: read it, update it, copy out what later work needs, then release. Formatting allocates and may perform I/O, and allocation acquires allocator-internal locks — so holding an application mutex across it nests unrelated lock hierarchies and stretches the hold time by the allocator's variable work. Copying the field out is the mechanism that makes the formatting safe to do unlocked, so it must stay inside."
+    },
+    {
+      "id": "c23-m15",
+      "section": "Reader-Writer Locks, Honestly",
+      "difficulty": "medium",
+      "prompt": "Why can `std::shared_mutex` be slower than a plain `std::mutex` even when 95% of operations are reads?",
+      "choices": [
+        "Because std::shared_lock silently escalates to an exclusive lock under contention",
+        "Because readers must serialize with one another anyway",
+        "Because every reader updates shared reader bookkeeping whose cache line bounces between cores, and short read sections never recover that cost",
+        "Because the standard mandates writer preference, which stalls arriving readers"
+      ],
+      "answer": 2,
+      "explain": "Reader parallelism is not free: recording how many readers are active is itself a shared write, so the count's cache line migrates between cores even though the protected data is only read. If the read section is short, that bookkeeping dominates and a plain mutex — which serializes less machinery — wins. Readers genuinely do not exclude one another, and the standard interface exposes no portable fairness selection at all, so neither reader nor writer preference can be assumed."
+    },
+    {
+      "id": "c23-m16",
+      "section": "Reader-Writer Locks, Honestly",
+      "difficulty": "easy",
+      "prompt": "Which lock types do readers and writers use with `std::shared_mutex`?",
+      "choices": [
+        "std::shared_lock for readers, std::unique_lock for writers",
+        "std::unique_lock for readers, std::shared_lock for writers",
+        "std::lock_guard for both — the mutex decides which mode to use",
+        "std::shared_lock for both; the mutex promotes the writer automatically"
+      ],
+      "answer": 0,
+      "explain": "The wrapper, not the mutex, selects the mode: shared_lock calls lock_shared(), unique_lock calls lock(). Nothing infers the intent from the operation, and there is no promotion from shared to exclusive — attempting to build one is a classic deadlock, since two readers can each wait for the other to release before either can upgrade."
+    },
+    {
+      "id": "c23-m17",
+      "section": "Condition Variables: The Canonical Pattern",
+      "difficulty": "medium",
+      "prompt": "Why does the canonical wait pass a predicate rather than calling `condition.wait(lock)` on its own?",
+      "choices": [
+        "Because the one-argument wait() does not release the mutex while parked",
+        "Because passing a predicate lets the implementation skip the kernel wait entirely",
+        "Because notify_one() would otherwise wake every waiter",
+        "Because a wait may wake spuriously, and because a notification sent before the wait begins is lost unless durable state records it"
+      ],
+      "answer": 3,
+      "explain": "Two independent reasons, and both are about the predicate being a statement about *state*. Spurious wakeups mean returning from wait() proves nothing, so the condition must be rechecked — the two-argument overload is exactly the `while (!pred()) wait(lock);` loop. And because condition variables do not store signals, a notification that arrives before any thread waits is discarded; only durable predicate state records that work is available. Both overloads release the mutex while parked."
+    },
+    {
+      "id": "c23-m18",
+      "section": "Condition Variables: The Canonical Pattern",
+      "difficulty": "hard",
+      "prompt": "One thread calls `send_broken()` while no thread is waiting; another thread then calls `receive_broken()`. What happens?",
+      "code": "#include <condition_variable>\n#include <mutex>\n\nstd::mutex mutex;\nstd::condition_variable condition;\n\nvoid send_broken() {\n    condition.notify_one();\n}\n\nvoid receive_broken() {\n    std::unique_lock lock{mutex};\n    condition.wait(lock);\n}",
+      "choices": [
+        "The waiter returns immediately, because the notification was queued for the next waiter",
+        "The waiter may sleep forever: condition variables do not store signals, and nothing durable recorded that work was available",
+        "The waiter returns immediately, because wait() rechecks the mutex before parking",
+        "The program is ill-formed, because wait() requires a predicate"
+      ],
+      "answer": 1,
+      "explain": "A condition variable is a parking mechanism, not a message queue. notify_one() with no waiter present wakes nobody and is discarded — there is no counter and no pending-signal state. The receiver then parks with nothing left to wake it. The fix is not a bigger timeout but a durable predicate: set a `ready_` flag under the mutex before notifying, so a consumer that arrives late sees a true predicate and never parks at all. (A spurious wake could still rescue this particular program by accident, which is exactly why it must not be relied on.)"
+    },
+    {
+      "id": "c23-m19",
+      "section": "Condition Variables: The Canonical Pattern",
+      "difficulty": "medium",
+      "prompt": "When is `notify_all()` required rather than `notify_one()`?",
+      "choices": [
+        "Whenever more than one thread might be waiting on the condition variable",
+        "Never — notify_one() is always sufficient and always cheaper",
+        "When one state change may enable several waiters, or when different waiters test different predicates on the same condition variable",
+        "Only when the notifier still holds the mutex at the point of notification"
+      ],
+      "answer": 2,
+      "explain": "notify_one() is correct when one newly available item satisfies exactly one interchangeable consumer — several waiters is fine in that case, since only one can take the item. It breaks down when a single change enables several waiters, or when waiters test different predicates and notify_one() may wake one whose predicate is still false while the one that could proceed stays parked. Waking everyone for a single item is the thundering-herd cost you pay to avoid that."
+    },
+    {
+      "id": "c23-m20",
+      "section": "One-Time Initialization",
+      "difficulty": "easy",
+      "prompt": "`Config& config() { static Config instance = load_config(); return instance; }` is called concurrently by several threads. What is guaranteed?",
+      "choices": [
+        "Initialization happens exactly once; concurrent callers block until it completes and then observe the initialized object",
+        "Each thread initializes its own instance",
+        "The behaviour is undefined without an explicit mutex around the static",
+        "Initialization is repeated on each thread until every thread has run it once"
+      ],
+      "answer": 0,
+      "explain": "A function-local static — a 'magic static' — is required to be initialized exactly once even under concurrent first calls; the implementation inserts a guard that makes the losing threads wait. Adding a mutex around it is redundant, and adding an unsynchronized `bool initialized` beside it reintroduces exactly the data race and partial-publication hazard the guard removes. Note the one escape hatch: if load_config() throws, initialization did not complete and a later call may retry."
+    },
+    {
+      "id": "c23-m21",
+      "section": "One-Time Initialization",
+      "difficulty": "medium",
+      "prompt": "The callable passed to `std::call_once` throws. What is the state of the `std::once_flag` afterwards?",
+      "choices": [
+        "Set — later calls do nothing, so the object stays half-initialized",
+        "Set — later calls rethrow the stored exception",
+        "Unset — the exception propagates to that caller, and another call may try again",
+        "Undefined — the once_flag must be destroyed and recreated"
+      ],
+      "answer": 2,
+      "explain": "call_once completes the flag only when the callable returns normally, so a throwing attempt leaves the flag unset and the exception reaches its caller. That is what makes retry possible and is the same rule magic statics follow. The tempting wrong answer — flag set, object half-initialized — would be the behaviour of a hand-rolled `if (!done) { init(); done = true; }` if `done` were set before the work, which is one more reason not to hand-roll it."
+    },
+    {
+      "id": "c23-m22",
+      "section": "The C++20 Kit: Semaphores, Latches, Barriers, and Atomic Wait",
+      "difficulty": "medium",
+      "prompt": "Which property distinguishes `std::counting_semaphore` from `std::mutex`?",
+      "choices": [
+        "A semaphore has no thread ownership — one thread may acquire a permit and a different thread may release it",
+        "A semaphore never blocks; it returns false when no permit is available",
+        "A semaphore is always faster, because it never reaches the kernel",
+        "A semaphore integrates with std::lock_guard and std::unique_lock"
+      ],
+      "answer": 0,
+      "explain": "The absence of ownership is exactly what makes a semaphore right for signalling and resource slots — the thread that finishes an order can release the permit the submitting thread acquired. It is also why a binary_semaphore is a poor mutex substitute: there is no owner to check, no relocking diagnostic, and no lock-wrapper integration, so a stray release simply invents a permit and quietly breaks the resource bound."
+    },
+    {
+      "id": "c23-m23",
+      "section": "The C++20 Kit: Semaphores, Latches, Barriers, and Atomic Wait",
+      "difficulty": "easy",
+      "prompt": "What is the difference between `std::latch` and `std::barrier`?",
+      "choices": [
+        "A latch is reusable across phases; a barrier is one-shot",
+        "Both are reusable, but only a barrier can run a completion function",
+        "Both are one-shot; a barrier merely adds a completion function",
+        "A latch is a one-shot countdown that stays open once it reaches zero; a barrier resets for the next phase"
+      ],
+      "answer": 3,
+      "explain": "Reusability is the axis. A latch counts down once and, once open, stays open and cannot be reset — right for facts that happen once, like 'all workers are ready'. A barrier is a repeated phase boundary: every participant arrives, an optional completion step runs, and the barrier resets so the next phase can use it. That reset also creates an obligation a latch does not have — every remaining participant must reach every phase, or its peers wait forever."
+    },
+    {
+      "id": "c23-m24",
+      "section": "The C++20 Kit: Semaphores, Latches, Barriers, and Atomic Wait",
+      "difficulty": "medium",
+      "prompt": "What does `ready.wait(false)` do on a `std::atomic<bool> ready`?",
+      "choices": [
+        "Waits until the value becomes false",
+        "Blocks while the atomic still equals false, returning once a store changes it and notification wakes the waiter",
+        "Spins for an implementation-defined period and then throws on timeout",
+        "Registers a callback to be invoked on the next store to the atomic"
+      ],
+      "answer": 1,
+      "explain": "The argument is the value the waiter expects to be *stale*: wait(old) blocks while the atomic still equals old. Reading it as 'wait until it becomes false' is the classic inversion and produces a program that returns instantly and then reads unpublished data. The implementation checks in user space first and can park with futex-shaped machinery, which is why the publisher must call notify_one/notify_all after the store."
+    },
+    {
+      "id": "c23-m25",
+      "section": "Spinning, Parking, and What a Mutex Really Is",
+      "difficulty": "medium",
+      "prompt": "On an oversubscribed machine, why can a pure spin lock be catastrophic rather than merely wasteful?",
+      "choices": [
+        "Because the atomic exchange in the spin loop is slower than a system call",
+        "Because a spinning thread cannot be interrupted by a signal or preempted",
+        "Because the spinner can consume the very time slice the descheduled lock holder needs in order to run and release",
+        "Because spin locks cannot be used with RAII lock wrappers"
+      ],
+      "answer": 2,
+      "explain": "Spinning trades CPU for wake latency, and that trade is fine when the holder is running and will release promptly. When the holder has been descheduled, the spinner burns a full logical core doing nothing while blocking the only thread that can make progress — the waste becomes a livelock-shaped stall rather than a small overhead. A secondary effect compounds it: a tight exchange loop writes the lock's cache line on every attempt, so the waiting itself slows the owner down. Spin-then-park bounds the failure."
+    },
+    {
+      "id": "c23-m26",
+      "section": "Spinning, Parking, and What a Mutex Really Is",
+      "difficulty": "hard",
+      "prompt": "What does the kernel-side futex wait check before putting the caller to sleep, and why does it matter?",
+      "choices": [
+        "That the futex word still holds the expected value — otherwise unlock already happened and the waiter would sleep through the release",
+        "That the calling thread's priority exceeds the current holder's, to avoid inversion",
+        "That no other waiter is already queued, so that FIFO order is preserved",
+        "That the mutex is not recursive, since recursion would corrupt the wait queue"
+      ],
+      "answer": 0,
+      "explain": "There is a window between the user-space code observing a locked word and the thread actually entering the kernel. If unlock lands in that window, the wake finds no waiter, and a naive implementation would then park forever. Passing the expected value into the futex wait closes it: the kernel re-checks under its own lock and returns immediately if the value has changed. This is what keeps the uncontended path in user space — one compare-and-swap to acquire, one store to release, no syscall — while remaining correct under contention."
+    },
+    {
+      "id": "c23-m27",
+      "section": "Thread Pools and Task Queues",
+      "difficulty": "medium",
+      "prompt": "In the chapter's ThreadPool, why is `task()` invoked after the `unique_lock`'s scope has ended?",
+      "choices": [
+        "Because std::function is not safe to invoke while any mutex is held",
+        "Because the condition variable requires its mutex to be free during a notify",
+        "Because the mutex protects the queue, not execution — running the task under it would serialize the whole pool and let arbitrary user code block submission",
+        "Because the task may call submit() itself, and std::mutex is recursive"
+      ],
+      "answer": 2,
+      "explain": "The mutex's written invariant is 'this mutex guards the task queue'. Executing user code inside it widens that invariant to cover the entire pool: workers could no longer run concurrently, and a task that blocks would also block every producer trying to submit. That is why the worker moves the callable into a local — transferring ownership before the critical section ends — and only then calls it. std::mutex is emphatically not recursive, which makes the reentrant-submit answer a deadlock rather than a justification."
+    },
+    {
+      "id": "c23-m28",
+      "section": "Thread Pools and Task Queues",
+      "difficulty": "hard",
+      "prompt": "Every task running in a fixed-size pool synchronously waits for the result of another task submitted to the same pool. What is the failure?",
+      "choices": [
+        "Livelock — the workers spin, react to each other, and never complete",
+        "Deadlock by starvation — every worker is blocked on work that remains queued behind the blocked workers",
+        "Priority inversion — the queued tasks effectively outrank the running ones",
+        "A lock convoy — the workers parade one at a time through the queue mutex"
+      ],
+      "answer": 1,
+      "explain": "There is no lock cycle here and no CPU burn, which is why 'deadlock' and 'livelock' both feel wrong at first — but the four deadlock conditions are satisfied with pool workers as the resource: each worker is held while waiting for another, and nothing can preempt it. The queued tasks that would release the waiters can never be dequeued because no worker is free. Livelock would show high CPU and rising retry counts; this shows idle CPU and no progress at all."
+    },
+    {
+      "id": "c23-m29",
+      "section": "Pathologies",
+      "difficulty": "medium",
+      "prompt": "This function never waits for `second` while holding `first`, so deadlock is ruled out. What can still go wrong?",
+      "code": "#include <mutex>\n#include <thread>\n\nvoid update_guarded_pair();\n\nvoid update_pair(std::mutex& first, std::mutex& second) {\n    for (;;) {\n        std::unique_lock first_lock{first};\n        std::unique_lock second_lock{second, std::try_to_lock};\n\n        if (second_lock.owns_lock()) {\n            update_guarded_pair();\n            return;\n        }\n\n        first_lock.unlock();\n        std::this_thread::yield();\n    }\n}",
+      "choices": [
+        "Deadlock, if the two references name the same mutex object",
+        "A data race on the guarded pair, because try_to_lock does not synchronize",
+        "Priority inversion, because a try-lock cannot participate in priority inheritance",
+        "Livelock — opposing callers can release and retry in lockstep forever, burning CPU without completing"
+      ],
+      "answer": 3,
+      "explain": "Breaking hold-and-wait removes the wait cycle, so no thread is blocked — but two callers arriving in opposite orders can each grab their first mutex, fail the try-lock, release, yield, and repeat indefinitely. That is livelock: the threads execute and react to each other while no operation completes, showing high CPU and a rising retry count rather than blocked stacks. Randomized backoff makes the lockstep unlikely, but it is a contention policy, not a substitute for a coherent lock order. (The same-mutex case is real, which is why the full version in the chapter special-cases `&first == &second` before the loop.)"
+    },
+    {
+      "id": "c23-m30",
+      "section": "Latency Lens",
+      "difficulty": "medium",
+      "prompt": "Why is notifying a condition variable *after* releasing its mutex the usual latency optimization?",
+      "choices": [
+        "Because calling notify_one() while holding the mutex is undefined behaviour",
+        "Because a waiter woken while the notifier still holds the mutex wakes directly into a blocked acquire of that same mutex",
+        "Because notify_one() cannot be called from a thread that owns the associated mutex",
+        "Because the predicate state is not visible to other threads until the mutex is released"
+      ],
+      "answer": 1,
+      "explain": "Notifying under the lock is perfectly correct — nothing is undefined and nothing forbids it. It is just wasteful: the woken thread's very first action inside wait() is to reacquire the mutex, which the notifier still holds, so it pays a scheduler round trip only to park again. The visibility answer is the subtle wrong one: publishing the predicate state *under* the mutex is what makes it visible to any future lock holder, and that requirement is unchanged by where the notify goes."
+    }
+  ],
+  "reading": [
+    {
+      "id": "c23-r01",
+      "section": "Starting Threads: `std::thread` and `std::jthread`",
+      "prompt": "What does this print?",
+      "code": "#include <atomic>\n#include <iostream>\n#include <thread>\n#include <vector>\n\nstd::atomic<int> total{0};\n\nint main() {\n    {\n        std::vector<std::jthread> workers;\n        for (int w = 0; w < 4; ++w) {\n            workers.emplace_back([] {\n                for (int i = 0; i < 1000; ++i) {\n                    total.fetch_add(1);\n                }\n            });\n        }\n    }  // every jthread is destroyed here, and each one joins\n\n    std::cout << total.load() << '\\n';\n}",
+      "kind": "value",
+      "accept": ["4000"],
+      "explain": "Four workers each perform 1000 atomic increments, so the total is 4000 regardless of interleaving — fetch_add is an indivisible read-modify-write, so no update is lost. The load is placed after the inner scope ends, which is where the vector destroys its jthreads and each one joins. Printing inside the scope would give an arbitrary partial count instead."
+    },
+    {
+      "id": "c23-r02",
+      "section": "Starting Threads: `std::thread` and `std::jthread`",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <thread>\n\nvoid increment(int& counter) {\n    ++counter;\n}\n\nint main() {\n    int counter = 0;\n    std::jthread worker{increment, counter};\n    worker.join();\n}",
+      "kind": "no-compile",
+      "explain": "Thread arguments are decay-copied into the thread's internal storage, so what is stored here is an `int`, not an `int&`. The thread then tries to invoke `increment` with that stored value, and an rvalue cannot bind to `int&` — so the constructor's invocability requirement fails and the program is ill-formed. This is a case where the language refuses to silently give you the 'updates a copy' bug: write `std::ref(counter)` and take on the lifetime obligation explicitly."
+    },
+    {
+      "id": "c23-r03",
+      "section": "Starting Threads: `std::thread` and `std::jthread`",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <iostream>\n#include <memory>\n#include <semaphore>\n#include <thread>\n\nstd::binary_semaphore released{0};\n\nvoid bump(int& counter) {\n    released.acquire();\n    ++counter;\n}\n\nint main() {\n    std::thread worker;\n    {\n        auto counter = std::make_unique<int>(0);\n        worker = std::thread{bump, std::ref(*counter)};\n    }  // the int is freed here\n\n    released.release();\n    worker.join();\n    std::cout << \"joined\\n\";\n}",
+      "kind": "ub",
+      "explain": "std::ref made the argument storable and preserved reference semantics, but it did not extend anything's lifetime. The unique_ptr frees the int at the end of the inner scope, and the semaphore then deliberately releases the worker so it dereferences the freed object — AddressSanitizer reports 'heap-use-after-free ... READ of size 4'. Note that the join is correct and comes too late to help: joining guarantees the worker has finished, not that what it referred to was still alive while it ran."
+    },
+    {
+      "id": "c23-r04",
+      "section": "Data Races and the Mutex Family",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n#include <mutex>\n#include <thread>\n#include <vector>\n\nint counter = 0;\nstd::mutex counter_mutex;\n\nvoid increment_batched() {\n    int local = 0;\n    for (int i = 0; i < 1000; ++i) {\n        ++local;\n    }\n\n    std::lock_guard lock{counter_mutex};\n    counter += local;\n}\n\nint main() {\n    {\n        std::vector<std::jthread> workers;\n        for (int w = 0; w < 4; ++w) {\n            workers.emplace_back(increment_batched);\n        }\n    }\n\n    std::cout << counter << '\\n';\n}",
+      "kind": "value",
+      "accept": ["4000"],
+      "explain": "Each worker counts into a thread-confined local — no synchronization needed, because nothing else can see it — and then publishes one subtotal under the mutex. Four subtotals of 1000 give 4000, deterministically. The lock acquisitions fall from 4000 to 4, which is the whole point of batching; what it costs is publication freshness, since `counter` shows nothing until a worker finishes its batch."
+    },
+    {
+      "id": "c23-r05",
+      "section": "Data Races and the Mutex Family",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <iostream>\n#include <thread>\n\nint counter = 0;\n\nvoid increment_many() {\n    for (int i = 0; i < 100000; ++i) {\n        ++counter;\n    }\n}\n\nint main() {\n    {\n        std::jthread first{increment_many};\n        std::jthread second{increment_many};\n    }\n\n    std::cout << counter << '\\n';\n}",
+      "kind": "ub",
+      "explain": "`++counter` on a plain int is an unsynchronized read-modify-write performed by two threads, so this is a data race and therefore undefined behaviour — not merely a lost-update problem with a plausible answer. Do not predict a number: the compiler may keep counter in a register across the loop, and it is entitled to optimize on the assumption that no race occurs. ThreadSanitizer is the tool that reports this ('WARNING: ThreadSanitizer: data race'); ASan and UBSan do not instrument for races, so a quiet run here proves nothing. The fixes are a mutex, a batched subtotal, or std::atomic<int>."
+    },
+    {
+      "id": "c23-r06",
+      "section": "RAII Lock Wrappers and Multi-Lock Deadlock Avoidance",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <condition_variable>\n#include <mutex>\n\nstd::mutex mutex;\nstd::condition_variable ready;\nbool flag = false;\n\nint main() {\n    std::lock_guard lock{mutex};\n    ready.wait(lock, [] {\n        return flag;\n    });\n}",
+      "kind": "no-compile",
+      "explain": "std::condition_variable::wait takes a std::unique_lock<std::mutex>, and std::lock_guard does not convert to one. The requirement is not arbitrary: wait must release the mutex, park, and reacquire before returning, and a lock_guard has no state in which to record that it temporarily does not own the mutex. Changing the declaration to `std::unique_lock lock{mutex};` is the whole fix."
+    },
+    {
+      "id": "c23-r07",
+      "section": "Condition Variables: The Canonical Pattern",
+      "prompt": "What does this print?",
+      "code": "#include <condition_variable>\n#include <iostream>\n#include <mutex>\n#include <thread>\n\nclass PriceHandoff {\npublic:\n    void publish(int price) {\n        {\n            std::lock_guard lock{mutex_};\n            price_ = price;\n            ready_ = true;\n        }\n        ready_condition_.notify_one();\n    }\n\n    int receive() {\n        std::unique_lock lock{mutex_};\n        ready_condition_.wait(lock, [this] {\n            return ready_;\n        });\n        ready_ = false;\n        return price_;\n    }\n\nprivate:\n    std::mutex mutex_;\n    std::condition_variable ready_condition_;\n    int price_ = 0;\n    bool ready_ = false;\n};\n\nint main() {\n    PriceHandoff handoff;\n    std::jthread producer{[&handoff] {\n        handoff.publish(101);\n    }};\n\n    std::cout << handoff.receive() << '\\n';\n}",
+      "kind": "value",
+      "accept": ["101"],
+      "explain": "The output is 101 and does not depend on which thread runs first — that is exactly what the durable predicate buys. If the consumer arrives first it parks and the notification wakes it; if the producer publishes first, `ready_` is already true and wait() returns without parking at all. Remove `ready_` and the second ordering loses the wakeup and hangs forever. Note also that publish() closes its lock_guard scope before notifying, so the woken consumer does not wake straight into a blocked acquire."
+    },
+    {
+      "id": "c23-r08",
+      "section": "One-Time Initialization",
+      "prompt": "What does this print?",
+      "code": "#include <atomic>\n#include <iostream>\n#include <mutex>\n#include <thread>\n#include <vector>\n\nstd::once_flag initialized;\nstd::atomic<int> initializations{0};\n\nvoid initialize() {\n    std::call_once(initialized, [] {\n        initializations.fetch_add(1);\n    });\n}\n\nint main() {\n    {\n        std::vector<std::jthread> workers;\n        for (int w = 0; w < 4; ++w) {\n            workers.emplace_back(initialize);\n        }\n    }\n\n    std::cout << initializations.load() << '\\n';\n}",
+      "kind": "value",
+      "accept": ["1"],
+      "explain": "Exactly one invocation of the callable completes; the other three callers block until it finishes and then return without running it. So the count is 1, deterministically, no matter how the four threads interleave. Replacing the once_flag with an unsynchronized `bool done` would make this both a data race and a program that can genuinely print 2 or more, because several threads can read `done == false` before any of them writes it."
+    },
+    {
+      "id": "c23-r09",
+      "section": "The C++20 Kit: Semaphores, Latches, Barriers, and Atomic Wait",
+      "prompt": "What does this print?",
+      "code": "#include <atomic>\n#include <iostream>\n#include <latch>\n#include <thread>\n#include <vector>\n\nint main() {\n    constexpr int worker_count = 4;\n    std::latch prepared{worker_count};\n    std::atomic<int> ready_workers{0};\n\n    std::vector<std::jthread> workers;\n    for (int id = 0; id < worker_count; ++id) {\n        workers.emplace_back([&] {\n            ready_workers.fetch_add(1);\n            prepared.count_down();\n        });\n    }\n\n    prepared.wait();\n    std::cout << ready_workers.load() << '\\n';\n}",
+      "kind": "value",
+      "accept": ["4"],
+      "explain": "prepared.wait() returns only once the count has reached zero, which requires all four count_down() calls — and each worker increments the atomic before it counts down. So the printed value is 4 every time, without a single join being needed for that guarantee. This is the latch's job: it converts 'four separate facts have happened' into one waitable event. A latch stays open afterwards and cannot be reset; a reusable phase boundary is std::barrier."
+    },
+    {
+      "id": "c23-r10",
+      "section": "Thread-Local Storage",
+      "prompt": "What does this print?",
+      "code": "#include <atomic>\n#include <iostream>\n#include <thread>\n#include <vector>\n\nthread_local int local_count = 0;\nstd::atomic<int> total{0};\n\nint main() {\n    {\n        std::vector<std::jthread> workers;\n        for (int w = 0; w < 4; ++w) {\n            workers.emplace_back([] {\n                for (int i = 0; i < 3; ++i) {\n                    ++local_count;\n                }\n                total.fetch_add(local_count);\n            });\n        }\n    }\n\n    std::cout << total.load() << ' ' << local_count << '\\n';\n}",
+      "kind": "value",
+      "accept": ["12 0"],
+      "explain": "There are five instances of local_count — one per worker plus one for the main thread. Each worker increments only its own to 3 with plain, unsynchronized operations (thread confinement removes the need for a lock), then publishes its subtotal once, giving 4 x 3 = 12. The main thread's instance was never touched by any worker, so it still reads 0. That last value is the whole point: `thread_local` is not a shared variable with a fancy name."
+    }
+  ],
+  "writing": [
+    {
+      "id": "c23-w01",
+      "section": "Starting Threads: `std::thread` and `std::jthread`",
+      "minutes": 10,
+      "prompt": "Write a FeedService class that owns one background worker. The worker must loop until a cooperative stop is requested, and the service must shut down correctly on ordinary scope exit and on exception unwinding without the caller ever calling join(). Add a comment stating why the worker member is declared where it is.",
+      "checklist": [
+        "Uses std::jthread, not std::thread, so no explicit join or detach is needed",
+        "The worker callable takes a std::stop_token and loops on !stop.stop_requested()",
+        "The jthread member is declared last, after every member the worker uses",
+        "A comment explains that members destroy in reverse declaration order, so the last member joins first",
+        "The state the worker touches is guarded by a mutex (or is atomic)"
+      ],
+      "solution": "#include <mutex>\n#include <stop_token>\n#include <thread>\n\nclass FeedService {\npublic:\n    FeedService()\n        : worker_{[this](std::stop_token stop) { run(stop); }} {}\n\n    long polls() const {\n        std::lock_guard lock{mutex_};\n        return polls_;\n    }\n\nprivate:\n    void run(std::stop_token stop) {\n        while (!stop.stop_requested()) {\n            poll_once();\n        }\n    }\n\n    void poll_once() {\n        std::lock_guard lock{mutex_};\n        ++polls_;\n    }\n\n    mutable std::mutex mutex_;\n    long polls_ = 0;\n\n    // Declared last on purpose: members are destroyed in reverse declaration\n    // order, so ~jthread requests stop and joins while mutex_ and polls_ are\n    // still alive. Declaring it first would destroy them under the worker.\n    std::jthread worker_;\n};",
+      "notes": "The destructor is written for you by jthread: it requests stop, then joins. Note the limit of that guarantee — the request only takes effect when the worker reaches a check, so a poll_once() that could block indefinitely would make ~FeedService wait indefinitely too. Detaching is not the fix; owning the handle in a longer-lived object is."
+    },
+    {
+      "id": "c23-w02",
+      "section": "Thread-Local Storage",
+      "minutes": 7,
+      "prompt": "A per-message formatter needs a scratch std::string and a random engine, and is called from many worker threads. Write both as thread-confined state, and add a comment naming the two costs the chapter attributes to thread_local.",
+      "checklist": [
+        "Both objects are declared thread_local inside the function, not at namespace scope as shared globals",
+        "The random engine is seeded once per thread, not on every call",
+        "The scratch buffer is reused across calls rather than reallocated",
+        "A comment names the per-thread guard check on a dynamically initialized thread-local",
+        "A comment names the footprint multiplication by the number of participating threads"
+      ],
+      "solution": "#include <random>\n#include <string>\n\n// Two costs of thread_local: a dynamically initialized instance needs a\n// per-thread guard check on access and runs its constructor once per thread\n// (not once per process), and every live thread holds its own copy, so a\n// worst-case-sized buffer costs worst_case x thread_count of memory.\n\nint jittered_price(int price) {\n    thread_local std::mt19937 engine{std::random_device{}()};\n    std::uniform_int_distribution<int> jitter{-1, 1};\n    return price + jitter(engine);\n}\n\nstd::string& scratch_buffer() {\n    thread_local std::string buffer;\n    buffer.clear();          // reuse the capacity, drop the contents\n    buffer.reserve(256);     // sized for typical work, not worst case\n    return buffer;\n}",
+      "notes": "A random engine carries mutable state, so sharing one across threads without synchronization is a data race; one engine per thread removes the sharing instead of adding a lock. Size the scratch buffer for the typical message and handle an exceptional one separately — reserving the worst case here quietly reserves it on every worker."
+    },
+    {
+      "id": "c23-w03",
+      "section": "Data Races and the Mutex Family",
+      "minutes": 8,
+      "prompt": "Write a TradeCounter that many workers update. Each worker scans its own batch of trades and must acquire the mutex once per batch, not once per trade. Provide a const total() accessor that is also correctly synchronized.",
+      "checklist": [
+        "The counting loop runs on a thread-confined local with no lock held",
+        "The mutex is acquired exactly once per batch, to publish the subtotal",
+        "The mutex member is `mutable` so that const total() can lock it",
+        "total() locks — an unsynchronized reader beside locked writers is still a data race",
+        "Locking uses an RAII wrapper, never a manual lock()/unlock() pair"
+      ],
+      "solution": "#include <mutex>\n#include <vector>\n\nclass TradeCounter {\npublic:\n    void add_batch(long count) {\n        std::lock_guard lock{mutex_};\n        total_ += count;\n    }\n\n    long total() const {\n        // Every access to guarded state follows the same policy. Locking the\n        // writers but not the readers still leaves a data race.\n        std::lock_guard lock{mutex_};\n        return total_;\n    }\n\nprivate:\n    mutable std::mutex mutex_;\n    long total_ = 0;\n};\n\nvoid count_filled(TradeCounter& counter, const std::vector<int>& trades) {\n    long local = 0;\n    for (int quantity : trades) {\n        if (quantity > 0) {\n            ++local;\n        }\n    }\n\n    counter.add_batch(local);  // one acquisition per batch\n}",
+      "notes": "This is the batching trade in miniature: one acquisition per batch instead of one per event, paid for with publication freshness — total() lags until a worker finishes its batch. If the count is all you need, std::atomic<long> with fetch_add is simpler; the mutex earns its place as soon as the guarded invariant spans more than one field."
+    },
+    {
+      "id": "c23-w04",
+      "section": "RAII Lock Wrappers and Multi-Lock Deadlock Avoidance",
+      "minutes": 10,
+      "prompt": "Write `transfer(Account& from, Account& to, int amount)` where each Account owns its own mutex guarding its own balance. It must be deadlock-free when two threads transfer in opposite directions, and must handle from and to being the same account. Then write `snapshot_log(const Account&)` that formats a log line without holding the account's mutex during formatting.",
+      "checklist": [
+        "Uses std::scoped_lock to acquire both mutexes, not two sequential locks",
+        "Special-cases &from == &to before locking (locking one mutex twice would be UB)",
+        "The insufficient-balance check happens under the lock, before any mutation",
+        "snapshot_log copies the needed state out under the lock and formats after releasing",
+        "A comment states each mutex's invariant: it guards its own account's balance"
+      ],
+      "solution": "#include <mutex>\n#include <string>\n\nstruct Account {\n    // mutex guards balance, and only balance, for this account.\n    int balance = 0;\n    mutable std::mutex mutex;\n};\n\nstd::string format_for_log(int balance);\n\nbool transfer(Account& from, Account& to, int amount) {\n    if (&from == &to) {\n        return true;  // locking the same mutex twice would be undefined\n    }\n\n    // scoped_lock avoids hold-and-wait: it never blocks indefinitely on the\n    // second mutex while retaining the first, so opposing callers cannot\n    // form a wait cycle.\n    std::scoped_lock lock{from.mutex, to.mutex};\n\n    if (from.balance < amount) {\n        return false;\n    }\n\n    from.balance -= amount;\n    to.balance += amount;\n    return true;\n}\n\nstd::string snapshot_log(const Account& account) {\n    int balance = 0;\n    {\n        std::lock_guard lock{account.mutex};\n        balance = account.balance;  // copy out, then release\n    }\n\n    return format_for_log(balance);  // allocates and formats unlocked\n}",
+      "notes": "The pairwise invariant is that a completed transfer preserves the total balance across the two accounts, which is why both mutexes have to be held across the whole check-and-move. Keeping format_for_log outside the critical section matters more than it looks: formatting allocates, allocation takes allocator-internal locks, and nesting those under an application mutex makes the contention picture much harder to reason about."
+    },
+    {
+      "id": "c23-w05",
+      "section": "Reader-Writer Locks, Honestly",
+      "minutes": 8,
+      "prompt": "Write a ConfigStore whose lookup() may run concurrently from many threads and whose reload() replaces the whole map exclusively. Then add a comment stating the measurement that would justify std::shared_mutex over a plain std::mutex here.",
+      "checklist": [
+        "Readers use std::shared_lock, the writer uses std::unique_lock",
+        "The std::shared_mutex member is `mutable` so const lookup() can lock it",
+        "reload() takes its map by value and moves it into place",
+        "A comment names the reader bookkeeping / cache-line cost of shared_mutex",
+        "A comment states that a high read percentage alone does not justify the choice"
+      ],
+      "solution": "#include <mutex>\n#include <shared_mutex>\n#include <string>\n#include <unordered_map>\n\nclass ConfigStore {\npublic:\n    std::string lookup(const std::string& key) const {\n        std::shared_lock lock{mutex_};\n        return values_.at(key);\n    }\n\n    void reload(std::unordered_map<std::string, std::string> next) {\n        std::unique_lock lock{mutex_};\n        values_ = std::move(next);\n    }\n\nprivate:\n    // Justifying shared_mutex needs the read *duration*, not the read\n    // percentage: every reader writes shared reader bookkeeping whose cache\n    // line then bounces between cores. Only read sections long enough to\n    // overlap usefully recover that cost, and only if writes stay rare\n    // enough not to repeatedly exclude readers. Measure both against a\n    // plain std::mutex before choosing.\n    mutable std::shared_mutex mutex_;\n    std::unordered_map<std::string, std::string> values_;\n};",
+      "notes": "Taking the new map by value lets the caller move it in, so the expensive construction happens outside the exclusive lock and only a cheap move happens inside it. Also note what the type name does not promise: the standard exposes no portable fairness selection, so do not infer from `shared_mutex` that readers or writers are protected from starvation."
+    },
+    {
+      "id": "c23-w06",
+      "section": "Condition Variables: The Canonical Pattern",
+      "minutes": 14,
+      "prompt": "Write a bounded blocking queue with push() and pop(). A push into a full queue must wait for space; a pop from an empty queue must wait for an item. Use two condition variables and explain in a comment why one is not enough.",
+      "checklist": [
+        "Separate not_empty and not_full condition variables, each with its own predicate",
+        "Both predicates describe durable state (size, emptiness), not an event",
+        "Waits use std::unique_lock and the predicate overload, never a bare wait()",
+        "Predicate state is only read and modified while the mutex is held",
+        "Each operation notifies the *other* condition variable after changing state",
+        "A comment explains that one shared CV would wake producers for consumer events and vice versa"
+      ],
+      "solution": "#include <condition_variable>\n#include <cstddef>\n#include <mutex>\n#include <queue>\n\nclass BoundedQueue {\npublic:\n    explicit BoundedQueue(std::size_t capacity) : capacity_(capacity) {}\n\n    void push(int value) {\n        std::unique_lock lock{mutex_};\n        not_full_.wait(lock, [this] {\n            return items_.size() < capacity_;\n        });\n\n        items_.push(value);\n        lock.unlock();          // publish first, then notify\n        not_empty_.notify_one();\n    }\n\n    int pop() {\n        std::unique_lock lock{mutex_};\n        not_empty_.wait(lock, [this] {\n            return !items_.empty();\n        });\n\n        int value = items_.front();\n        items_.pop();\n        lock.unlock();\n        not_full_.notify_one();\n        return value;\n    }\n\nprivate:\n    // Two conditions, two condition variables. With one shared CV a\n    // notify_one() after a pop could wake a blocked consumer instead of the\n    // waiting producer; that consumer rechecks its predicate, finds the\n    // queue empty, and parks again while the producer sleeps on. Correct but\n    // wasteful at best, and it forces notify_all() to stay correct.\n    std::mutex mutex_;\n    std::condition_variable not_empty_;\n    std::condition_variable not_full_;\n    std::queue<int> items_;\n    std::size_t capacity_;\n};",
+      "notes": "Both predicates describe state — 'the queue is nonempty', 'the queue has room' — which is what makes them survive scheduling delay and spurious wakeups. A predicate phrased as 'a notification occurred' cannot, because condition variables store no signals. The bound is also a design decision, not just a number: it is where the system chooses to block producers instead of converting overload into unbounded memory growth."
+    },
+    {
+      "id": "c23-w07",
+      "section": "One-Time Initialization",
+      "minutes": 6,
+      "prompt": "A Service must connect exactly once, no matter how many threads call initialize() concurrently. Its initialization assigns two members, so a single static initializer will not do. Write it, and add a comment on what happens if the initialization throws.",
+      "checklist": [
+        "Uses std::once_flag with std::call_once, not a bool guarded by a mutex",
+        "The once_flag is a member, initialized by its default constructor only",
+        "Both members are assigned inside the single call_once callable",
+        "A comment states that a throwing callable leaves the flag unset, so another call may retry",
+        "Only initialization goes inside the callable — no unrelated slow work"
+      ],
+      "solution": "#include <mutex>\n#include <string>\n\nstruct Config {\n    std::string endpoint;\n    int venue_count = 0;\n};\n\nConfig load_config();\nvoid connect(const Config& config);\n\nclass Service {\npublic:\n    void initialize() {\n        // Exactly one invocation completes. Concurrent callers block until it\n        // does, then observe its effects. If load_config() or connect()\n        // throws, the exception propagates to that caller, the flag stays\n        // unset, and a later call may try again.\n        std::call_once(initialized_, [this] {\n            config_ = load_config();\n            connect(config_);\n        });\n    }\n\nprivate:\n    std::once_flag initialized_;\n    Config config_{};\n};",
+      "notes": "Put only initialization in the callable: every first caller waits behind whatever is in there, so unrelated slow I/O turns a one-time cost into a startup stall for every thread. And note what call_once does not give you — there is no reset. If configuration must reload, model explicit versions rather than trying to reuse the flag."
+    },
+    {
+      "id": "c23-w08",
+      "section": "The C++20 Kit: Semaphores, Latches, Barriers, and Atomic Wait",
+      "minutes": 9,
+      "prompt": "Write a benchmark harness that starts N workers, has every worker finish its setup before any worker begins the measured region, and then joins them all. Add a comment stating why a latch is the right primitive and what you would use instead if the workers had to synchronize at the end of every phase.",
+      "checklist": [
+        "Uses std::latch constructed with the worker count",
+        "Every worker calls arrive_and_wait() between setup and the measured region",
+        "Workers are std::jthread stored in a container, so joining is automatic",
+        "A comment states that a latch is one-shot and stays open once it reaches zero",
+        "A comment names std::barrier as the reusable per-phase alternative"
+      ],
+      "solution": "#include <cstddef>\n#include <latch>\n#include <thread>\n#include <vector>\n\nvoid prepare_worker(int id);\nvoid measure_worker(int id);\n\nvoid run_benchmark(int worker_count) {\n    // A latch counts down to one event that happens once: 'every worker is\n    // ready'. It stays open afterwards and cannot be reset, which is exactly\n    // right for a start gate. If the workers had to rendezvous at the end of\n    // every phase, that repeated boundary is std::barrier, which resets\n    // itself (and can run a completion step) after each phase.\n    std::latch start_gate{worker_count};\n\n    std::vector<std::jthread> workers;\n    workers.reserve(static_cast<std::size_t>(worker_count));\n\n    for (int id = 0; id < worker_count; ++id) {\n        workers.emplace_back([&start_gate, id] {\n            prepare_worker(id);\n            start_gate.arrive_and_wait();  // counts down, then waits for zero\n            measure_worker(id);\n        });\n    }\n}  // every jthread joins here",
+      "notes": "arrive_and_wait() combines the two sides that a latch also offers separately: a participant that only reports a fact calls count_down(), and a coordinator that only observes calls wait(). Without the gate, a worker that finishes setup early starts measuring while its peers are still allocating, so the first samples measure setup contention rather than the workload."
+    },
+    {
+      "id": "c23-w09",
+      "section": "Thread Pools and Task Queues",
+      "minutes": 12,
+      "prompt": "Write the worker loop for a fixed thread pool: it takes a std::stop_token, waits for a task, runs it, and exits only when a stop has been requested and the queue is empty. Write submit() as well. State the shutdown policy your loop implements in a comment.",
+      "checklist": [
+        "Waits with std::condition_variable_any and the stop-token overload",
+        "The wait predicate is 'a task exists', a statement about state",
+        "The task is moved out of the queue into a local before the lock is released",
+        "The task is invoked with the mutex not held",
+        "The exit condition requires both stop_requested() and an empty queue",
+        "A comment states the shutdown policy (drain queued work vs. discard it)"
+      ],
+      "solution": "#include <condition_variable>\n#include <functional>\n#include <mutex>\n#include <queue>\n#include <stop_token>\n#include <utility>\n\nclass ThreadPool {\npublic:\n    void submit(std::function<void()> task) {\n        {\n            std::lock_guard lock{mutex_};\n            tasks_.push(std::move(task));\n        }\n        ready_.notify_one();  // publish under the lock, notify after\n    }\n\nprivate:\n    // Shutdown policy: DRAIN. A worker exits only once a stop has been\n    // requested and no queued task remains, so already-submitted work still\n    // runs. Discarding pending work is an equally valid policy, but the API\n    // has to say which one it implements.\n    void run(std::stop_token stop) {\n        for (;;) {\n            std::function<void()> task;\n            {\n                std::unique_lock lock{mutex_};\n                ready_.wait(lock, stop, [this] {\n                    return !tasks_.empty();\n                });\n\n                if (stop.stop_requested() && tasks_.empty()) {\n                    return;\n                }\n\n                task = std::move(tasks_.front());  // move out under the lock\n                tasks_.pop();\n            }\n\n            task();  // run with the mutex released\n        }\n    }\n\n    std::mutex mutex_;\n    std::condition_variable_any ready_;\n    std::queue<std::function<void()>> tasks_;\n};",
+      "notes": "std::condition_variable_any is required for the stop-token overload; a plain std::condition_variable has none, and a worker parked on one would sleep through a stop request. The lock guards the queue and nothing else — running task() inside it would serialize the whole pool and let arbitrary user code block every producer. std::move_only_function<void()> is the better queue element once your library provides it, since std::function forces every task to be copyable."
+    },
+    {
+      "id": "c23-w10",
+      "section": "Pathologies",
+      "minutes": 8,
+      "prompt": "Two functions each need both of two mutexes and are currently written to acquire them in opposite orders. Write two different fixes — one that breaks circular wait and one that breaks hold-and-wait — and name in a comment the pathology each fix does *not* eliminate.",
+      "checklist": [
+        "Fix 1 imposes a single consistent acquisition order (or uses std::scoped_lock)",
+        "Fix 2 uses std::try_to_lock and releases the first mutex on failure",
+        "Both fixes handle the two references naming the same mutex",
+        "A comment names which of the four deadlock conditions each fix breaks",
+        "A comment states that the try-lock retry loop can still livelock"
+      ],
+      "solution": "#include <mutex>\n#include <thread>\n\nvoid update_guarded_pair();\n\n// Fix 1: break CIRCULAR WAIT. scoped_lock acquires the set with a\n// deadlock-avoidance algorithm, so no caller can hold one mutex while\n// blocking indefinitely on the other. This does not address contention: a\n// hot pair of mutexes can still form a lock convoy.\nvoid update_ordered(std::mutex& first, std::mutex& second) {\n    if (&first == &second) {\n        std::lock_guard lock{first};\n        update_guarded_pair();\n        return;\n    }\n\n    std::scoped_lock lock{first, second};\n    update_guarded_pair();\n}\n\n// Fix 2: break HOLD AND WAIT. The caller never waits for `second` while\n// retaining `first`. This rules out deadlock but not LIVELOCK: two opposing\n// callers can release and retry in lockstep forever, burning CPU while\n// completing nothing. Production retry adds randomized backoff.\nvoid update_try_lock(std::mutex& first, std::mutex& second) {\n    if (&first == &second) {\n        std::lock_guard lock{first};\n        update_guarded_pair();\n        return;\n    }\n\n    for (;;) {\n        std::unique_lock first_lock{first};\n        std::unique_lock second_lock{second, std::try_to_lock};\n\n        if (second_lock.owns_lock()) {\n            update_guarded_pair();\n            return;\n        }\n\n        first_lock.unlock();\n        std::this_thread::yield();\n    }\n}",
+      "notes": "Deadlock needs all four of mutual exclusion, hold-and-wait, no preemption, and circular wait; breaking any one rules it out. Prefer the ordered fix — backoff improves the probability of progress but gives no fairness guarantee and adds latency variance, so it is a contention policy rather than a substitute for a coherent lock order. Remember that the order must also cover callbacks, error paths, and teardown, since calling unknown code under a mutex imports that code's acquisitions into your order."
+    }
+  ]
+}

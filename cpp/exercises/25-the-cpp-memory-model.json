@@ -1,0 +1,683 @@
+{
+  "chapter": 25,
+  "mcq": [
+    {
+      "id": "c25-m01",
+      "section": "Why a model exists",
+      "difficulty": "easy",
+      "prompt": "Two atomics start at zero. Thread 1 stores 1 to x then loads y into r1; thread 2 stores 1 to y then loads x into r2, all with relaxed ordering. Why can r1 == 0 && r2 == 0 be observed?",
+      "choices": [
+        "Because relaxed operations are not really atomic, so both stores can be lost",
+        "Because a core may retire its store into a store buffer and perform its later load before that store becomes visible to other cores",
+        "Because the two threads never actually run at the same time",
+        "Because relaxed loads are permitted to return an arbitrary value"
+      ],
+      "answer": 1,
+      "explain": "Store buffering is the classic hardware explanation: each core's store sits in its own buffer while the following load executes, so neither load sees the other's store. Relaxed operations are still genuinely atomic and still participate in each object's modification order — the loads return values that were actually written, they simply are not ordered across the two objects."
+    },
+    {
+      "id": "c25-m02",
+      "section": "Why a model exists",
+      "difficulty": "medium",
+      "prompt": "You disassemble an optimised build and find that the generated instructions happen to forbid a reordering your code depends on. What has that established?",
+      "choices": [
+        "Nothing portable — the abstract guarantee comes from the memory orders you wrote, not from today's instruction selection",
+        "That the code is correct, since the machine cannot produce the bad outcome",
+        "That the memory orders in the source can be weakened to relaxed",
+        "That the compiler has inserted the ordering the standard requires, so the source is redundant"
+      ],
+      "answer": 0,
+      "explain": "The disassembly explains the cost of one build on one target; it cannot define what another compiler or architecture must do. Reasoning that ignores the selected memory orders is not repaired by a favourable instruction sequence — the next inlining decision or the next target can remove the accidental ordering."
+    },
+    {
+      "id": "c25-m03",
+      "section": "Locations, conflicts, and data races — the formal definitions",
+      "difficulty": "medium",
+      "prompt": "Two threads concurrently write `flags.bid_changed` and `flags.ask_changed` in this struct. What is the status of the program?",
+      "code": "struct Flags {\n    unsigned bid_changed : 1;\n    unsigned ask_changed : 1;\n};",
+      "choices": [
+        "Race-free, because the two members are distinct objects",
+        "Race-free, because each write only touches one bit",
+        "A data race, because adjacent non-zero-width bit-fields form one memory location",
+        "Implementation-defined, because bit-field layout is implementation-defined"
+      ],
+      "answer": 2,
+      "explain": "A memory location is a scalar object or a maximal sequence of adjacent non-zero-width bit-fields, so these two bit-fields are one location and the concurrent writes conflict. Ordinary (non-bit-field) members really are separate locations and could be synchronised independently — that is exactly the distinction the bit-field rule breaks. A zero-width bit-field between them would split the locations."
+    },
+    {
+      "id": "c25-m04",
+      "section": "Locations, conflicts, and data races — the formal definitions",
+      "difficulty": "hard",
+      "prompt": "A thread spins on `while (!done) {}` where `done` is a plain `bool` written by another thread. Beyond \"the value may be stale\", what may the optimiser legally do?",
+      "choices": [
+        "Hoist the load out of the loop, turning it into `if (!done) for(;;) {}` — an infinite loop even after the write",
+        "Nothing — the loop must reload `done` on every iteration",
+        "Insert an implicit acquire fence to make the program well-defined",
+        "Replace the loop with a call to std::this_thread::yield()"
+      ],
+      "answer": 0,
+      "explain": "The access is a data race, so the execution has undefined behaviour and the compiler may assume no conflicting write exists; the load then has a loop-invariant value and can be hoisted. This is not \"possibly stale\" — the loop can never terminate, and the failure appears to precede the write in time. No implicit fence is ever inserted to rescue a racy program."
+    },
+    {
+      "id": "c25-m05",
+      "section": "Locations, conflicts, and data races — the formal definitions",
+      "difficulty": "medium",
+      "prompt": "A ThreadSanitizer run over your relaxed-atomic protocol is clean. What have you learned?",
+      "choices": [
+        "That the program is data-race-free on every execution",
+        "That the memory orders chosen are strong enough for the protocol",
+        "That the executions exercised exposed no race to the tool — it says nothing about untested interleavings, and it does not diagnose insufficient ordering among atomics",
+        "That the program satisfies DRF-SC and can be reasoned about by interleaving"
+      ],
+      "answer": 2,
+      "explain": "TSan is a dynamic detector: it tracks ordering relationships in the executions it observes, so a clean run covers only those executions. It also cannot flag a logically insufficient relaxed ordering, because when every conflicting access is atomic there is no data race to report — only a wrong answer. DRF-SC requires mutexes or sequentially consistent atomics; relaxed atomics deliberately opt out of it."
+    },
+    {
+      "id": "c25-m06",
+      "section": "Happens-before",
+      "difficulty": "easy",
+      "prompt": "Which of these does NOT create a synchronizes-with edge?",
+      "choices": [
+        "An unlock of a mutex and a later successful lock of that mutex",
+        "A thread's completion and a successful join() that observes it",
+        "A release store and an acquire load that reads its value",
+        "Two relaxed writes to the same atomic object"
+      ],
+      "answer": 3,
+      "explain": "Writes to one atomic share a modification order, but modification order is not a synchronizes-with edge and publishes nothing about other locations. The other three are the standard cross-thread edges. Two threads can agree on the order of writes to one relaxed atomic while disagreeing about everything else."
+    },
+    {
+      "id": "c25-m07",
+      "section": "Happens-before",
+      "difficulty": "medium",
+      "prompt": "`ready` is stored with release after `data = 42`. A consumer's acquire load of `ready` returns `false`. What ordering does the consumer have?",
+      "choices": [
+        "Full acquire ordering, because the load was spelled memory_order_acquire",
+        "None from this pair — synchronization depends on which write the load observes, and reading `false` observes no release",
+        "An edge to the initialisation of `ready`, which orders `data` as well",
+        "Ordering with respect to `ready` but not `data`, so reading `data` is still safe"
+      ],
+      "answer": 1,
+      "explain": "The edge is created by an acquire operation that reads from a release operation or its release sequence. A load that returns the pre-release value read from no release, so there is no synchronizes-with edge and reading `data` would be a race. The keywords alone do nothing; the ordering belongs to a communicating pair with a specific reads-from relationship."
+    },
+    {
+      "id": "c25-m08",
+      "section": "Happens-before",
+      "difficulty": "medium",
+      "prompt": "In the canonical publication pattern, `data` is a plain `int` and only `ready` is atomic. Why is the plain access to `data` not a data race?",
+      "choices": [
+        "Because the release store makes `data` behave as if it were atomic",
+        "Because a single write and a single read never conflict",
+        "Because the release/acquire pair puts the write in a happens-before chain that precedes the read, and a data race requires neither access to happen before the other",
+        "Because `int` writes are atomic on any real target"
+      ],
+      "answer": 2,
+      "explain": "Happens-before is the fourth clause of the data-race definition: with the write sequenced before the release, the release synchronizing with the acquire, and the acquire sequenced before the read, the accesses are ordered and the race is gone. The release does not change `data`'s type or atomicity — it publishes effects that were already sequenced before it, to a thread that observes it."
+    },
+    {
+      "id": "c25-m09",
+      "section": "Atomic types and operations",
+      "difficulty": "easy",
+      "prompt": "What is the difference between `std::atomic<T>::is_lock_free()` and `std::atomic<T>::is_always_lock_free`?",
+      "choices": [
+        "is_lock_free() is a runtime query about a particular object; is_always_lock_free is a compile-time constant about every object of that specialization on this target",
+        "is_lock_free() reports whether the type is trivially copyable; is_always_lock_free reports the alignment",
+        "They are synonyms, one kept for compatibility",
+        "is_always_lock_free is true only when the operations compile to a single instruction"
+      ],
+      "answer": 0,
+      "explain": "Lock freedom can depend on the object's address and ABI constraints, which is why a runtime query exists at all; the constant lets you turn the requirement into a static_assert and thus a build failure. Note that is_always_lock_free == false means \"not guaranteed\", not \"always takes a lock\"."
+    },
+    {
+      "id": "c25-m10",
+      "section": "Atomic types and operations",
+      "difficulty": "medium",
+      "prompt": "Two threads each execute `counter = counter + 1;` on a `std::atomic<int>`. What is the defect?",
+      "choices": [
+        "Both accesses are atomic, but they are two separate operations, so both threads can read the same value and store the same successor — an update is lost",
+        "There is no defect — assignment on an atomic is an atomic increment",
+        "It is a data race, because the read and the write are separate non-atomic accesses",
+        "It compiles to fetch_add with relaxed ordering, which is too weak"
+      ],
+      "answer": 0,
+      "explain": "Each of the load and the store is individually atomic, so there is no data race and no undefined behaviour — the bug is a lost update, which is a plain correctness bug. `counter += 1` and `counter.fetch_add(1)` are single read-modify-write operations and cannot lose an update; the compound assignment just uses the seq_cst default."
+    },
+    {
+      "id": "c25-m11",
+      "section": "Atomic types and operations",
+      "difficulty": "hard",
+      "prompt": "You wrap an existing `std::uint64_t` field in a `std::atomic_ref` so a wire-layout struct keeps its plain field type. What is the obligation this creates?",
+      "choices": [
+        "The field must be declared volatile as well",
+        "The referenced object must meet required_alignment, and while any atomic_ref for it exists every concurrent access must go through an atomic_ref",
+        "Only the writer needs an atomic_ref; readers may read the plain field",
+        "The atomic_ref must outlive the referenced object"
+      ],
+      "answer": 1,
+      "explain": "atomic_ref moves the alignment obligation from the type onto the referenced object, and mixing a plain read with an atomic-ref write is still a conflicting pair with one non-atomic access — a data race. The \"only the writer needs it\" answer is the common misreading: the race definition asks that *at least one* access be non-atomic, so a plain reader is enough to create it."
+    },
+    {
+      "id": "c25-m12",
+      "section": "Compare-exchange",
+      "difficulty": "easy",
+      "prompt": "When should you prefer `compare_exchange_strong` over `compare_exchange_weak`?",
+      "choices": [
+        "Inside a retry loop, because spurious failures waste iterations",
+        "When the atomic is larger than a machine word",
+        "When a false result has standalone meaning and the caller will not retry",
+        "Whenever the success ordering is memory_order_release"
+      ],
+      "answer": 2,
+      "explain": "Weak CAS may fail spuriously, which is free inside a loop that would retry anyway and maps directly onto LL/SC machines such as ARM. Strong CAS is for a one-shot attempt whose `false` result you are going to act on — using strong inside a loop just moves the retry into the library."
+    },
+    {
+      "id": "c25-m13",
+      "section": "Compare-exchange",
+      "difficulty": "medium",
+      "prompt": "A CAS returns false. What is the state of the `expected` argument, and what should the loop do next?",
+      "choices": [
+        "Set to the value actually observed; the loop should recompute `desired` from it and retry without a separate load",
+        "Unchanged; the loop must reload the atomic before retrying",
+        "Set to `desired`; the loop should abort",
+        "Unspecified; the loop must treat it as garbage"
+      ],
+      "answer": 0,
+      "explain": "A failed CAS writes the observed value back into `expected`, which is exactly what drives the canonical retry loop. Reloading afterwards is wasted work and can break algorithms whose progress argument depends on acting on the precise value the CAS observed. Note that a *spurious* failure leaves `expected` usable too."
+    },
+    {
+      "id": "c25-m14",
+      "section": "Compare-exchange",
+      "difficulty": "hard",
+      "prompt": "Why can the failure ordering of a compare-exchange never be `memory_order_release` or `memory_order_acq_rel`?",
+      "choices": [
+        "Because the failure path must be relaxed for performance reasons",
+        "Because release semantics on a failure would deadlock LL/SC hardware",
+        "Because the failure ordering must always be weaker than the success ordering",
+        "Because the failure path performs no write, and there is nothing to release"
+      ],
+      "answer": 3,
+      "explain": "On failure the operation only reads: it loads the current value into `expected` and stores nothing, so a release — which orders earlier operations before a *write* — has no write to attach to. Failure may still be `acquire` when the observed value will be dereferenced; the rule is not that failure must be relaxed, only that it cannot release."
+    },
+    {
+      "id": "c25-m15",
+      "section": "The ordering ladder — centerpiece",
+      "difficulty": "medium",
+      "prompt": "What exactly does `memory_order_relaxed` guarantee?",
+      "choices": [
+        "Nothing at all; a relaxed load may return any value ever written to any object",
+        "Indivisibility and the per-object coherence rules, including participation in that object's modification order — and nothing about other locations",
+        "Indivisibility plus acquire semantics on loads, since loads cannot release",
+        "The same guarantees as acquire/release on hardware with a strong memory model"
+      ],
+      "answer": 1,
+      "explain": "Relaxed gives full atomicity and single-object coherence — increments are never lost, and one thread never watches an object's history run backwards. What it drops is any cross-object ordering, which is why it suits statistics and unique tickets. \"x86 is strong\" does not upgrade it: the compiler still follows the C++ ordering, and x86 store buffers permit real reorderings."
+    },
+    {
+      "id": "c25-m16",
+      "section": "The ordering ladder — centerpiece",
+      "difficulty": "medium",
+      "prompt": "Which pairing of ordering with direction is correct?",
+      "choices": [
+        "Acquire keeps earlier operations before it; release keeps later operations after it",
+        "Acquire keeps later operations after it; release keeps earlier operations before it",
+        "Both acquire and release keep operations on both sides pinned",
+        "Acquire applies to stores and release applies to loads"
+      ],
+      "answer": 1,
+      "explain": "A release is a one-way barrier for what came before it in its thread; an acquire is a one-way barrier for what comes after it. That asymmetry is why a release attaches to a store and an acquire to a load, and why operations may still drift *into* the region from the open side. Getting the direction backwards is the most common ladder error."
+    },
+    {
+      "id": "c25-m17",
+      "section": "The ordering ladder — centerpiece",
+      "difficulty": "hard",
+      "prompt": "A protocol uses `seq_cst` on two flags but one relaxed store on a third atomic. What does the total order `S` say about that relaxed store?",
+      "choices": [
+        "It is added to S at the position where it executes, since S covers all atomic operations",
+        "It is placed in S immediately after the previous seq_cst operation in its thread",
+        "It promotes the whole protocol to seq_cst, since mixing orders is not allowed",
+        "Only seq_cst operations participate in S; the relaxed store is outside it and must be justified separately by modification order and happens-before"
+      ],
+      "answer": 3,
+      "explain": "`S` is a single total order over sequentially consistent operations and fences only. Mixing in a weaker operation does not quietly enrol it, so a mixed-order proof has to account for both S and each object's own modification order — which is precisely why starting from an all-seq_cst protocol and weakening with a proof is the auditable direction."
+    },
+    {
+      "id": "c25-m18",
+      "section": "The ordering ladder — centerpiece",
+      "difficulty": "easy",
+      "prompt": "What is the current status of `memory_order_consume`?",
+      "choices": [
+        "It is the recommended cheap alternative to acquire for pointer publication",
+        "It was removed in C++20 and no longer compiles",
+        "Mainstream compilers promote it to acquire, and it is deprecated in C++26 — recognise the dependency-ordering intent, do not ship it",
+        "It orders only atomic operations, never the non-atomic data behind a loaded pointer"
+      ],
+      "answer": 2,
+      "explain": "The intent was to order only operations carrying a data dependency from the loaded value, which some hardware preserves more cheaply than a full acquire. In practice the specification proved unimplementable as written, compilers strengthen it to acquire, and C++26 deprecates it. It still compiles — it simply buys nothing."
+    },
+    {
+      "id": "c25-m19",
+      "section": "Coherence, modification order, and release sequences",
+      "difficulty": "medium",
+      "prompt": "Which describes a release sequence headed by a release store to atomic object `a`?",
+      "choices": [
+        "The contiguous run of read-modify-write operations following the release in `a`'s modification order, ending at the first non-RMW write",
+        "Every subsequent operation on any atomic object performed by the releasing thread",
+        "Every subsequent operation on `a` in modification order, of any kind",
+        "Only the operations performed by the same thread that issued the release"
+      ],
+      "answer": 0,
+      "explain": "The sequence is contiguous in that one object's modification order, starts at the release, and continues through RMWs — which may come from any thread — until a plain store breaks it. An acquire that reads from any member synchronizes with the head. That is what makes a chain of `fetch_sub` reference-count decrements publish each owner's effects to the thread that reaches zero."
+    },
+    {
+      "id": "c25-m20",
+      "section": "Coherence, modification order, and release sequences",
+      "difficulty": "medium",
+      "prompt": "A thread performs two sequenced relaxed loads of the same atomic `version`, whose writers only ever increment it. Can the second load observe a smaller value than the first?",
+      "code": "#include <atomic>\n\nstd::atomic<unsigned> version{0};\n\nunsigned gap() {\n    unsigned first = version.load(std::memory_order_relaxed);\n    unsigned second = version.load(std::memory_order_relaxed);\n    return second - first;\n}",
+      "choices": [
+        "Yes — relaxed ordering places no constraint on repeated loads",
+        "No — read-read coherence forbids the second load from observing a modification earlier in `version`'s modification order than the first did",
+        "Yes, but only on a weakly-ordered target such as AArch64",
+        "No, but only because both loads are in the same thread and the compiler will fold them"
+      ],
+      "answer": 1,
+      "explain": "Coherence is per-object and survives relaxed ordering: a thread never watches one atomic's history run backwards. Relaxed removes cross-object ordering, not single-object coherence — the same reasoning says nothing about a separate `generation` atomic. Folding the two loads into one is also permitted, and would still satisfy the assertion."
+    },
+    {
+      "id": "c25-m21",
+      "section": "Fences",
+      "difficulty": "hard",
+      "prompt": "A producer does relaxed slot stores, then a release fence, then a relaxed store of `batch_ready`. A consumer does a relaxed load of `batch_ready`, then an acquire fence, then relaxed slot loads. What must hold for the fences to synchronize?",
+      "choices": [
+        "Nothing more — a release fence always synchronizes with a later acquire fence",
+        "The carrier store and load must themselves be release and acquire",
+        "The consumer's relaxed load must read the value written by the producer's relaxed carrier store, or a suitable later member of its release sequence",
+        "Both fences must be memory_order_seq_cst"
+      ],
+      "answer": 2,
+      "explain": "Fence-fence synchronization needs an atomic operation to carry the connection: the reads-from relationship between the carrier store and the carrier load is what links the release fence to the acquire fence. The store and load may be relaxed, which is the whole economy of the pattern — but an isolated fence with no observed carrier value publishes nothing to anybody."
+    },
+    {
+      "id": "c25-m22",
+      "section": "Fences",
+      "difficulty": "medium",
+      "prompt": "What does `std::atomic_signal_fence(std::memory_order_seq_cst)` constrain?",
+      "choices": [
+        "Compiler reordering only, between a thread and a signal handler running in that thread",
+        "Compiler and processor reordering between all cores",
+        "Cache flushes to main memory",
+        "Nothing — it is a no-op removed by the optimiser"
+      ],
+      "answer": 0,
+      "explain": "It is a pure compiler barrier scoped to a thread and its own signal handlers; it emits no inter-core synchronization instruction and does nothing for another CPU. `std::atomic_thread_fence` is the inter-thread one. Neither flushes caches — a fence constrains order, and coherence propagates values according to that order."
+    },
+    {
+      "id": "c25-m23",
+      "section": "Safe publication patterns",
+      "difficulty": "medium",
+      "prompt": "In double-checked locking, the fast-path load of the pointer is changed from acquire to relaxed \"because we only test it for null\". What breaks?",
+      "choices": [
+        "Nothing; the mutex on the slow path supplies all necessary ordering",
+        "The load may tear and return half a pointer",
+        "The second check inside the mutex becomes unnecessary",
+        "A non-null pointer can be observed without the pointee's initialisation being visible, so reading its fields is a race on stale or uninitialised memory"
+      ],
+      "answer": 3,
+      "explain": "Publication is a pair: the release store publishes the construction, and only an acquire load that reads it establishes the happens-before edge for the fields behind the pointer. A relaxed load can legally see the address without the initialisation. Tearing is not the issue — a lock-free pointer load is indivisible either way; visibility of *other* memory is what the acquire buys."
+    },
+    {
+      "id": "c25-m24",
+      "section": "Safe publication patterns",
+      "difficulty": "medium",
+      "prompt": "A writer does `store(config, memory_order_release);` and then, on the next line, `config->max_order_size = 20'000;`. Why is that broken?",
+      "choices": [
+        "Because the store should have been seq_cst",
+        "Because the release only orders operations sequenced before it — the later write races with readers who already acquired the pointer",
+        "Because writing through an atomic-published pointer always requires atomic_ref",
+        "Because the release store invalidates the pointer for the storing thread"
+      ],
+      "answer": 1,
+      "explain": "A release is a one-way barrier over what came before it. Construction must be complete before publication, not merely before the pointer store in later source text. Once published, treat the object as immutable unless a separate protocol synchronizes the mutation; strengthening the store to seq_cst does not help, because the problematic write is still after it."
+    },
+    {
+      "id": "c25-m25",
+      "section": "Litmus tests — flagship",
+      "difficulty": "medium",
+      "prompt": "Message passing: the writer stores 42 to `message` (relaxed) then `true` to `message_ready`; the reader loads `message_ready` then `message` (relaxed). With a *relaxed* flag, is \"ready true, message 0\" allowed?",
+      "choices": [
+        "No — the writer's stores are in program order",
+        "Only on hardware weaker than x86; the C++ model forbids it",
+        "No — coherence forbids it",
+        "Yes — with relaxed flag operations the two atomics have independent modification orders and no cross-object edge exists"
+      ],
+      "answer": 3,
+      "explain": "Relaxed operations give per-object coherence and nothing across objects, so nothing connects the `message` store to the `message_ready` load. Program order in the source is sequenced-before, which orders evaluations *within* a thread and never crosses a thread boundary on its own. Making the flag release/acquire forbids the row; the outcome being rare on a given machine is not the same as being forbidden."
+    },
+    {
+      "id": "c25-m26",
+      "section": "Litmus tests — flagship",
+      "difficulty": "hard",
+      "prompt": "Store buffering with *release stores and acquire loads*: `x.store(1,rel); r1=y.load(acq)` against `y.store(1,rel); r2=x.load(acq)`. Is (r1,r2)==(0,0) allowed?",
+      "choices": [
+        "No — the release stores are ordered before the acquire loads in each thread",
+        "No — acquire and release together are equivalent to seq_cst for two variables",
+        "Yes — each acquire load reads the initial value, so it reads from no release and no synchronizes-with edge forms",
+        "It is unspecified; the standard does not answer this case"
+      ],
+      "answer": 2,
+      "explain": "The edge requires an acquire that *reads from* a release. Both loads returning 0 means neither observed the other thread's store, so no edge exists and nothing forbids the outcome. This is the case that motivates seq_cst: adding the single total order S makes the four required constraints form a cycle, which no total order can contain."
+    },
+    {
+      "id": "c25-m27",
+      "section": "Litmus tests — flagship",
+      "difficulty": "hard",
+      "prompt": "IRIW: one reader loads x then y and sees (1,0); a second loads y then x and sees (1,0). Under which orderings is that outcome forbidden?",
+      "choices": [
+        "Under relaxed only",
+        "Under release/acquire and seq_cst",
+        "Under seq_cst only",
+        "Under none — every ordering permits it"
+      ],
+      "answer": 2,
+      "explain": "Acquire loads of the value 1 do synchronize with their release stores, but nothing orders the two independent *writers* relative to each other, so the readers may disagree. Only seq_cst forces one total order S, in which the four observations would require a cycle. IRIW is the canonical test that acquire/release is not a weaker seq_cst — it is a different guarantee."
+    },
+    {
+      "id": "c25-m28",
+      "section": "Tearing, alignment, and `volatile`",
+      "difficulty": "easy",
+      "prompt": "Which of these does C++ `volatile` provide for inter-thread communication?",
+      "choices": [
+        "Atomicity of the access",
+        "A happens-before edge with another thread",
+        "Exemption from the data-race rule",
+        "None of these — it only makes each access an observable side effect the compiler may not elide or merge"
+      ],
+      "answer": 3,
+      "explain": "volatile exists for memory-mapped I/O and narrow facilities such as `volatile std::sig_atomic_t`; it supplies compiler-visible access behaviour and nothing else. Java and C# give their `volatile` inter-thread semantics, which is the usual source of the confusion. A polling loop over a volatile flag written by another thread is still a data race and still undefined behaviour."
+    },
+    {
+      "id": "c25-m29",
+      "section": "Tearing, alignment, and `volatile`",
+      "difficulty": "medium",
+      "prompt": "Two `std::atomic<std::uint64_t>` counters are correctly aligned and written by different threads. What does that alignment NOT give you?",
+      "choices": [
+        "Freedom from tearing relative to other atomic accesses to the same object",
+        "Isolation from false sharing — the two counters can still occupy one cache line and bounce it between the writers",
+        "A well-defined program with respect to the data-race rule",
+        "Single-instruction access on a target where the type is lock-free"
+      ],
+      "answer": 1,
+      "explain": "Alignment stops one object from straddling a boundary; it says nothing about two distinct objects landing in the same cache line. Those accesses stay race-free and untorn — the cost is purely performance, as the line ping-pongs between cores. Padding to a destructive-interference boundary is the separate fix."
+    },
+    {
+      "id": "c25-m30",
+      "section": "Latency Lens",
+      "difficulty": "medium",
+      "prompt": "On x86, an acquire load and a relaxed load of the same atomic commonly compile to the same instruction. What is the acquire still buying?",
+      "choices": [
+        "Nothing on x86; the ordering is free and therefore vacuous",
+        "A processor fence that the relaxed load omits",
+        "Cache-line exclusivity for the loading core",
+        "The compiler-side constraint: the acquire forbids scheduling later accesses before the load, and it is the portable guarantee on weaker targets"
+      ],
+      "answer": 3,
+      "explain": "Two costs hide behind one ordering name: the compiler must preserve the abstract ordering, and the instructions must constrain the processor. x86 ordinary loads already satisfy the hardware half, but the compiler half — blocking motion of later accesses across the load — remains, and on AArch64 the acquire selects a distinct instruction such as `ldar`. A load never acquires exclusive ownership of a line; that is what an RMW does."
+    }
+  ],
+  "reading": [
+    {
+      "id": "c25-r01",
+      "section": "Happens-before",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <atomic>\n#include <iostream>\n#include <thread>\n\nint main() {\n    std::atomic<bool> ready{false};\n\n    std::thread consumer{[ready] {\n        std::cout << ready.load(std::memory_order_acquire) << '\\n';\n    }};\n\n    ready.store(true, std::memory_order_release);\n    consumer.join();\n}",
+      "kind": "no-compile",
+      "explain": "The lambda captures `ready` by copy, and `std::atomic` has a deleted copy constructor. That deletion is deliberate: a copy would be a second, independent atomic object, so the consumer could never observe the producer's store no matter which memory orders were used. Capture by reference (`[&ready]`) — with the join guaranteeing the object outlives the thread — is the intended form."
+    },
+    {
+      "id": "c25-r02",
+      "section": "Atomic types and operations",
+      "prompt": "What does this print?",
+      "code": "#include <atomic>\n#include <cstdint>\n#include <iostream>\n\nint main() {\n    std::uint64_t sequence = 7;\n    std::atomic_ref<std::uint64_t> reference{sequence};\n\n    std::uint64_t prior =\n        reference.fetch_add(3, std::memory_order_relaxed);\n\n    std::cout << prior << ' ' << sequence << ' '\n              << std::boolalpha << reference.is_lock_free() << ' '\n              << std::atomic_ref<std::uint64_t>::required_alignment\n              << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "7 10 true 8"
+      ],
+      "explain": "atomic_ref applies atomic operations to an existing object without changing its type: `fetch_add` returns the value from *before* the modification (7), and the underlying `sequence` now holds 10. A 64-bit integer is lock-free on this target and `required_alignment` is 8 — that constant is the obligation atomic_ref places on the referenced object, since unlike std::atomic it cannot choose the object's alignment itself."
+    },
+    {
+      "id": "c25-r03",
+      "section": "Atomic types and operations",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <atomic>\n#include <iostream>\n#include <string>\n\nint main() {\n    std::atomic<std::string> symbol{std::string{\"EURUSD\"}};\n    std::cout << symbol.load().size() << '\\n';\n}",
+      "kind": "no-compile",
+      "explain": "std::atomic<T> mandates a trivially copyable T, and std::string has user-provided copy/move operations and a destructor. The requirement comes from object representation: an atomic operation copies bytes, and a type that owns a heap buffer cannot be duplicated that way. Note that being trivially copyable only makes a type *eligible* — it still promises nothing about lock freedom."
+    },
+    {
+      "id": "c25-r04",
+      "section": "Atomic types and operations",
+      "prompt": "What does this print?",
+      "code": "#include <atomic>\n#include <iostream>\n\nint main() {\n    std::atomic<unsigned> next_sequence{0};\n\n    unsigned first = next_sequence.fetch_add(1, std::memory_order_relaxed);\n    unsigned second = next_sequence.fetch_add(1, std::memory_order_relaxed);\n    unsigned prior = next_sequence.exchange(100, std::memory_order_relaxed);\n\n    std::cout << first << ' ' << second << ' ' << prior << ' '\n              << next_sequence.load(std::memory_order_relaxed) << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "0 1 2 100"
+      ],
+      "explain": "Every read-modify-write returns the value from before its own modification, so the two fetch_adds hand out 0 and 1 — the property that makes them a ticket dispenser. `exchange` is also an RMW: it stores unconditionally and returns the prior value 2, leaving 100 behind. The common error is to expect fetch_add to return the new value, which would hand two callers the same ticket number."
+    },
+    {
+      "id": "c25-r05",
+      "section": "Compare-exchange",
+      "prompt": "What does this print?",
+      "code": "#include <atomic>\n#include <iostream>\n\nint main() {\n    std::atomic<int> head{7};\n    int expected = 3;\n\n    bool ok = head.compare_exchange_strong(expected, 9);\n    std::cout << std::boolalpha << ok << ' ' << expected << ' '\n              << head.load() << '\\n';\n\n    ok = head.compare_exchange_strong(expected, 9);\n    std::cout << ok << ' ' << expected << ' ' << head.load() << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "false 7 7 true 7 9"
+      ],
+      "explain": "The first CAS compares 7 against `expected == 3`, fails, and writes the observed 7 back into `expected`; the atomic is untouched. The second attempt therefore matches and stores 9, leaving `expected` at 7 — a successful CAS does not update it. That write-back on failure is what lets the canonical retry loop recompute `desired` without a separate reload."
+    },
+    {
+      "id": "c25-r06",
+      "section": "Compare-exchange",
+      "prompt": "What does this print?",
+      "code": "#include <atomic>\n#include <iostream>\n#include <thread>\n#include <vector>\n\nint main() {\n    std::atomic<long> total{0};\n    std::vector<std::thread> workers;\n\n    for (int t = 0; t < 4; ++t) {\n        workers.emplace_back([&] {\n            for (int i = 0; i < 10'000; ++i) {\n                long expected = total.load(std::memory_order_relaxed);\n                while (!total.compare_exchange_weak(\n                    expected, expected + 1,\n                    std::memory_order_relaxed)) {\n                }\n            }\n        });\n    }\n\n    for (auto& worker : workers) {\n        worker.join();\n    }\n    std::cout << total.load() << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "40000"
+      ],
+      "explain": "The final total is fully determined even though the interleaving is not: a successful CAS only stores when the atomic still equals the value the thread observed, so no increment can be lost, and every join happens before the print. Relaxed ordering is sufficient here because nothing outside `total` is being published — the CAS still reads the immediately preceding value in `total`'s modification order. Only the number of retries varies from run to run."
+    },
+    {
+      "id": "c25-r07",
+      "section": "Coherence, modification order, and release sequences",
+      "prompt": "What does this print?",
+      "code": "#include <atomic>\n#include <cstddef>\n#include <iostream>\n\nstruct Control {\n    std::atomic<std::size_t> references{1};\n    int handle = 42;\n};\n\nint main() {\n    Control control;\n    control.references.fetch_add(2, std::memory_order_relaxed);\n\n    std::size_t a = control.references.fetch_sub(1, std::memory_order_acq_rel);\n    std::size_t b = control.references.fetch_sub(1, std::memory_order_acq_rel);\n    std::size_t c = control.references.fetch_sub(1, std::memory_order_acq_rel);\n\n    std::cout << a << ' ' << b << ' ' << c << ' '\n              << (c == 1 ? \"destroy\" : \"keep\") << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "3 2 1 destroy"
+      ],
+      "explain": "Each fetch_sub returns the count from before its own decrement, so the owner that receives 1 is the one that dropped the last reference and must destroy. The three RMWs form a release sequence headed by the first release operation, and each reads the immediately preceding value in modification order — which is what makes the acquire half of the final decrement observe the effects published by the earlier owners. Testing for `== 0` after the decrement is the classic off-by-one."
+    },
+    {
+      "id": "c25-r08",
+      "section": "Fences",
+      "prompt": "What does this print?",
+      "code": "#include <array>\n#include <atomic>\n#include <iostream>\n#include <thread>\n\nint main() {\n    std::array<std::atomic<int>, 4> slots{};\n    std::atomic<bool> batch_ready{false};\n\n    std::thread producer{[&] {\n        for (int i = 0; i < 4; ++i) {\n            slots[i].store((i + 1) * 10, std::memory_order_relaxed);\n        }\n        std::atomic_thread_fence(std::memory_order_release);\n        batch_ready.store(true, std::memory_order_relaxed);\n    }};\n\n    producer.join();\n\n    std::atomic_thread_fence(std::memory_order_acquire);\n    int sum = 0;\n    for (auto& slot : slots) {\n        sum += slot.load(std::memory_order_relaxed);\n    }\n    std::cout << std::boolalpha\n              << batch_ready.load(std::memory_order_relaxed) << ' '\n              << sum << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "true 100"
+      ],
+      "explain": "The four relaxed slot stores are published as a batch by one release fence, and the relaxed flag store is the carrier that connects it to the reader's acquire fence. Here the result is forced regardless: a successful `join()` synchronizes with the end of the thread, so every store is already visible and 10+20+30+40 is 100. The fence pattern earns its keep in a polling reader, where the relaxed carrier load must actually read the carrier store for the two fences to connect at all."
+    },
+    {
+      "id": "c25-r09",
+      "section": "Locations, conflicts, and data races — the formal definitions",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <iostream>\n#include <thread>\n\nstruct Flags {\n    unsigned bid_changed : 1;\n    unsigned ask_changed : 1;\n};\n\nFlags flags{};\n\nint main() {\n    std::thread bid{[] {\n        for (int i = 0; i < 100'000; ++i) flags.bid_changed = 1;\n    }};\n    std::thread ask{[] {\n        for (int i = 0; i < 100'000; ++i) flags.ask_changed = 1;\n    }};\n    bid.join();\n    ask.join();\n\n    std::cout << flags.bid_changed << ' ' << flags.ask_changed << '\\n';\n}",
+      "kind": "ub",
+      "explain": "Adjacent non-zero-width bit-fields form a single memory location, so the two threads perform conflicting non-atomic writes with no happens-before edge between them: a data race, and therefore undefined behaviour. It will usually print `1 1`, because the compiler emits a read-modify-write of the containing byte and the last one wins; that is a hardware accident, not a guarantee. ASan and UBSan do not detect races — ThreadSanitizer is the tool for this one, so a quiet run here is expected. Had these been ordinary `unsigned` members they would be distinct locations and the program would be race-free."
+    },
+    {
+      "id": "c25-r10",
+      "section": "Safe publication patterns",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <atomic>\n#include <iostream>\n\nstruct Config {\n    int max_order_size;\n};\n\nint main() {\n    std::atomic<Config*> current{nullptr};\n    current.store(new Config{10'000}, std::memory_order_release);\n\n    Config* replaced = current.load(std::memory_order_acquire);\n    delete replaced;  // no reclamation protocol\n\n    std::cout << current.load(std::memory_order_acquire)->max_order_size\n              << '\\n';\n}",
+      "kind": "ub",
+      "explain": "Release/acquire solves publication, not reclamation: the atomic still holds the address of a freed object, and dereferencing it is a use-after-free that AddressSanitizer reports immediately. The chapter's double-checked-locking example sidesteps this only because the configuration lives until process shutdown; a replaceable object needs a reclamation design such as `atomic<shared_ptr>` for control paths, or the schemes in Chapter 26. Strengthening the orderings to seq_cst would change nothing — the memory model orders accesses, it does not extend lifetimes."
+    }
+  ],
+  "writing": [
+    {
+      "id": "c25-w01",
+      "section": "Locations, conflicts, and data races — the formal definitions",
+      "minutes": 8,
+      "prompt": "The `Flags` struct below has two adjacent one-bit fields written by two different threads. Rewrite it so the two updates are race-free without introducing a mutex, and add a comment naming the rule that made the original a race.",
+      "starter": "struct Flags {\n    unsigned bid_changed : 1;\n    unsigned ask_changed : 1;\n};",
+      "checklist": [
+        "Comment states that adjacent non-zero-width bit-fields are one memory location",
+        "The two flags become separate memory locations (separate atomic scalar members)",
+        "Both writers use atomic operations, not plain stores",
+        "The explicit memory order is relaxed, or the choice is justified in a comment",
+        "No mutex is used"
+      ],
+      "solution": "#include <atomic>\n\n// The originals were adjacent non-zero-width bit-fields, which form ONE\n// memory location: two concurrent writes conflict and the program has a\n// data race. Separate scalar objects are separate memory locations.\nstruct Flags {\n    std::atomic<bool> bid_changed{false};\n    std::atomic<bool> ask_changed{false};\n};\n\nvoid mark_bid(Flags& flags) {\n    // Relaxed: nothing else is being published through this flag.\n    flags.bid_changed.store(true, std::memory_order_relaxed);\n}\n\nvoid mark_ask(Flags& flags) {\n    flags.ask_changed.store(true, std::memory_order_relaxed);\n}",
+      "notes": "A zero-width bit-field between the two members would also split the memory locations, making plain concurrent writes race-free — but the fields would still be non-atomic, so any reader would need its own synchronization. Making each flag a distinct atomic object states the intent and removes both problems. If a reader must publish payload alongside a flag, upgrade that flag's store to release."
+    },
+    {
+      "id": "c25-w02",
+      "section": "Happens-before",
+      "minutes": 8,
+      "prompt": "Write a producer/consumer pair that publishes a non-atomic `Quote` struct through an atomic flag, using the weakest orderings that are still correct. In a comment, name the four edges of the happens-before chain that make the consumer's plain read race-free.",
+      "checklist": [
+        "Payload is a plain (non-atomic) struct, written before the flag store",
+        "Flag store uses memory_order_release; flag load uses memory_order_acquire",
+        "The consumer reads the payload only when the load returns true",
+        "Comment names sequenced-before, synchronizes-with, sequenced-before, and the transitive happens-before",
+        "No mutex and no volatile"
+      ],
+      "solution": "#include <atomic>\n#include <cstdint>\n\nstruct Quote {\n    std::int64_t bid_ticks;\n    std::int64_t ask_ticks;\n};\n\nQuote quote{};\nstd::atomic<bool> ready{false};\n\nvoid produce() {\n    quote = Quote{101, 102};                             // (1)\n    ready.store(true, std::memory_order_release);        // (2)\n}\n\nbool consume(Quote& out) {\n    if (!ready.load(std::memory_order_acquire)) {        // (3)\n        return false;\n    }\n    out = quote;                                         // (4)\n    return true;\n}\n\n// The chain: (1) is sequenced-before (2); (2) synchronizes-with (3)\n// BECAUSE (3) reads the value (2) wrote; (3) is sequenced-before (4).\n// The transitive closure gives (1) happens-before (4), so the two\n// conflicting plain accesses to `quote` are ordered and race-free.",
+      "notes": "The load returning `false` creates no edge at all, which is why the payload read sits inside the `if`. Note also that the release does not make `quote` atomic — it publishes effects already sequenced before it. Publishing a second update through the same flag would need a fresh protocol, since a reader that has already seen `true` performs no further acquire."
+    },
+    {
+      "id": "c25-w03",
+      "section": "Atomic types and operations",
+      "minutes": 6,
+      "prompt": "Write a `next_ticket()` that hands every caller a distinct 64-bit sequence number with the weakest correct ordering, and make the build fail on any target where the atomic is not guaranteed lock-free.",
+      "checklist": [
+        "Uses fetch_add, not `counter = counter + 1` or a load/store pair",
+        "Ordering is memory_order_relaxed and spelled explicitly",
+        "static_assert on std::atomic<std::uint64_t>::is_always_lock_free",
+        "A comment notes that the returned value is the pre-increment value",
+        "A comment notes relaxed publishes nothing about other state"
+      ],
+      "solution": "#include <atomic>\n#include <cstdint>\n\nstatic_assert(std::atomic<std::uint64_t>::is_always_lock_free,\n              \"ticket dispenser must not fall back to a library lock\");\n\nstd::uint64_t next_ticket() {\n    static std::atomic<std::uint64_t> ticket{0};\n    // fetch_add returns the value from BEFORE the increment, so callers\n    // receive 0, 1, 2, ... with no duplicates.\n    //\n    // Relaxed is sufficient: every increment joins this object's\n    // modification order, so none is lost. It publishes nothing about\n    // any other location - that needs a separate release/acquire pair.\n    return ticket.fetch_add(1, std::memory_order_relaxed);\n}",
+      "notes": "`is_always_lock_free` is the compile-time constant, so it can be a static_assert; `is_lock_free()` is the runtime query that exists because lock freedom can depend on address and ABI constraints. Writing `ticket = ticket + 1` here would be atomic per access yet still lose updates, and `ticket += 1` would silently use the seq_cst default."
+    },
+    {
+      "id": "c25-w04",
+      "section": "Compare-exchange",
+      "minutes": 10,
+      "prompt": "Write `record_high(std::atomic<long>& peak, long candidate)` that raises `peak` to `candidate` only when `candidate` is larger, using a CAS retry loop. Return whether the value was raised. Justify the CAS variant and both orderings in comments.",
+      "checklist": [
+        "Loads `peak` once before the loop; does not reload inside it",
+        "Uses compare_exchange_weak, with a comment saying why weak suits a retry loop",
+        "Exits early (returns false) when the observed value already dominates the candidate",
+        "Failure ordering is not release or acq_rel",
+        "Comment justifies the chosen success and failure orderings"
+      ],
+      "solution": "#include <atomic>\n\nbool record_high(std::atomic<long>& peak, long candidate) {\n    // One load; the failed CAS refreshes `observed` for us.\n    long observed = peak.load(std::memory_order_relaxed);\n\n    while (candidate > observed) {\n        // weak: this loop already retries, so a spurious failure costs\n        // one more iteration and avoids the nested retry a strong CAS\n        // may have to perform on an LL/SC machine.\n        //\n        // success: relaxed - we publish no other state through `peak`.\n        // failure: relaxed - the observed value is only compared, never\n        // used to reach other memory. (Release/acq_rel are ill-formed\n        // for the failure path: a failed CAS performs no write.)\n        if (peak.compare_exchange_weak(observed, candidate,\n                                       std::memory_order_relaxed,\n                                       std::memory_order_relaxed)) {\n            return true;\n        }\n    }\n    return false;\n}",
+      "notes": "The loop condition doubles as the retry test: when a failed CAS writes a larger `observed` back, `candidate > observed` becomes false and the function returns without another attempt. Adding an explicit `observed = peak.load(...)` inside the loop is the standard wasted-work bug — the operation already refreshed it."
+    },
+    {
+      "id": "c25-w05",
+      "section": "The ordering ladder — centerpiece",
+      "minutes": 10,
+      "prompt": "Write four one-line atomic operations, one for each rung of the ladder (relaxed, release, acquire, acq_rel), each with a comment naming the specific edge that justifies the choice. Then add a fifth with seq_cst and state the protocol shape that requires it.",
+      "checklist": [
+        "Relaxed example involves only one atomic object's own value",
+        "Release is on a store and acquire is on a load (not the reverse)",
+        "acq_rel example is a read-modify-write that both consumes and publishes",
+        "seq_cst comment names a protocol over independent atomics (mutual flags, phase decision, or IRIW-style agreement)",
+        "Each comment names the edge, not just the ordering keyword"
+      ],
+      "solution": "#include <atomic>\n#include <cstdint>\n\nstd::atomic<std::uint64_t> hits{0};\nstd::atomic<bool> ready{false};\nstd::atomic<int> owner{0};\nstd::atomic<bool> flag_a{false};\nint payload = 0;\n\nvoid ladder() {\n    // relaxed: only this object's value and modification order matter.\n    // No other location is being ordered.\n    hits.fetch_add(1, std::memory_order_relaxed);\n\n    // release: publishes everything sequenced before it (the write to\n    // `payload`) to whichever thread's acquire reads THIS value.\n    payload = 42;\n    ready.store(true, std::memory_order_release);\n\n    // acquire: if this reads the release above, that release\n    // synchronizes with it and `payload` may be read race-free.\n    if (ready.load(std::memory_order_acquire)) {\n        payload += 1;\n    }\n\n    // acq_rel: one RMW that consumes state published by the previous\n    // owner (acquire half) and publishes this owner's state onward to\n    // the next (release half).\n    owner.exchange(1, std::memory_order_acq_rel);\n\n    // seq_cst: needed when operations on INDEPENDENT atomics must share\n    // one globally agreed order - Dekker-style mutual flags, a global\n    // phase decision, or readers that must agree on the order of two\n    // unrelated writes (IRIW). Acquire/release cannot supply that.\n    flag_a.store(true, std::memory_order_seq_cst);\n}",
+      "notes": "The rungs are not a single strength axis: acquire and release govern opposite directions, and neither is stronger than the other. Only seq_cst adds something genuinely new — membership in the single total order S, which is why store-buffering and IRIW outcomes stay allowed under release/acquire and become forbidden under seq_cst."
+    },
+    {
+      "id": "c25-w06",
+      "section": "Coherence, modification order, and release sequences",
+      "minutes": 10,
+      "prompt": "Write the `release()` half of an intrusive reference count in the optimised shape: every decrement is a release, and only the decrement that reaches zero pays for an acquire. Comment on why the fence is sound.",
+      "checklist": [
+        "Decrement uses fetch_sub with memory_order_release",
+        "Destruction is triggered by the pre-decrement value being 1, not 0",
+        "An acquire std::atomic_thread_fence is issued only on the zero path",
+        "Comment explains that the RMWs form a release sequence the final decrement reads from",
+        "Comment notes that a purely relaxed final decrement would be unsound"
+      ],
+      "solution": "#include <atomic>\n#include <cstddef>\n\nstruct Resource {\n    int handle;\n};\n\nstruct Control {\n    std::atomic<std::size_t> references{1};\n    Resource resource;\n};\n\nvoid add_reference(Control* control) {\n    control->references.fetch_add(1, std::memory_order_relaxed);\n}\n\nvoid release(Control* control) {\n    // Release on every decrement: each owner publishes its prior use of\n    // `resource` before dropping its reference.\n    if (control->references.fetch_sub(1, std::memory_order_release) == 1) {\n        // fetch_sub returns the count from BEFORE the decrement, so 1\n        // means this call dropped the last reference.\n        //\n        // Sound because the decrements are read-modify-writes: they form\n        // a release sequence in `references`'s modification order, and\n        // this final RMW read from it. The acquire fence therefore picks\n        // up every earlier owner's released effects before destruction.\n        //\n        // A relaxed final decrement would acquire nothing, and the\n        // destructor could run before earlier owners' writes are visible.\n        std::atomic_thread_fence(std::memory_order_acquire);\n        delete control;\n    }\n}",
+      "notes": "This is the shape libstdc++ and friends use, for a measurable reason: the acquire is paid once per object rather than once per decrement, and the uncontended path becomes a plain release RMW. Note that the reference count orders ownership bookkeeping only — it does not make concurrent unsynchronized writes to `resource` itself safe."
+    },
+    {
+      "id": "c25-w07",
+      "section": "Fences",
+      "minutes": 10,
+      "prompt": "Publish an array of four relaxed atomic slots as one batch using a single release fence, and write the matching consumer with an acquire fence. In comments, identify the carrier operation and state what breaks if the consumer's payload loads are hoisted above its fence.",
+      "checklist": [
+        "All payload stores and loads are memory_order_relaxed",
+        "One std::atomic_thread_fence(release) after the stores and before the carrier store",
+        "One std::atomic_thread_fence(acquire) after the carrier load and before the payload loads",
+        "Comment names the carrier atomic and the required reads-from relationship",
+        "Consumer returns early when the carrier load does not observe the publication"
+      ],
+      "solution": "#include <array>\n#include <atomic>\n#include <cstddef>\n#include <optional>\n\nstd::array<std::atomic<int>, 4> slots{};\nstd::atomic<bool> batch_ready{false};\n\nvoid publish_batch(const std::array<int, 4>& values) {\n    for (std::size_t i = 0; i < values.size(); ++i) {\n        slots[i].store(values[i], std::memory_order_relaxed);\n    }\n    std::atomic_thread_fence(std::memory_order_release);\n    // `batch_ready` is the CARRIER: the fences connect only when the\n    // consumer's load actually reads this store (or a later member of\n    // its release sequence).\n    batch_ready.store(true, std::memory_order_relaxed);\n}\n\nstd::optional<std::array<int, 4>> consume_batch() {\n    if (!batch_ready.load(std::memory_order_relaxed)) {\n        return std::nullopt;  // read no carrier value: no edge at all\n    }\n    std::atomic_thread_fence(std::memory_order_acquire);\n\n    // Hoisting any of these loads above the fence destroys the pattern:\n    // the acquire fence orders operations that come AFTER it, so a slot\n    // load moved above it could observe a pre-publication value.\n    std::array<int, 4> values{};\n    for (std::size_t i = 0; i < values.size(); ++i) {\n        values[i] = slots[i].load(std::memory_order_relaxed);\n    }\n    return values;\n}",
+      "notes": "The economy of the fence form is that ordering is paid once for the whole batch instead of once per slot. The cost is that the proof is spread across more lines — moving the carrier store above the release fence, or a payload load above the acquire fence, silently removes the edge. Prefer acquire/release directly on the flag unless batching shows a measured benefit."
+    },
+    {
+      "id": "c25-w08",
+      "section": "Safe publication patterns",
+      "minutes": 12,
+      "prompt": "Write a correct double-checked-locking `get_config()` returning `Config&`, with a comment on each of the four things that make it correct: the fast-path acquire, the second check under the lock, the release publication, and why construction must complete before the store.",
+      "checklist": [
+        "Fast-path load uses memory_order_acquire",
+        "A second load of the pointer happens after acquiring the mutex",
+        "Publication store uses memory_order_release",
+        "The pointer is std::atomic<Config*>, not a plain Config*",
+        "Comment states that the object must be fully constructed before the release store",
+        "Comment notes a function-local static is the better answer for ordinary lazy initialisation"
+      ],
+      "solution": "#include <atomic>\n#include <mutex>\n\nstruct Config {\n    int max_order_size;\n};\n\nstd::atomic<Config*> current_config{nullptr};\nstd::mutex config_mutex;\n\nConfig& get_config() {\n    // (1) Acquire, not relaxed: a non-null pointer must arrive together\n    // with the visibility of the pointee's initialisation.\n    Config* config = current_config.load(std::memory_order_acquire);\n    if (config != nullptr) {\n        return *config;\n    }\n\n    std::lock_guard lock{config_mutex};\n\n    // (2) Re-check: another thread may have published while this one\n    // waited for the mutex.\n    config = current_config.load(std::memory_order_acquire);\n    if (config == nullptr) {\n        // (3) Construction completes here, entirely sequenced before...\n        config = new Config{10'000};\n        // (4) ...the release store, which publishes it. Any later write\n        // through `config` would NOT be covered and would race with\n        // fast-path readers.\n        current_config.store(config, std::memory_order_release);\n    }\n    return *config;\n}\n\n// For ordinary lazy initialisation prefer a function-local static:\n// magic statics already give thread-safe one-time construction.\n// Hand-written DCLP is for lifetimes a static cannot express.",
+      "notes": "A plain `Config*` here would be a data race even though every writer holds the mutex, because the unlocked fast-path read still conflicts with the write. This version also deliberately omits reclamation: it is only sound because the configuration lives until process shutdown. Replaceable configuration needs `atomic<shared_ptr<const Config>>` or one of the reclamation schemes in Chapter 26."
+    },
+    {
+      "id": "c25-w09",
+      "section": "Tearing, alignment, and `volatile`",
+      "minutes": 6,
+      "prompt": "A colleague fixed a hanging polling loop by adding `volatile` to a shared `bool stop`. Rewrite it correctly and add a comment listing the three things `volatile` does not provide for inter-thread communication.",
+      "starter": "volatile bool stop = false;\n\nvoid request_stop() {\n    stop = true;\n}\n\nvoid poll() {\n    while (!stop) {\n    }\n}",
+      "checklist": [
+        "The flag becomes std::atomic<bool> and volatile is removed",
+        "Store and load carry explicit memory orders",
+        "Comment states volatile gives no atomicity",
+        "Comment states volatile creates no happens-before edge",
+        "Comment states volatile grants no exemption from the data-race rule"
+      ],
+      "solution": "#include <atomic>\n\n// volatile supplies NONE of the three things this loop needed:\n//   - no atomicity of the access,\n//   - no happens-before edge with the other thread,\n//   - no exemption from the data-race rule (the original is still UB).\n// It only makes each access an observable side effect the compiler may\n// not elide or merge - which is why it exists for memory-mapped I/O.\nstd::atomic<bool> stop{false};\n\nvoid request_stop() {\n    stop.store(true, std::memory_order_release);\n}\n\nvoid poll() {\n    while (!stop.load(std::memory_order_acquire)) {\n    }\n}",
+      "notes": "Release/acquire here is not overkill if the stopping thread also publishes state the poller reads afterwards; if the flag genuinely carries nothing but itself, relaxed is sufficient and the loop still terminates, because a relaxed load may not be hoisted out of the loop the way a racy plain load may. Java and C# do give their `volatile` inter-thread semantics — that is the usual source of this bug."
+    },
+    {
+      "id": "c25-w10",
+      "section": "Litmus tests — flagship",
+      "minutes": 12,
+      "prompt": "Write the store-buffering litmus test as two thread functions parameterised by a store order and a load order, plus a comment table stating whether (r1,r2)==(0,0) is allowed under relaxed, under release stores with acquire loads, and under seq_cst — with the one-line reason for each.",
+      "checklist": [
+        "Store order and load order are separate parameters (acquire is invalid on a store, release on a load)",
+        "Both result variables are plain ints written by exactly one thread each",
+        "Table marks (0,0) allowed under relaxed and under release/acquire",
+        "Table marks (0,0) forbidden under seq_cst",
+        "Reason for release/acquire says the loads read no release value, so no synchronizes-with edge forms",
+        "Reason for seq_cst names the cycle in the single total order S"
+      ],
+      "solution": "#include <atomic>\n\nstd::atomic<int> sb_x{0};\nstd::atomic<int> sb_y{0};\nint sb_r1 = -1;\nint sb_r2 = -1;\n\nvoid sb_first(std::memory_order store_order,\n              std::memory_order load_order) {\n    sb_x.store(1, store_order);\n    sb_r1 = sb_y.load(load_order);\n}\n\nvoid sb_second(std::memory_order store_order,\n               std::memory_order load_order) {\n    sb_y.store(1, store_order);\n    sb_r2 = sb_x.load(load_order);\n}\n\n// Question: (sb_r1, sb_r2) == (0, 0)?\n//\n// relaxed          ALLOWED    No cross-object ordering at all; each\n//                             object has only its own modification\n//                             order.\n// release/acquire  ALLOWED    Each load reads the INITIAL value, so it\n//                             reads from no release: no\n//                             synchronizes-with edge is created and\n//                             nothing forbids the outcome.\n// seq_cst          FORBIDDEN  All four operations join one total order\n//                             S. Both loads reading 0 forces each load\n//                             before the other thread's store, while\n//                             each store precedes its own thread's\n//                             load - a four-edge cycle no total order\n//                             can contain.",
+      "notes": "The parameterisation is not cosmetic: `store(1, memory_order_acquire)` and `load(memory_order_release)` are precondition violations, so a single `order` parameter could not express the release/acquire row at all. The lesson generalises — release/acquire is not a weaker seq_cst but a different guarantee, and store buffering plus IRIW are the two tests that separate them."
+    }
+  ]
+}

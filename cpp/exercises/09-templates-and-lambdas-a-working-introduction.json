@@ -1,0 +1,440 @@
+{
+  "chapter": 9,
+  "mcq": [
+    {
+      "id": "c09-m01",
+      "section": "Templates are compile-time code generation",
+      "difficulty": "easy",
+      "prompt": "`max(3, 5)` and `max(2.5, 7.1)` are calls to the same function template. What does the compiler produce?",
+      "choices": [
+        "One function that boxes its arguments into a common runtime representation",
+        "Two separate instantiations with concrete parameter types, optimised independently",
+        "One function plus a runtime type tag that selects the comparison",
+        "One function using virtual dispatch on the argument type"
+      ],
+      "answer": 1,
+      "explain": "Each distinct set of template arguments generates a separate function at compile time, so `max<int>` and `max<double>` are as concrete as hand-written overloads and can be inlined and optimised separately. The boxing answer describes type erasure — the model behind commonly used Java generics — which is precisely what C++ templates do not do, and why an instantiation costs nothing at runtime."
+    },
+    {
+      "id": "c09-m02",
+      "section": "Templates are compile-time code generation",
+      "difficulty": "medium",
+      "prompt": "A template body uses `a < b`. The definition compiles cleanly. What does that prove?",
+      "choices": [
+        "Nothing about particular types: operations that depend on `T` are only validated when an instantiation asks for them",
+        "That the compiler has already generated code for the common built-in types",
+        "That any failure will be reported as a link error rather than a compile error",
+        "That every type the template could be called with supports `<`"
+      ],
+      "answer": 0,
+      "explain": "The compiler parses the definition when it sees it, but it cannot check `a < b` until it knows what `T` is. That is why an error for a specific type surfaces at the *first use* that instantiates the template, often far from the definition. The name of this hazard is that a template body is not proof that every possible instantiation is valid."
+    },
+    {
+      "id": "c09-m03",
+      "section": "The four template kinds",
+      "difficulty": "easy",
+      "prompt": "Given `template<class T> using Vec = std::vector<T>;`, what is the relationship between `Vec<int>` and `std::vector<int>`?",
+      "choices": [
+        "`Vec<int>` is a derived class of `std::vector<int>`",
+        "They are distinct types that convert to each other implicitly",
+        "`Vec<int>` is a new, distinct type that wraps `std::vector<int>`",
+        "`Vec<int>` is exactly `std::vector<int>` — an alias template creates aliases, not new types"
+      ],
+      "answer": 3,
+      "explain": "An alias template names a family of type aliases; the two spellings denote one and the same type, so they overload-resolve, compare and convert identically. Wanting a genuinely distinct type — a strong typedef — requires an actual class, which is a different tool for a different job."
+    },
+    {
+      "id": "c09-m04",
+      "section": "The four template kinds",
+      "difficulty": "medium",
+      "prompt": "Which use site does *not* require the template argument to be written out?",
+      "choices": [
+        "`Buffer<double> prices{64};` for `template<class T> class Buffer`",
+        "`double origin = zero<double>;` for `template<class T> constexpr T zero = T{};`",
+        "`int squared = square(7);` for `template<class T> T square(T value)`",
+        "`Vec<int> quantities{1, 2, 3};` for `template<class T> using Vec = std::vector<T>`"
+      ],
+      "answer": 2,
+      "explain": "A function template can deduce `T` from its arguments, so `square(7)` needs nothing written. A variable template and an alias template have no arguments to deduce from and must be spelled. The class template is the interesting near-miss: CTAD can sometimes deduce class template arguments from *constructor* arguments, but that is a separate C++17 feature rather than the ordinary deduction that makes `square(7)` work."
+    },
+    {
+      "id": "c09-m05",
+      "section": "Deduction: how the compiler picks T",
+      "difficulty": "medium",
+      "prompt": "For `template<class T> T max(T a, T b);`, why is `max(1, 2.0)` an error?",
+      "choices": [
+        "Because `int` and `double` have different sizes",
+        "Because the two arguments propose `int` and `double` for one parameter, and deduction does not convert to reconcile conflicting proposals",
+        "Because the return type cannot be deduced from two different parameter types",
+        "Because `1` is an lvalue and `2.0` is a prvalue"
+      ],
+      "answer": 1,
+      "explain": "Each argument independently proposes a type for `T`, and the proposals must agree exactly before overload resolution continues — deduction finds types, it does not negotiate a compromise. Fixing `T` explicitly with `max<double>(1, 2.0)` changes the situation completely: now both parameters are `double` and ordinary argument conversion turns `1` into `1.0`."
+    },
+    {
+      "id": "c09-m06",
+      "section": "Deduction: how the compiler picks T",
+      "difficulty": "hard",
+      "prompt": "`auto wrong = max(\"alpha\", \"beta\");` compiles for `template<class T> T max(T a, T b)`. What does it actually compute?",
+      "choices": [
+        "`max<const char*>`, comparing pointer values rather than characters, with an unspecified result for pointers into unrelated objects",
+        "`max<const char[6]>`, comparing arrays element by element",
+        "Nothing useful: it is undefined behaviour at run time",
+        "The lexicographically greater string, because string literals compare as text"
+      ],
+      "answer": 0,
+      "explain": "A string literal used as a by-value argument decays to `const char*`, so `T` is deduced as `const char*` and `<` is the built-in pointer comparison. The relational result for pointers into unrelated objects is unspecified, not undefined — the program is well-formed and simply meaningless. Constructing `std::string` arguments makes lexical comparison the operation actually requested."
+    },
+    {
+      "id": "c09-m07",
+      "section": "CTAD: deducing class template arguments",
+      "difficulty": "medium",
+      "prompt": "What is the difference between `std::vector ambiguous{3, 5};` and `std::vector<int> filled(3, 5);`?",
+      "choices": [
+        "`ambiguous` fails to compile because CTAD cannot choose between the constructors",
+        "`ambiguous` holds three elements all equal to 5; `filled` holds two elements, 3 and 5",
+        "Both hold three elements equal to 5; the first just deduces the element type",
+        "`ambiguous` holds two elements, 3 and 5; `filled` holds three elements all equal to 5"
+      ],
+      "answer": 3,
+      "explain": "CTAD only supplies the missing template argument — it does not alter constructor overload resolution, including the strong preference braces give to the `std::initializer_list` constructor. So braces mean \"these elements\" and parentheses reach the count-and-value constructor. This is exactly the case where spelling `int` and choosing the bracket style deliberately makes the intent unmistakable."
+    },
+    {
+      "id": "c09-m08",
+      "section": "CTAD: deducing class template arguments",
+      "difficulty": "medium",
+      "prompt": "After `std::vector values{1, 2, 3};`, a later `values.push_back(4.5)` is written. What happens to the deduced type?",
+      "choices": [
+        "The element type becomes a common type of `int` and `double` chosen at the end of the enclosing scope",
+        "The vector is re-deduced as `std::vector<double>`",
+        "Nothing: deduction belongs to the definition, so `values` remains `std::vector<int>` and 4.5 is converted on insertion",
+        "The program is ill-formed, because CTAD forbids later insertions of other types"
+      ],
+      "answer": 2,
+      "explain": "CTAD happens once, at the object definition; the type is then fixed and every later operation follows the ordinary `std::vector<int>` interface. The value 4.5 undergoes the usual conversion to `int` on insertion — a narrowing conversion that is easy to miss, which is another reason to spell the element type where a reviewer would otherwise have to reconstruct it."
+    },
+    {
+      "id": "c09-m09",
+      "section": "Reading template errors",
+      "difficulty": "medium",
+      "prompt": "`std::sort(prices.begin(), prices.end())` on a `std::list<int>` produces a wall of diagnostics whose first `error:` points at `__last - __first` inside a library header. How should you triage it?",
+      "choices": [
+        "Start from the last error, since compilers report the root cause last",
+        "Read the first `error:`, follow `required from` lines back to the first location in your own source, and ignore library-internal candidates until your call makes sense",
+        "Rebuild with the library headers preprocessed so the real error is visible",
+        "Assume the standard library is misconfigured, since a correct call cannot fail inside a header"
+      ],
+      "answer": 1,
+      "explain": "Later errors are usually consequences of the first, and the useful information is the chain from your call site into the machinery: here `__last - __first` says the iterator type has no subtraction, which is the real diagnosis — `std::sort` needs random access and a list gives bidirectional iterators. The failure is inside a header because that is where the requirement is used, not because anything is misconfigured; concepts turn many such failures into a direct \"constraint not satisfied\" message."
+    },
+    {
+      "id": "c09-m10",
+      "section": "Concepts: constraints you can read",
+      "difficulty": "easy",
+      "prompt": "What is a concept, and what does it cost at run time?",
+      "choices": [
+        "A named compile-time predicate on types; nothing at run time",
+        "A runtime type check inserted at each constrained call",
+        "A base class that constrained types must inherit from",
+        "A compile-time predicate that also emits a runtime assertion in debug builds"
+      ],
+      "answer": 0,
+      "explain": "A concept is checked entirely by the compiler: it decides whether a template argument is acceptable and improves the diagnostic when it is not, then disappears. The generated code for a constrained template is identical to the unconstrained one. Concepts also require no inheritance relationship — they are structural predicates over expressions, which is what lets them constrain `int` as readily as a user type."
+    },
+    {
+      "id": "c09-m11",
+      "section": "Concepts: constraints you can read",
+      "difficulty": "medium",
+      "prompt": "In a `requires` expression such as `{ std::hash<T>{}(value) } -> std::convertible_to<std::size_t>;`, what is actually happening?",
+      "choices": [
+        "The expression is evaluated at compile time and must yield a `std::size_t`",
+        "The compiler generates a runtime probe that reports failures through an exception",
+        "The expression is evaluated once at program start and its result is cached",
+        "The compiler checks that the expression is well-formed and that its type satisfies the stated result requirement; the expression is never executed"
+      ],
+      "answer": 3,
+      "explain": "Read the body as \"for a value of type `T`, these expressions must compile, with these result requirements\". Nothing is evaluated — `value` is a parameter of the requires expression that never exists as an object. That is why a `requires` expression can test operations that would be expensive, or that have no meaningful value at all, without any cost."
+    },
+    {
+      "id": "c09-m12",
+      "section": "Function objects and lambda anatomy — the flagship",
+      "difficulty": "easy",
+      "prompt": "What does a lambda expression create?",
+      "choices": [
+        "A function pointer to a compiler-generated free function",
+        "A `std::function` object holding the body",
+        "An object of a unique, unnamed compiler-generated class — the closure type — whose `operator()` is the body",
+        "An inline block of code with no object identity"
+      ],
+      "answer": 2,
+      "explain": "The lambda is a request for a class: captures become data members and the body becomes `operator()`. Because the closure type is unnamed, `auto` is the normal way to hold one. `std::function` can *store* such an object behind a type-erased interface, but that is an extra layer you opt into — a template parameter accepting the concrete closure type needs no wrapper at all."
+    },
+    {
+      "id": "c09-m13",
+      "section": "Function objects and lambda anatomy — the flagship",
+      "difficulty": "medium",
+      "prompt": "In the hand-written equivalent of `[limit](const Order& o) { return o.price > limit; }`, why is `operator()` marked `const`?",
+      "choices": [
+        "Because the parameter is a `const` reference",
+        "Because a lambda's `operator()` is `const` by default, so the closure cannot modify its by-value captures",
+        "Because all function objects must have a `const` call operator to be usable by algorithms",
+        "Because the capture is by value and by-value captures are stored as `const` members"
+      ],
+      "answer": 1,
+      "explain": "A lambda's generated call operator is `const` unless the lambda is declared `mutable`, so the body cannot assign to a by-value capture — the hand-written class must match that to be a faithful model. The members themselves are not `const`; it is the *call operator* that is, which is why `mutable` is enough to lift the restriction."
+    },
+    {
+      "id": "c09-m14",
+      "section": "Function objects and lambda anatomy — the flagship",
+      "difficulty": "medium",
+      "prompt": "Two lambda expressions with byte-identical source text appear on consecutive lines. What is true of their types?",
+      "choices": [
+        "They have distinct closure types; every lambda expression generates its own",
+        "They have the same type only if neither captures anything",
+        "Their types are the same after conversion to a function pointer, and different otherwise",
+        "They have the same closure type, since the source is identical"
+      ],
+      "answer": 0,
+      "explain": "Each lambda *expression* produces its own unique unnamed class, so `std::same_as<decltype(first), decltype(second)>` is false even for identical text. Captureless lambdas do additionally convert to a plain function pointer, and two such pointers can compare equal — but that is a conversion to a shared type, not evidence that the closure types matched."
+    },
+    {
+      "id": "c09-m15",
+      "section": "Capture modes",
+      "difficulty": "easy",
+      "prompt": "A local `int level = 1;` is captured as `[level]`. The code then sets `level = 2` and calls the closure. What does the closure see?",
+      "choices": [
+        "2, because captures are read when the closure is called",
+        "1 on the first call and 2 on later calls",
+        "It is unspecified which value the closure observes",
+        "1, because a by-value capture takes its value when the closure is created"
+      ],
+      "answer": 3,
+      "explain": "A by-value capture copies into a data member at closure construction; that member is then independent of the original variable. `[&level]` is the form that reads the current outer value on each call — and it is also the form that requires the outer object to still be alive when that call happens."
+    },
+    {
+      "id": "c09-m16",
+      "section": "Capture modes",
+      "difficulty": "medium",
+      "prompt": "A function has fifteen locals and a global counter. Its lambda writes `[=]` and its body uses two of the locals and the global. What ends up in the closure?",
+      "choices": [
+        "All fifteen locals plus the global",
+        "All fifteen locals; globals are never captured",
+        "Copies of the two odr-used locals only; the global is accessed directly and not captured",
+        "Nothing: `[=]` defers all reads to call time"
+      ],
+      "answer": 2,
+      "explain": "A default capture includes only the entities the body actually odr-uses, not every name in scope, and globals and static locals are reached directly so they are never captured at all. The reason to prefer explicit captures anyway is documentation: for a stored, returned, or queued lambda the capture list is where a reader learns what state the object holds and what lifetimes it depends on."
+    },
+    {
+      "id": "c09-m17",
+      "section": "Dangling captures",
+      "difficulty": "medium",
+      "prompt": "`auto make_bad_adder(int n) { return [&n](int x) { return x + n; }; }` — what is the defect?",
+      "choices": [
+        "It fails to compile, because a parameter cannot be captured by reference",
+        "The reference capture does not extend `n`'s lifetime, so invoking the returned closure reads a destroyed object: undefined behaviour",
+        "It returns a copy of `n` and so is merely wasteful",
+        "The closure is fine until it is copied, at which point the reference is rebound"
+      ],
+      "answer": 1,
+      "explain": "A reference capture stores a reference, and a reference never keeps its referent alive; `n` dies with the invocation of `make_bad_adder`, leaving the surviving closure pointing into a dead frame. Capturing `[n]` by value fixes it outright. Compiler warnings and AddressSanitizer catch some instances of this, but neither is a lifetime guarantee — the rule is what protects you."
+    },
+    {
+      "id": "c09-m18",
+      "section": "Dangling captures",
+      "difficulty": "hard",
+      "prompt": "A member function stores a lambda written `[=]` into a queue that outlives the object. The body reads a data member. What is the hazard?",
+      "choices": [
+        "`[=]` captures `this` as a pointer, not a copy of the object, so the stored closure can outlive the object and dangle",
+        "The member is copied but its `const` is dropped, allowing accidental mutation",
+        "The closure copies every member individually, making it too large to queue",
+        "None: `[=]` copies the enclosing object, so the closure is self-contained"
+      ],
+      "answer": 0,
+      "explain": "Using a member inside a lambda means using `this->member`, and what `[=]` captures is the `this` pointer — one word, by value, pointing at an object with no lifetime commitment to the closure. Queue that closure past the object's death and every member access dangles. The by-value capture being safe is the intuition that makes this bug so easy to write: the capture *is* by value; the pointer it copies is the problem."
+    },
+    {
+      "id": "c09-m19",
+      "section": "Generic lambdas and passing lambdas to algorithms",
+      "difficulty": "medium",
+      "prompt": "What does declaring a lambda parameter as `auto` do?",
+      "choices": [
+        "It creates a separate closure type for each argument type used",
+        "It type-erases the parameter, boxing the argument at each call",
+        "It defers the parameter type until link time",
+        "It makes the closure's `operator()` a function template, so one closure type can be called with many argument types"
+      ],
+      "answer": 3,
+      "explain": "A generic lambda has one closure type whose call operator is a template; each distinct call instantiates a suitable `operator()`. Nothing is boxed or erased — the body is still only valid for types that support the operations it uses, so calling `[](const auto& l, const auto& r){ return l.price < r.price; }` with two `int`s fails exactly as an ordinary template would."
+    },
+    {
+      "id": "c09-m20",
+      "section": "Generic lambdas and passing lambdas to algorithms",
+      "difficulty": "medium",
+      "prompt": "Why can `std::sort(orders.begin(), orders.end(), less_price)` inline the comparator when passing the same logic through a function pointer often cannot?",
+      "choices": [
+        "Because `std::sort` special-cases closure types in the standard library",
+        "Because lambdas are always marked `inline` by the compiler",
+        "Because `std::sort` is instantiated with the closure's exact concrete type, so the comparator body is visible inside that instantiation",
+        "Because function pointers force an allocation for each call"
+      ],
+      "answer": 2,
+      "explain": "The comparator's type is a template parameter, so the instantiation of `std::sort` sees the specific closure type and its body — an ordinary inlining opportunity. A function pointer is a runtime value: unless the optimiser can prove which function it holds, the call site must issue an indirect call it cannot inline through. No allocation is involved either way; that cost belongs to `std::function`."
+    }
+  ],
+  "reading": [
+    {
+      "id": "c09-r01",
+      "section": "Capture modes",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n\nint main() {\n    int level = 1;\n\n    auto snapshot = [level] { std::cout << level << ' '; };\n    auto live = [&level] { std::cout << level << '\\n'; };\n\n    level = 2;\n    snapshot();\n    live();\n}",
+      "kind": "value",
+      "accept": [
+        "1 2"
+      ],
+      "explain": "`[level]` copied the value 1 into a member when the closure was created, so the later assignment cannot reach it. `[&level]` stored a reference and reads the current value at call time, printing 2. The distinction is when the value is taken, not when it is used — and the reference form additionally requires `level` to still be alive at the call."
+    },
+    {
+      "id": "c09-r02",
+      "section": "Deduction: how the compiler picks T",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <iostream>\n\ntemplate<class T>\nT larger(T a, T b) {\n    return a < b ? b : a;\n}\n\nint main() {\n    std::cout << larger(1, 2.0) << '\\n';\n}",
+      "kind": "no-compile",
+      "explain": "The first argument proposes `T = int` and the second proposes `T = double`; deduction requires the proposals to agree and will not insert a conversion to reconcile them. Writing `larger<double>(1, 2.0)` compiles and prints 2, because once `T` is fixed the call has two `double` parameters and ordinary argument conversion applies to the literal 1."
+    },
+    {
+      "id": "c09-r03",
+      "section": "Dangling captures",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <iostream>\n#include <memory>\n\nauto make_reader() {\n    auto counter = std::make_unique<int>(7);\n    int& value = *counter;\n    return [&value] { return value; };\n}\n\nint main() {\n    auto reader = make_reader();\n    std::cout << reader() << '\\n';\n}",
+      "kind": "ub",
+      "explain": "`counter` is destroyed when `make_reader` returns, freeing the int; the closure kept only a reference, which never extends a lifetime. Calling `reader()` therefore reads freed memory — AddressSanitizer reports a heap-use-after-free. Capturing by value (`[value]`, or an init-capture of the copied number) removes the dependency entirely."
+    },
+    {
+      "id": "c09-r04",
+      "section": "Generic lambdas and passing lambdas to algorithms",
+      "prompt": "What does this print?",
+      "code": "#include <algorithm>\n#include <iomanip>\n#include <iostream>\n#include <vector>\n\nstruct Order {\n    double price;\n    int quantity;\n};\n\nint main() {\n    std::vector<Order> orders{{100.25, 10}, {99.95, 30}, {100.10, 20}};\n\n    auto less_price = [](const auto& left, const auto& right) {\n        return left.price < right.price;\n    };\n\n    std::sort(orders.begin(), orders.end(), less_price);\n\n    std::cout << std::fixed << std::setprecision(2);\n    for (const Order& order : orders) {\n        std::cout << order.price << ' ';\n    }\n    std::cout << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "99.95 100.10 100.25"
+      ],
+      "explain": "The generic lambda's `operator()` is a template; `std::sort` instantiates it with `Order` and orders ascending by price. Because the comparator is passed as its own concrete closure type rather than through a function pointer, its body is visible inside the `std::sort` instantiation and is an ordinary inlining candidate."
+    },
+    {
+      "id": "c09-r05",
+      "section": "Function objects and lambda anatomy — the flagship",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n#include <type_traits>\n\nint main() {\n    auto first = [](int x) { return x + 1; };\n    auto second = [](int x) { return x + 1; };\n\n    std::cout << std::boolalpha\n              << std::is_same_v<decltype(first), decltype(second)> << ' '\n              << (first(1) == second(1)) << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "false true"
+      ],
+      "explain": "Every lambda expression generates its own unique unnamed closure type, so identical source text still yields two unrelated types — which is why `auto` is the normal way to hold a closure. The behaviour is of course identical, so the values agree. The tempting wrong reading is that identical bodies imply identical types; the type comes from the expression, not from the text of the body."
+    },
+    {
+      "id": "c09-r06",
+      "section": "CTAD: deducing class template arguments",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n#include <vector>\n\nint main() {\n    std::vector ambiguous{3, 5};\n    std::vector<int> filled(3, 5);\n\n    std::cout << ambiguous.size() << ' ' << filled.size() << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "2 3"
+      ],
+      "explain": "CTAD deduces `std::vector<int>` for both, but it does not change constructor overload resolution: braces strongly prefer the `std::initializer_list` constructor, so `ambiguous` holds the two elements 3 and 5. Parentheses reach the count-and-value constructor, giving three elements each equal to 5. Reading `{3, 5}` as \"three fives\" is the classic misstep."
+    }
+  ],
+  "writing": [
+    {
+      "id": "c09-w01",
+      "section": "Deduction: how the compiler picks T",
+      "minutes": 8,
+      "prompt": "Write a single-parameter `larger` function template and a two-parameter `less_than` function template. Then, in a `demo()` function, show three call forms: one that deduces successfully, one that needs an explicit template argument because the arguments disagree, and one that would silently compare pointers if written with string literals — with the fix.",
+      "checklist": [
+        "`larger` has one type parameter used for both parameters and the return type",
+        "`less_than` has two independent type parameters",
+        "A comment states that mixed-type arguments make deduction fail rather than convert",
+        "The explicit-argument call is written as `larger<double>(...)`",
+        "The string case constructs `std::string` arguments and a comment names pointer comparison as the defect"
+      ],
+      "solution": "#include <string>\n\ntemplate<class T>\nT larger(T a, T b) {\n    return a < b ? b : a;\n}\n\ntemplate<class T, class U>\nbool less_than(T left, U right) {\n    return left < right;\n}\n\nvoid demo() {\n    int high = larger(3, 5);            // T deduced as int\n\n    // larger(1, 2.0) is an error: the arguments propose int and double\n    // for one parameter and deduction will not convert to reconcile them.\n    double mixed = larger<double>(1, 2.0);  // T fixed; 1 converts to 1.0\n\n    bool ordered = less_than(1, 2.0);   // two parameters, T=int U=double\n\n    // larger(\"alpha\", \"beta\") deduces T = const char* and compares\n    // pointer values, not text. Construct strings to compare lexically.\n    std::string text = larger(std::string{\"alpha\"}, std::string{\"beta\"});\n\n    (void)high; (void)mixed; (void)ordered; (void)text;\n}",
+      "notes": "`less_than` is a different interface, not a workaround that makes the one-parameter `larger` infer a compromise type. Note also that the `std::string` call would find `std::max` through argument-dependent lookup if the template were named `max` — one more reason the chapter writes `::max` in its own example."
+    },
+    {
+      "id": "c09-w02",
+      "section": "The four template kinds",
+      "minutes": 9,
+      "prompt": "Write one small example of each of the four template kinds — a function template, a class template, a variable template, and an alias template — followed by a use site for each showing whether the argument is deduced or spelled.",
+      "checklist": [
+        "All four kinds appear: function, class, variable, alias",
+        "The function-template use site deduces its argument",
+        "The class-template, variable-template and alias use sites spell their arguments",
+        "A comment states that the alias creates no new type",
+        "The code compiles as written (headers included)"
+      ],
+      "solution": "#include <cstddef>\n#include <type_traits>\n#include <vector>\n\n// Function template\ntemplate<class T>\nT square(T value) {\n    return value * value;\n}\n\n// Class template\ntemplate<class T>\nclass Buffer {\npublic:\n    explicit Buffer(std::size_t count) : data_(count) {}\n    T& operator[](std::size_t index) { return data_[index]; }\n\nprivate:\n    std::vector<T> data_;\n};\n\n// Variable template\ntemplate<class T>\nconstexpr T zero = T{};\n\n// Alias template: names std::vector<T>, it does not create a new type.\ntemplate<class T>\nusing Vec = std::vector<T>;\n\nstatic_assert(std::is_same_v<Vec<int>, std::vector<int>>);\n\nvoid use() {\n    int squared = square(7);       // deduced: T is int\n    Buffer<double> prices{64};     // spelled: T is double\n    double origin = zero<double>;  // spelled\n    Vec<int> quantities{1, 2, 3};  // spelled; same type as std::vector<int>\n\n    (void)squared; (void)prices; (void)origin; (void)quantities;\n}",
+      "notes": "`class` and `typename` are interchangeable when introducing a type parameter. The `static_assert` is the point of the alias example: `Vec<int>` and `std::vector<int>` are one type, so they overload-resolve and convert identically — an alias template is a naming convenience, not a wrapper."
+    },
+    {
+      "id": "c09-w03",
+      "section": "Concepts: constraints you can read",
+      "minutes": 10,
+      "prompt": "Constrain a `checked_max` to integral types, writing the constraint in two of the three syntaxes from the chapter. Then define your own `Hashable` concept with a `requires` expression that tests `std::hash<T>` and assert it for `int` and `std::string`.",
+      "checklist": [
+        "One overload uses a constrained template parameter (`template<std::integral T>`)",
+        "A second function uses a `requires` clause or the abbreviated `auto` form",
+        "`Hashable` is written with a `requires` expression and a result requirement",
+        "The result requirement uses `std::convertible_to<std::size_t>`",
+        "`static_assert`s show `Hashable` holds for `int` and `std::string`",
+        "A comment states that concepts add no runtime check"
+      ],
+      "solution": "#include <concepts>\n#include <cstddef>\n#include <functional>\n#include <string>\n\n// Constrained template parameter.\ntemplate<std::integral T>\nT checked_max(T a, T b) {\n    return a < b ? b : a;\n}\n\n// requires clause: the same constraint in another position.\ntemplate<class T>\n    requires std::integral<T>\nT checked_min(T a, T b) {\n    return b < a ? b : a;\n}\n\n// Abbreviated template.\nvoid send(std::integral auto value) { (void)value; }\n\ntemplate<class T>\nconcept Hashable = requires(T value) {\n    { std::hash<T>{}(value) } -> std::convertible_to<std::size_t>;\n};\n\nstatic_assert(Hashable<int>);\nstatic_assert(Hashable<std::string>);\n\n// All of the above is checked by the compiler; the generated code for a\n// constrained template is identical to the unconstrained one.\nvoid use() {\n    (void)checked_max(8, 13);\n    (void)checked_min(8, 13);\n    send(3);\n}",
+      "notes": "The `requires` expression is never executed — `value` is a parameter that never becomes an object. That is what lets a concept test operations that would be expensive or meaningless to run. `checked_max(\"a\", \"b\")` now fails at the call site with \"const char* is not integral\" rather than somewhere inside the body."
+    },
+    {
+      "id": "c09-w04",
+      "section": "Function objects and lambda anatomy — the flagship",
+      "minutes": 8,
+      "prompt": "Write a lambda that captures a `double limit` by value and tests whether an `Order`'s price exceeds it. Beside it, hand-write the equivalent function-object class. Call both on the same order and print the two results plus `sizeof` the closure.",
+      "checklist": [
+        "The lambda captures `limit` explicitly by value, not via `[=]`",
+        "The hand-written class has one data member per capture",
+        "The hand-written `operator()` is marked `const`, matching the lambda's default",
+        "Both callables are invoked on the same `Order` and produce the same result",
+        "A comment notes the closure type is unique and unnamed, so `auto` holds it"
+      ],
+      "solution": "#include <iostream>\n\nstruct Order {\n    double price;\n    int quantity;\n};\n\nvoid inspect_closures() {\n    double limit = 100.0;\n\n    // Unique, unnamed closure type: auto is the only practical spelling.\n    auto over = [limit](const Order& order) {\n        return order.price > limit;\n    };\n\n    struct Over {\n        double limit;  // one data member for the one capture\n\n        // const, because a lambda's operator() is const unless mutable.\n        bool operator()(const Order& order) const {\n            return order.price > limit;\n        }\n    };\n\n    Over over_by_hand{limit};\n    Order order{101.25, 50};\n\n    std::cout << std::boolalpha\n              << over(order) << ' '\n              << over_by_hand(order) << ' '\n              << (sizeof(over) == sizeof(double)) << '\\n';\n}",
+      "notes": "Each by-value capture normally becomes one unnamed data member, so a closure over a single `double` is commonly the size of a `double` — though exact layout is implementation-defined. An empty closure still has nonzero size, because every complete object needs an addressable identity."
+    },
+    {
+      "id": "c09-w05",
+      "section": "Dangling captures",
+      "minutes": 7,
+      "prompt": "Write a factory that returns an adder closure. Show the broken reference-capturing version as a comment explaining the undefined behaviour, then the correct by-value version. Add a short comment list of the chapter's rules for choosing a capture mode.",
+      "checklist": [
+        "The broken version is present as a comment, with a note that it reads a destroyed object",
+        "The working factory captures by value",
+        "A comment states that a reference capture does not extend the referent's lifetime",
+        "The rules distinguish returned/stored/queued lambdas from immediately consumed ones",
+        "A rule notes that a copied pointer or view is still a lifetime dependency despite being a by-value capture"
+      ],
+      "solution": "// BROKEN: n dies when the function returns; the closure keeps only a\n// reference, which never extends a lifetime. Calling the result reads a\n// destroyed object -- undefined behaviour.\n//\n//   auto make_bad_adder(int n) {\n//       return [&n](int x) { return x + n; };\n//   }\n\nauto make_adder(int n) {\n    return [n](int x) { return x + n; };  // the value travels with the closure\n}\n\n// Capture rules:\n//  - Capture by value when the lambda is returned, stored, or queued.\n//  - Capture by reference only when the lambda is consumed immediately\n//    and the referent clearly outlives the call.\n//  - A copied pointer, reference wrapper, or view is a lifetime\n//    dependency even though the capture itself is by value.\n//  - Recheck captures whenever an immediate lambda becomes a stored or\n//    asynchronous callback.\n\nint use() {\n    auto add_five = make_adder(5);\n    return add_five(3);  // 8\n}",
+      "notes": "The fourth rule is the one that bites in real codebases: the lambda was correct when it ran inline, someone later moved it onto a queue, and the capture list was never revisited. `[=]` inside a member function is the same trap in disguise — it captures `this` as a pointer, not a copy of the object."
+    },
+    {
+      "id": "c09-w06",
+      "section": "Generic lambdas and passing lambdas to algorithms",
+      "minutes": 9,
+      "prompt": "Write a generic lambda that compares any two objects having a `.price` member, use it to sort a `std::vector<Order>` with `std::sort`, and use the same closure on a different type. Add a comment explaining why passing it directly to `std::sort` is faster than routing it through a function pointer.",
+      "checklist": [
+        "The comparator's parameters are declared `const auto&`",
+        "The same closure object is used with two different element types",
+        "`std::sort` receives the closure directly as its third argument",
+        "A comment states that `std::sort` is instantiated with the closure's concrete type, exposing the body for inlining",
+        "A comment contrasts that with the indirect call a function pointer usually forces"
+      ],
+      "solution": "#include <algorithm>\n#include <iostream>\n#include <vector>\n\nstruct Order {\n    double price;\n    int quantity;\n};\n\nstruct Quote {\n    double price;\n};\n\n// One closure type; its operator() is a template, so each call\n// instantiates a suitable version.\nauto less_price = [](const auto& left, const auto& right) {\n    return left.price < right.price;\n};\n\nvoid sort_both() {\n    std::vector<Order> orders{{100.25, 10}, {99.95, 30}, {100.10, 20}};\n    std::vector<Quote> quotes{{100.10}, {99.95}};\n\n    // std::sort is instantiated with less_price's exact concrete type,\n    // so the comparator body is visible inside that instantiation and\n    // can be inlined. A comparator passed as a function pointer is a\n    // runtime value; unless the optimizer can prove its target, the\n    // call site must issue an indirect call it cannot inline through.\n    std::sort(orders.begin(), orders.end(), less_price);\n    std::sort(quotes.begin(), quotes.end(), less_price);\n\n    std::cout << orders.front().price << ' ' << quotes.front().price << '\\n';\n}",
+      "notes": "The lambda body is valid only for types that support the operations it uses — calling `less_price(1, 2)` fails because `int` has no `.price`, exactly as an ordinary template would. Iterator and comparator requirements are formalised in Chapter 13; what matters here is that the concrete closure type is what makes the comparator transparent to the optimiser."
+    }
+  ]
+}

@@ -1,0 +1,431 @@
+{
+  "chapter": 22,
+  "mcq": [
+    {
+      "id": "c22-m01",
+      "section": "Language versions and feature-test macros",
+      "difficulty": "easy",
+      "prompt": "Your build reports `__cplusplus == 202302L`. What does that establish?",
+      "choices": [
+        "That the compiler and standard library implement every C++23 feature",
+        "That std::expected is available",
+        "That `import std;` will work",
+        "Only that the compiler was invoked in C++23 language mode"
+      ],
+      "answer": 3,
+      "explain": "`__cplusplus` reports the selected language mode and nothing more; compilers and standard libraries ship individual features on their own schedules and sometimes backport them into older modes. Gate on the specific feature-test macro — `__cpp_lib_expected` for std::expected — which answers the question you actually have."
+    },
+    {
+      "id": "c22-m02",
+      "section": "Language versions and feature-test macros",
+      "difficulty": "medium",
+      "prompt": "Why do feature-test macros hold dates such as `201907L` rather than being defined-or-not?",
+      "choices": [
+        "To record when the vendor shipped the feature, for support purposes",
+        "So code can require a particular revision of the feature, not just its presence",
+        "Because the preprocessor cannot compare boolean macros",
+        "To let the standard deprecate a feature by lowering its value"
+      ],
+      "answer": 1,
+      "explain": "Features get revised, so `#if defined(__cpp_concepts) && __cpp_concepts >= 201907L` asks for a specific revision rather than an early partial implementation. The value is the standard's revision date, not the vendor's ship date, and it never goes backwards. Never define a reserved `__cpp_` macro yourself — an absent or older value means the implementation cannot support the path you selected."
+    },
+    {
+      "id": "c22-m03",
+      "section": "Range-based `for`, desugared",
+      "difficulty": "easy",
+      "prompt": "How many times is the range expression in `for (int price : make_book())` evaluated?",
+      "choices": [
+        "Once, with the result bound to a hidden `auto&&` reference",
+        "Once per iteration",
+        "Twice: once for begin and once for end",
+        "Once per element plus one final call for the end position"
+      ],
+      "answer": 0,
+      "explain": "The transformation binds the range expression's result to a hidden reference once, then obtains the beginning and ending positions once from that. Re-evaluating per iteration is what a hand-written `for (i = 0; i < f().size(); ++i)` does by accident — and is precisely the cost the range-based form removes."
+    },
+    {
+      "id": "c22-m04",
+      "section": "Range-based `for`, desugared",
+      "difficulty": "medium",
+      "prompt": "How does the loop find the beginning and ending positions of its range?",
+      "choices": [
+        "Always through free begin(range) and end(range) found by ADL",
+        "Always through member range.begin() and range.end()",
+        "Suitable members first; otherwise free begin/end found by argument-dependent lookup",
+        "Through std::ranges::begin only, which is why C-arrays need std::span"
+      ],
+      "answer": 2,
+      "explain": "Lookup considers suitable member `begin()`/`end()` first, and falls back to free functions found by ADL — which is how a third-party type gains range support without editing the class. The two returned types need not match: a sentinel end is normal in the C++20 iterator protocol."
+    },
+    {
+      "id": "c22-m05",
+      "section": "Range-based `for`, desugared",
+      "difficulty": "hard",
+      "prompt": "`for (char c : Text{\"FAST\"}.view())` iterates a string_view over a temporary Text's member. What is its status?",
+      "choices": [
+        "Undefined behaviour in every standard revision",
+        "Well-defined in every standard revision, because the temporary binds to the hidden auto&&",
+        "Ill-formed, because a string_view is not a range",
+        "Undefined behaviour before C++23; valid in C++23, which extends temporaries inside the range initializer"
+      ],
+      "answer": 3,
+      "explain": "Before C++23 only the outer temporary bound directly to the hidden reference was lifetime-extended, and here that outer object is the string_view — the Text died at the end of the initializer, leaving the view dangling. C++23 extends the temporaries inside the range initializer through the loop. It does not repair a function that returns a dangling reference to its by-value parameter: that parameter still dies in the callee."
+    },
+    {
+      "id": "c22-m06",
+      "section": "Structured bindings, desugared",
+      "difficulty": "medium",
+      "prompt": "What does `auto [price, quantity] = order;` actually create?",
+      "choices": [
+        "Two independent variables, each copy-initialised from the corresponding member",
+        "One hidden Order object copy-initialised from order, with two names bound into it",
+        "Two references into order itself",
+        "A std::tuple<std::int64_t, int> holding copies of the members"
+      ],
+      "answer": 1,
+      "explain": "The declaration before `[` initialises one hidden object — here a copy of the whole Order — and the names are bindings into that object, not separate variables. That is why a by-value binding copies the entire record even when you read only one name, and why `auto&` instead binds the hidden object to the original."
+    },
+    {
+      "id": "c22-m07",
+      "section": "Structured bindings, desugared",
+      "difficulty": "medium",
+      "prompt": "In which order does the compiler consider the structured-binding protocols?",
+      "choices": [
+        "Built-in arrays, then tuple-like via tuple_size/tuple_element/get, then eligible classes' data members",
+        "Eligible classes' data members, then tuple-like, then arrays",
+        "Tuple-like first, so a class with both members and a get() is always unpacked as a tuple",
+        "Whichever yields the requested number of names"
+      ],
+      "answer": 0,
+      "explain": "Arrays bind element-per-name, then the tuple-like protocol is tried, and only if neither applies are an eligible class's non-static data members bound in declaration order. The priority matters for a class that opts into tuple_size: it is then unpacked as a tuple even though it also has members — but that only happens because the tuple-like check comes after arrays and before members, not because it comes first."
+    },
+    {
+      "id": "c22-m08",
+      "section": "Structured bindings, desugared",
+      "difficulty": "hard",
+      "prompt": "After `auto& [live_price, live_quantity] = order;`, what is `decltype(live_quantity)` where `order.quantity` is an int?",
+      "choices": [
+        "int&, matching the reference in the declaration",
+        "const int, because bindings are immutable",
+        "int — the declared member type — even though assigning through the binding modifies order",
+        "It is ill-formed: decltype may not be applied to a binding name"
+      ],
+      "answer": 2,
+      "explain": "A binding name is not a reference variable; `decltype` on it yields the referenced member's declared type, so `int`, even though the binding writes through to `order`. Parenthesise it — `decltype((live_quantity))` — and the ordinary expression rules apply, giving a reference type. This mirrors the `decltype(x)` versus `decltype((x))` distinction exactly."
+    },
+    {
+      "id": "c22-m09",
+      "section": "Three-way comparison",
+      "difficulty": "easy",
+      "prompt": "A struct declares `auto operator<=>(const Price&) const = default;` and nothing else. Which expressions work?",
+      "choices": [
+        "Only <, >, <= and >=; equality must still be written by hand",
+        "Only <=> itself; the relational operators must be written by hand",
+        "Only == and !=",
+        "<, >, <=, >=, == and != all work"
+      ],
+      "answer": 3,
+      "explain": "The compiler rewrites `bid < ask` as `(bid <=> ask) < 0`, and a *defaulted* `<=>` also implicitly declares a matching defaulted `operator==` — so equality comes along too. The catch is that a hand-written `<=>` does not: if you write the spaceship yourself, you must define `operator==` as well."
+    },
+    {
+      "id": "c22-m10",
+      "section": "Three-way comparison",
+      "difficulty": "medium",
+      "prompt": "What is the comparison category of a defaulted `<=>` on a struct whose only member is a double?",
+      "choices": [
+        "std::strong_ordering, because double has a total order over its representations",
+        "std::partial_ordering, because NaN is unordered with everything",
+        "std::weak_ordering, because -0.0 and +0.0 compare equal",
+        "It is ill-formed; floating-point members cannot be defaulted"
+      ],
+      "answer": 1,
+      "explain": "Built-in floating-point comparison yields `std::partial_ordering` because NaN is unordered against every value including itself, and the defaulted operator inherits the weakest member category. That is a real hazard: feeding such values to an ordered container breaks its strict-weak-ordering requirement. Weak ordering is for equivalent-but-distinguishable values, such as case-folded symbols."
+    },
+    {
+      "id": "c22-m11",
+      "section": "Three-way comparison",
+      "difficulty": "medium",
+      "prompt": "Why does the standard keep `operator==` separate rather than always deriving it from `<=>`?",
+      "choices": [
+        "Because equality can often be decided faster than a full ordering — a length check rejects most string pairs immediately",
+        "Because <=> cannot be constexpr",
+        "Because == must be a member while <=> must be a free function",
+        "Because equality has to work for types with no ordering, which <=> cannot express"
+      ],
+      "answer": 0,
+      "explain": "Deriving `==` from a full three-way comparison would throw away cheap shortcuts: two strings of different lengths are unequal without inspecting a character. Both operators can be members or friends and both can be constexpr; a type may also default `==` alone when it has no meaningful order."
+    },
+    {
+      "id": "c22-m12",
+      "section": "The `constexpr` family",
+      "difficulty": "medium",
+      "prompt": "Which statement about `constexpr` on a function is accurate?",
+      "choices": [
+        "Every call is evaluated at compile time",
+        "It is a hint the optimizer may ignore",
+        "It permits use in constant expressions; an ordinary call may still execute at runtime",
+        "It implies the function is inline and has internal linkage"
+      ],
+      "answer": 2,
+      "explain": "`constexpr` says the function is *permitted* in a constant expression and must be evaluated at compile time where one is required — initialising a `constexpr` variable or checking a `static_assert`. Called with runtime arguments it is an ordinary function. `consteval` is the keyword for 'compile time or it is an error'."
+    },
+    {
+      "id": "c22-m13",
+      "section": "The `constexpr` family",
+      "difficulty": "medium",
+      "prompt": "`constexpr int invalid = values[3];` indexes a two-element constexpr array. What happens?",
+      "choices": [
+        "It compiles, and reading `invalid` at runtime is undefined behaviour",
+        "It compiles and yields an unspecified value",
+        "It compiles with a warning under -Warray-bounds",
+        "It fails to compile: undefined behaviour is rejected during required constant evaluation"
+      ],
+      "answer": 3,
+      "explain": "A constant expression may not contain undefined behaviour, so out-of-bounds reads, signed overflow and invalid shifts are compile errors on executed constant-evaluation paths — constant evaluation acts as a build-time sanitizer with no runtime cost. Index the same array with a runtime variable and you get ordinary, undiagnosed undefined behaviour instead."
+    },
+    {
+      "id": "c22-m14",
+      "section": "The `constexpr` family",
+      "difficulty": "hard",
+      "prompt": "What does `constinit int sequence_start = compute_start();` guarantee?",
+      "choices": [
+        "That sequence_start is const and cannot be modified after initialisation",
+        "That the initialisation happens at compile time, while the object remains mutable",
+        "That the object is initialised before any other translation unit's statics",
+        "That every later write to the object is also a constant expression"
+      ],
+      "answer": 1,
+      "explain": "`constinit` constrains initialisation only: the object must be constant-initialised, so the cross-translation-unit dynamic-initialisation ordering hazard disappears and there is no first-use guard — but the object is still writable, which is exactly the point for mutable static state. A `constexpr` variable is the one that is also `const`."
+    },
+    {
+      "id": "c22-m15",
+      "section": "Deducing `this`",
+      "difficulty": "medium",
+      "prompt": "For `template<class Self> decltype(auto) price(this Self&& self)`, what is `Self` deduced as when the member is called on a non-const lvalue Quote?",
+      "choices": [
+        "Quote&",
+        "Quote",
+        "Quote&&",
+        "const Quote&"
+      ],
+      "answer": 0,
+      "explain": "The explicit object parameter is deduced exactly like any other forwarding reference, so an lvalue argument deduces an lvalue-reference type and the parameter collapses to `Quote&`. Calling on a `const` object deduces `const Quote&` and on a temporary deduces `Quote` — which is how one function replaces an overload set that differed only in object qualification."
+    },
+    {
+      "id": "c22-m16",
+      "section": "Deducing `this`",
+      "difficulty": "medium",
+      "prompt": "Which restriction applies to a member function with an explicit object parameter?",
+      "choices": [
+        "It must be a template",
+        "It may not be const-qualified",
+        "It has no implicit `this`, and it cannot be virtual",
+        "It may not have any additional parameters"
+      ],
+      "answer": 2,
+      "explain": "The object is now a named parameter, so `this` is not available and every member must be reached through `self`; such a function also cannot be `virtual`. It need not be a template — `Price scaled(this Price self, std::int64_t factor)` takes the object by value and has an ordinary extra parameter."
+    },
+    {
+      "id": "c22-m17",
+      "section": "Modules",
+      "difficulty": "medium",
+      "prompt": "Which of these does `export` in a module interface unit actually do?",
+      "choices": [
+        "Guarantees a stable binary ABI for the exported entity",
+        "Hides the layout of exported class types from importers",
+        "Makes the entity immune to ordinary source-compatibility concerns",
+        "Makes the declaration visible to translation units that import the module"
+      ],
+      "answer": 3,
+      "explain": "`export` controls source visibility to importers and nothing else. Modules change how declarations reach a translation unit, not what those declarations mean — an exported struct's layout is as visible and as fragile as it ever was, and changing it still breaks compatibility with already-compiled callers."
+    },
+    {
+      "id": "c22-m18",
+      "section": "Modules",
+      "difficulty": "medium",
+      "prompt": "A header defined `#define ENABLE_TRACING 1`. The team replaces the `#include` with an `import` of the equivalent module. What happens to the macro?",
+      "choices": [
+        "It is exported with the rest of the module's interface",
+        "It does not cross the import boundary, so code depending on it breaks",
+        "It becomes visible only inside the module's implementation units",
+        "It is replaced by a compiler-generated constexpr variable of the same name"
+      ],
+      "answer": 1,
+      "explain": "Macros are a preprocessing-time phenomenon and do not cross an import boundary at all — that macro isolation is one of the costs modules were designed to remove, and it is also the migration hazard. Configuration that used to arrive via a header macro must become a real declaration, a build-system definition, or a compiler flag."
+    },
+    {
+      "id": "c22-m19",
+      "section": "Contracts **(C++26)**",
+      "difficulty": "medium",
+      "prompt": "How does `[[assume(expr)]]` differ from a contract precondition?",
+      "choices": [
+        "It is never checked; reaching it with a false expr is undefined behaviour, whereas a contract is evaluated under the selected semantic",
+        "It is checked in debug builds and removed under NDEBUG, like assert",
+        "It always terminates on a false expression",
+        "It is a runtime check that the optimizer may not exploit"
+      ],
+      "answer": 0,
+      "explain": "`[[assume(expr)]]` is a promise to the optimizer, not a check: if the expression would be false, the program has undefined behaviour and the compiler is entitled to have optimised on that basis. A contract's `pre` can be ignored, observed through the violation handler, or enforced by terminating, according to the selected mode. `assert` is the NDEBUG-controlled macro."
+    },
+    {
+      "id": "c22-m20",
+      "section": "Static reflection **(C++26)** and the bridge to Part V",
+      "difficulty": "medium",
+      "prompt": "What is the intended payoff of static reflection for wire-format code?",
+      "choices": [
+        "Runtime inspection of object layout through a metadata table in the binary",
+        "Automatic ABI stability across compiler versions",
+        "Compile-time enumeration of a struct's members, removing hand-maintained parallel macro lists and code generators",
+        "Elimination of the need to define comparison operators"
+      ],
+      "answer": 2,
+      "explain": "Reflection is a compile-time facility: `^^T` yields a reflection value that consteval code can inspect, and a splice turns a reflected entity back into code — so a serializer can enumerate members from the struct itself instead of from a macro list that drifts. It adds no runtime metadata, and it makes no ABI promises. Treat the syntax as a C++26 preview, not shipping guidance."
+    }
+  ],
+  "reading": [
+    {
+      "id": "c22-r01",
+      "section": "Structured bindings, desugared",
+      "prompt": "What does this print?",
+      "code": "#include <cstdint>\n#include <iostream>\n\nstruct Order {\n    std::int64_t price;\n    int quantity;\n};\n\nint main() {\n    Order order{10'025, 50};\n\n    auto [price, quantity] = order;\n    quantity = 75;\n\n    auto& [live_price, live_quantity] = order;\n    live_quantity = 100;\n\n    std::cout << order.quantity << ' '\n              << quantity << ' '\n              << live_price << '\\n';\n}",
+      "kind": "value",
+      "accept": ["100 75 10025"],
+      "explain": "The first declaration copies the whole Order into a hidden object, so writing through `quantity` changes only that copy — `order` is untouched by it. The second binds the hidden object to `order` itself, so `live_quantity = 100` writes through. `live_price` then reads the unmodified price from the original. The lesson is that the declaration before `[` decides everything about the copy."
+    },
+    {
+      "id": "c22-r02",
+      "section": "Three-way comparison",
+      "prompt": "What does this print?",
+      "code": "#include <compare>\n#include <cstdint>\n#include <iostream>\n#include <type_traits>\n\nstruct Price {\n    std::int64_t ticks;\n    auto operator<=>(const Price&) const = default;\n};\n\nstruct Quote {\n    double value;\n    auto operator<=>(const Quote&) const = default;\n};\n\nint main() {\n    Price bid{10'025};\n    Price ask{10'030};\n\n    std::cout << std::boolalpha\n              << (bid < ask) << ' '\n              << (bid == ask) << ' '\n              << std::is_same_v<decltype(bid <=> ask),\n                                std::strong_ordering> << ' '\n              << std::is_same_v<decltype(Quote{1.0} <=> Quote{2.0}),\n                                std::partial_ordering> << '\\n';\n}",
+      "kind": "value",
+      "accept": ["true false true true"],
+      "explain": "`bid < ask` is rewritten as `(bid <=> ask) < 0`, and the defaulted spaceship implicitly supplies the defaulted `operator==` that makes `bid == ask` compile. The categories come from the members: an integer member gives strong_ordering, while a double member gives partial_ordering because NaN is unordered with everything — including itself."
+    },
+    {
+      "id": "c22-r03",
+      "section": "Deducing `this`",
+      "prompt": "What does this print?",
+      "code": "#include <cstdint>\n#include <iostream>\n\nstruct Price {\n    std::int64_t ticks;\n\n    Price scaled(this Price self, std::int64_t factor) {\n        self.ticks *= factor;\n        return self;\n    }\n};\n\nint main() {\n    Price base{50};\n    Price doubled = base.scaled(2);\n\n    std::cout << base.ticks << ' ' << doubled.ticks << '\\n';\n}",
+      "kind": "value",
+      "accept": ["50 100"],
+      "explain": "The explicit object parameter is taken *by value*, so `self` is a copy of `base` and mutating it leaves the original at 50. Reading `self.ticks *= factor` as though it were the usual implicit `this->ticks` is the trap. For a small trivially copied type this form also lets the object travel in registers rather than through an implicit pointer."
+    },
+    {
+      "id": "c22-r04",
+      "section": "The `constexpr` family",
+      "prompt": "What does this print?",
+      "code": "#include <array>\n#include <cstddef>\n#include <cstdint>\n#include <iostream>\n\nconstexpr std::uint32_t crc_entry(std::uint32_t value) {\n    for (int bit = 0; bit < 8; ++bit) {\n        value = (value & 1U) ? 0xEDB88320U ^ (value >> 1)\n                             : value >> 1;\n    }\n    return value;\n}\n\nconstexpr auto make_crc_table() {\n    std::array<std::uint32_t, 256> table{};\n    for (std::size_t i = 0; i < table.size(); ++i) {\n        table[i] = crc_entry(static_cast<std::uint32_t>(i));\n    }\n    return table;\n}\n\ninline constexpr auto crc_table = make_crc_table();\nstatic_assert(crc_table[0] == 0);\n\nconstexpr int compute_start() {\n    return 1'000;\n}\n\nconstinit int sequence_start = compute_start();\n\nint main() {\n    std::cout << crc_table[0] << ' ' << sequence_start << ' ';\n    ++sequence_start;\n    std::cout << sequence_start << '\\n';\n}",
+      "kind": "value",
+      "accept": ["0 1000 1001"],
+      "explain": "The whole 256-entry table is built during translation and lands in read-only data; no startup loop runs. `constinit` requires `sequence_start` to be constant-initialised, removing the dynamic-initialisation ordering hazard — but it does not make the object const, which is why `++sequence_start` compiles and prints 1001. Confusing `constinit` with `constexpr` is the usual error here."
+    },
+    {
+      "id": "c22-r05",
+      "section": "The `constexpr` family",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <cstdint>\n#include <iostream>\n#include <string_view>\n\nconsteval std::uint64_t hash_key(std::string_view key) {\n    std::uint64_t hash = 1469598103934665603ULL;\n    for (char c : key) {\n        hash = (hash ^ static_cast<unsigned char>(c)) * 1099511628211ULL;\n    }\n    return hash;\n}\n\nstd::uint64_t runtime_hash(std::string_view key) {\n    return hash_key(key);\n}\n\nint main() {\n    std::cout << runtime_hash(\"order\") << '\\n';\n}",
+      "kind": "no-compile",
+      "explain": "`consteval` declares an immediate function: every potentially evaluated call must itself be a constant expression. Inside `runtime_hash` the parameter `key` is not a constant expression, so the call is ill-formed — and that is the whole purpose of choosing `consteval` over `constexpr` here, since a runtime call to this hash would indicate a design mistake. `constexpr auto order_key = hash_key(\"order\");` at namespace scope compiles fine."
+    },
+    {
+      "id": "c22-r06",
+      "section": "The `constexpr` family",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <array>\n#include <iostream>\n\nconstexpr std::array<int, 2> values{10, 20};\n\nint main() {\n    int index = 3;\n    std::cout << values[index] << '\\n';\n}",
+      "kind": "ub",
+      "explain": "Written as `constexpr int invalid = values[3];` this would be a compile error, because a required constant evaluation may not contain undefined behaviour. Routed through a runtime `index`, the same out-of-bounds read gets no such treatment: `std::array::operator[]` performs no bounds check and the access is undefined behaviour, which ASan reports as a global-buffer-overflow. Constant evaluation is a build-time sanitizer only for the paths it actually executes; `at()` is the checked accessor at runtime."
+    }
+  ],
+  "writing": [
+    {
+      "id": "c22-w01",
+      "section": "Language versions and feature-test macros",
+      "minutes": 8,
+      "prompt": "Write a header-style gate that uses `std::expected` when the library provides it and falls back to a project-local result type otherwise. Include the correct header for the macro, and add a comment saying why you did not test `__cplusplus` instead.",
+      "checklist": [
+        "Includes <version> (or the feature's own header) before testing the macro",
+        "Tests __cpp_lib_expected, not __cplusplus or a compiler version",
+        "The <expected> header is included only inside the positive branch",
+        "A fallback definition exists so both branches compile",
+        "A comment states that a language-mode value does not prove a library feature is present"
+      ],
+      "solution": "#include <version>\n\n// __cplusplus only reports the selected language mode. Compilers and standard\n// libraries ship features on their own schedules and sometimes backport them\n// into older modes, so gate on the feature, not on the edition.\n#ifdef __cpp_lib_expected\n\n#include <expected>\n\ntemplate<class T, class E>\nusing Result = std::expected<T, E>;\n\n#else\n\n#include <variant>\n\ntemplate<class T, class E>\nclass Result {\npublic:\n    Result(T value) : storage_(value) {}\n    Result(E error) : storage_(error) {}\n\n    bool has_value() const { return storage_.index() == 0; }\n    const T& operator*() const { return std::get<0>(storage_); }\n\nprivate:\n    std::variant<T, E> storage_;\n};\n\n#endif\n\nint read_sequence() {\n    Result<int, int> result{42};\n    return *result;\n}",
+      "notes": "Feature macros carry revision dates, so a stricter gate is `#if defined(__cpp_lib_expected) && __cpp_lib_expected >= 202202L`. Never define a reserved `__cpp_` macro yourself to force a branch: an absent or older value is the implementation telling you it cannot support that path."
+    },
+    {
+      "id": "c22-w02",
+      "section": "Range-based `for`, desugared",
+      "minutes": 7,
+      "prompt": "Write a range-based `for` over a `std::vector<Order>` and, immediately below it, the equivalent desugared loop with the hidden reference and hidden positions spelled out. Then add three one-line loops showing the element-declaration choices and comment on when each is right.",
+      "checklist": [
+        "The desugared form binds the range expression once to an `auto&&`",
+        "begin and end are obtained once, before the loop, not per iteration",
+        "Shows `auto`, `auto&` and `const auto&` element declarations",
+        "A comment states that the range runs once but a by-value element copies per iteration",
+        "Both loops produce the same output"
+      ],
+      "solution": "#include <iostream>\n#include <string>\n#include <vector>\n\nstruct Order {\n    std::string symbol;\n    int quantity;\n};\n\nvoid print_orders(std::vector<Order>& orders) {\n    for (const Order& order : orders) {\n        std::cout << order.symbol << ' ';\n    }\n\n    // The same loop with the exposition-only variables spelled out: the range\n    // expression is evaluated once and the endpoints obtained once.\n    auto&& hidden_range = orders;\n    auto hidden_begin = begin(hidden_range);\n    auto hidden_end = end(hidden_range);\n    for (; hidden_begin != hidden_end; ++hidden_begin) {\n        const Order& order = *hidden_begin;\n        std::cout << order.symbol << ' ';\n    }\n\n    // The range runs once; a by-value element copies once per iteration.\n    for (auto order : orders) { static_cast<void>(order); }        // copies\n    for (auto& order : orders) { order.quantity = 0; }             // mutates\n    for (const auto& order : orders) { static_cast<void>(order); } // neither\n}",
+      "notes": "Lookup prefers suitable member begin()/end() and otherwise finds free functions by ADL, which is why the desugared form above calls them unqualified. The two returned types may differ when the end is a sentinel — write `auto hidden_end`, never `decltype(hidden_begin) hidden_end`."
+    },
+    {
+      "id": "c22-w03",
+      "section": "Structured bindings, desugared",
+      "minutes": 8,
+      "prompt": "Write a function returning a `std::tuple<std::int64_t, int>` and unpack it with a structured binding; then iterate a `std::map<std::string, int>` with a binding that avoids copying each entry. Add a comment explaining what the declaration before `[` controls.",
+      "checklist": [
+        "A tuple-returning function is unpacked with `auto [a, b] = f();`",
+        "Map iteration uses `const auto& [key, value]`",
+        "A comment states that the declaration before `[` initialises one hidden object",
+        "A comment notes that a by-value binding copies the whole entry even if one name is read",
+        "The code compiles and prints something deterministic"
+      ],
+      "solution": "#include <cstdint>\n#include <iostream>\n#include <map>\n#include <string>\n#include <tuple>\n\nstd::tuple<std::int64_t, int> best_bid() {\n    return {10'025, 40};\n}\n\nvoid report(const std::map<std::string, int>& positions) {\n    // The declaration before `[` initialises ONE hidden object; the names are\n    // bindings into it. `auto` makes a copy, `auto&` binds the original.\n    auto [bid_price, bid_quantity] = best_bid();\n    std::cout << bid_price << ' ' << bid_quantity << '\\n';\n\n    // A by-value binding here would copy the whole pair - including the\n    // std::string key - for every entry, even though only two names are read.\n    for (const auto& [symbol, position] : positions) {\n        std::cout << symbol << \": \" << position << '\\n';\n    }\n}\n\nint main() {\n    report({{\"AAPL\", 100}, {\"MSFT\", -50}});\n}",
+      "notes": "The tuple case goes through the tuple_size/tuple_element/get protocol; the map's value_type is a std::pair, which is tuple-like for exactly the same reason. Bindings cannot nest patterns or skip elements — structured-binding packs are a C++26 preview."
+    },
+    {
+      "id": "c22-w04",
+      "section": "Three-way comparison",
+      "minutes": 10,
+      "prompt": "Give a `Price` struct a defaulted `<=>`, and give a case-insensitive `Symbol` a hand-written `weak_ordering` spaceship. Explain in comments why Symbol also needs an explicit `operator==` and why its category is weak rather than strong.",
+      "checklist": [
+        "Price defaults <=> and gets == implicitly",
+        "Symbol's operator<=> returns std::weak_ordering explicitly",
+        "Symbol defines operator== explicitly, with a comment saying a hand-written <=> does not supply one",
+        "A comment explains that case-folded equivalence is not substitutability, hence weak",
+        "Both types are usable with < and =="
+      ],
+      "solution": "#include <algorithm>\n#include <compare>\n#include <cstdint>\n#include <string>\n\nstruct Price {\n    std::int64_t ticks;\n\n    // A DEFAULTED <=> also implicitly declares a defaulted ==.\n    auto operator<=>(const Price&) const = default;\n};\n\nstruct Symbol {\n    std::string text;\n\n    static char fold(char c) {\n        return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;\n    }\n\n    // Weak, not strong: \"AAPL\" and \"aapl\" are equivalent but observably\n    // different, so equal values are not substitutable.\n    friend std::weak_ordering operator<=>(const Symbol& left,\n                                          const Symbol& right) {\n        return std::lexicographical_compare_three_way(\n            left.text.begin(), left.text.end(),\n            right.text.begin(), right.text.end(),\n            [](char a, char b) { return fold(a) <=> fold(b); });\n    }\n\n    // A HAND-WRITTEN <=> supplies no ==, so it must be defined too.\n    friend bool operator==(const Symbol& left, const Symbol& right) {\n        return (left <=> right) == 0;\n    }\n};\n\nbool checks() {\n    return Price{1} < Price{2}\n        && Symbol{\"aapl\"} == Symbol{\"AAPL\"};\n}",
+      "notes": "A real Symbol would decide equality by comparing lengths first and only then folding characters — that shortcut is exactly why the standard keeps == separate from <=> rather than always deriving it. Defaulting follows member declaration order, so if business ordering differs from storage order, write the spaceship out rather than rearranging members."
+    },
+    {
+      "id": "c22-w05",
+      "section": "The `constexpr` family",
+      "minutes": 12,
+      "prompt": "Use all three keywords in one file: a `constexpr` function building a 256-entry lookup table checked with static_assert, a `consteval` compile-time-only hash, and a `constinit` mutable static counter. Comment each with what it guarantees and what it does not.",
+      "checklist": [
+        "The table is built by a constexpr function and stored in a constexpr (or inline constexpr) variable",
+        "A static_assert checks at least one table entry",
+        "The consteval function is used only in a constant-expression context",
+        "The constinit object is written to at runtime, demonstrating it is not const",
+        "Comments distinguish 'may run at compile time', 'must run at compile time', and 'must be initialised at compile time'"
+      ],
+      "solution": "#include <array>\n#include <cstddef>\n#include <cstdint>\n#include <string_view>\n\n// constexpr: PERMITTED in a constant expression, and required to run at\n// compile time only where one is required. An ordinary call runs at runtime.\nconstexpr std::uint32_t crc_entry(std::uint32_t value) {\n    for (int bit = 0; bit < 8; ++bit) {\n        value = (value & 1U) ? 0xEDB88320U ^ (value >> 1)\n                             : value >> 1;\n    }\n    return value;\n}\n\nconstexpr auto make_crc_table() {\n    std::array<std::uint32_t, 256> table{};\n    for (std::size_t i = 0; i < table.size(); ++i) {\n        table[i] = crc_entry(static_cast<std::uint32_t>(i));\n    }\n    return table;\n}\n\ninline constexpr auto crc_table = make_crc_table();\nstatic_assert(crc_table[0] == 0);\nstatic_assert(crc_table[1] == crc_entry(1));\n\n// consteval: an immediate function. Every potentially evaluated call MUST be\n// a constant expression, so a runtime call is a compile error by design.\nconsteval std::uint64_t hash_key(std::string_view key) {\n    std::uint64_t hash = 1469598103934665603ULL;\n    for (char c : key) {\n        hash = (hash ^ static_cast<unsigned char>(c)) * 1099511628211ULL;\n    }\n    return hash;\n}\n\nconstexpr auto order_key = hash_key(\"order\");\nstatic_assert(order_key != 0);\n\n// constinit: constrains INITIALISATION only. No dynamic initialisation and no\n// first-use guard - but the object stays mutable, unlike a constexpr variable.\nconstinit std::uint32_t messages_seen = 0;\n\nstd::uint32_t extend_crc(std::uint32_t crc, unsigned char byte) {\n    ++messages_seen;\n    return (crc >> 8) ^ crc_table[(crc ^ byte) & 0xFFU];\n}",
+      "notes": "Constant evaluation also rejects undefined behaviour on the paths it executes, so an out-of-bounds table index or a signed overflow inside make_crc_table would fail the build rather than becoming runtime UB. Storage allocated during constant evaluation cannot escape into runtime."
+    },
+    {
+      "id": "c22-w06",
+      "section": "Deducing `this`",
+      "minutes": 8,
+      "prompt": "Take a class with `int& price() &` and `const int& price() const &` overloads and replace them with a single explicit-object-parameter member. Add a second member that takes the object by value, and comment on the two restrictions such members carry.",
+      "checklist": [
+        "The before/after pair is shown, or the replaced overloads are named in a comment",
+        "The replacement uses `template<class Self>` with `this Self&& self`",
+        "Every member access inside goes through `self`, not an implicit this",
+        "A by-value explicit object parameter is also demonstrated",
+        "Comments name both restrictions: no implicit this, and cannot be virtual"
+      ],
+      "solution": "#include <cstdint>\n#include <utility>\n\n// Before: two members differing only in object qualification.\nstruct QuoteBefore {\n    int price_;\n\n    int& price() & { return price_; }\n    const int& price() const & { return price_; }\n};\n\n// After: one member. Self is deduced exactly like a forwarding reference,\n// so it becomes Quote&, const Quote& or Quote at the call site.\nstruct Quote {\n    int price_;\n\n    template<class Self>\n    decltype(auto) price(this Self&& self) {\n        // No implicit `this` here: every member must be reached through self.\n        // Such a function also cannot be declared virtual.\n        return std::forward<Self>(self).price_;\n    }\n};\n\nstruct Price {\n    std::int64_t ticks;\n\n    // By value: `self` is a copy, so the original is untouched. For a small\n    // trivially copied type this can travel in registers.\n    Price scaled(this Price self, std::int64_t factor) {\n        self.ticks *= factor;\n        return self;\n    }\n};\n\nvoid use() {\n    Quote quote{101};\n    const Quote frozen{102};\n\n    static_cast<void>(quote.price());\n    static_cast<void>(frozen.price());\n    static_cast<void>(Price{50}.scaled(2));\n}",
+      "notes": "Note that `return std::forward<Self>(self).price_;` under decltype(auto) yields the member's declared type, because decltype of an unparenthesized member access reports the entity's type — wrap it in parentheses if you genuinely want a reference back. Explicit object parameters also let a base member deduce the derived object directly, replacing some CRTP patterns."
+    }
+  ]
+}

@@ -1,0 +1,441 @@
+{
+  "chapter": 5,
+  "mcq": [
+    {
+      "id": "c05-m01",
+      "section": "Storage, lifetime, and the object model",
+      "difficulty": "easy",
+      "prompt": "A pointer still holds the same address after the object it pointed at was destroyed, and the bytes there are unchanged. What does that tell you about dereferencing it?",
+      "choices": [
+        "It is safe, because the bit pattern is still the one the object had",
+        "It is safe only if the type is trivially copyable",
+        "It is implementation-defined and diagnosable with a warning",
+        "It is a lifetime violation regardless of what the bytes contain"
+      ],
+      "answer": 3,
+      "explain": "Lifetime is a semantic property, not a test of whether memory has been overwritten. Storage supplies bytes; an object's lifetime says when those bytes may be treated as that type. The tempting answer — 'the bits are still 102, so reading is fine' — confuses storage with the object that used to live in it."
+    },
+    {
+      "id": "c05-m02",
+      "section": "Storage, lifetime, and the object model",
+      "difficulty": "medium",
+      "prompt": "For a class object, when does its lifetime end?",
+      "choices": [
+        "When its destructor begins",
+        "When its destructor returns",
+        "When its storage is released",
+        "When the last reference to it goes out of scope"
+      ],
+      "answer": 0,
+      "explain": "The chapter states it directly: a class object's lifetime ends when its destructor *begins*, which is why treating the object as fully alive inside a base's destructor is already restricted. Waiting for the destructor to return would be the intuitive guess, but that is when the storage merely becomes available for reuse — and for a trivial type such as int, lifetime ends when storage is released or reused, with no destructor involved at all."
+    },
+    {
+      "id": "c05-m03",
+      "section": "The initialization zoo",
+      "difficulty": "easy",
+      "prompt": "A local `int uninitialized;` is declared and then read. How should that be described?",
+      "choices": [
+        "It holds an unspecified but valid int",
+        "It holds garbage — unpredictable, but harmless to read",
+        "Reading it has undefined behavior",
+        "It is zero, like a namespace-scope int"
+      ],
+      "answer": 2,
+      "explain": "Default-initializing a fundamental type leaves an indeterminate value, and reading an indeterminate value is undefined behavior — the program has already left the rules of C++ before you look at the number. 'Garbage but usable' is the widespread misdescription: it implies the read is defined and merely unpredictable. Note the contrast with static storage: a namespace-scope `int count;` really is zero-initialized before startup."
+    },
+    {
+      "id": "c05-m04",
+      "section": "The initialization zoo",
+      "difficulty": "medium",
+      "prompt": "What are the sizes of `std::vector<int> repeated(3, 5);` and `std::vector<int> elements{3, 5};`?",
+      "choices": [
+        "3 and 2",
+        "3 and 3",
+        "2 and 2",
+        "2 and 3"
+      ],
+      "answer": 0,
+      "explain": "Parentheses select the (count, value) constructor, giving three elements each equal to 5. Braces prefer the std::initializer_list constructor, giving the two elements 3 and 5. Assuming braces are a drop-in replacement for parentheses is exactly the trap: the initializer_list constructor wins whenever it is viable."
+    },
+    {
+      "id": "c05-m05",
+      "section": "The initialization zoo",
+      "difficulty": "medium",
+      "prompt": "Given `double market_price = 101.75;`, what is the difference between `int rounded(market_price);` and `int rejected{market_price};`?",
+      "choices": [
+        "Both are ill-formed; a double cannot initialize an int",
+        "Both compile; the first truncates to 101, the second rounds to 102",
+        "The first compiles and produces 101; the second is ill-formed because braces reject narrowing",
+        "The first is ill-formed; the second compiles because braces permit any conversion"
+      ],
+      "answer": 2,
+      "explain": "Direct-initialization with parentheses allows the narrowing conversion and silently truncates toward zero, producing 101. List-initialization rejects narrowing conversions, so the braced form is ill-formed. Braces never round — they refuse. That refusal is the main reason to prefer them where a lost fractional part would be a bug."
+    },
+    {
+      "id": "c05-m06",
+      "section": "The initialization zoo",
+      "difficulty": "medium",
+      "prompt": "`class Price { public: explicit Price(double); };`. Which of these is ill-formed?",
+      "choices": [
+        "Price c = 99.5;",
+        "Price a(99.5);",
+        "Price b{99.5};",
+        "All three are well-formed"
+      ],
+      "answer": 0,
+      "explain": "`Price c = 99.5;` is copy-initialization, which does not consider an explicit converting constructor, so there is no viable candidate. The other two are direct-initialization and direct-list-initialization; both select the constructor directly and both accept explicit. The confusion is treating `=` as 'just another way to spell construction' — the punctuation is part of the meaning."
+    },
+    {
+      "id": "c05-m07",
+      "section": "Most vexing parse",
+      "difficulty": "easy",
+      "prompt": "What does `Widget w();` declare at block scope?",
+      "choices": [
+        "A default-constructed Widget object named w",
+        "A value-initialized Widget object named w",
+        "A function named w taking no arguments and returning Widget",
+        "Nothing — it is ill-formed"
+      ],
+      "answer": 2,
+      "explain": "If a statement can be parsed as a declaration, C++ parses it as one, so this declares a function. It is perfectly well-formed, which is why no diagnostic appears here; the error surfaces later at `w.reset()`, complaining that the base type 'Widget ()' is not an object. Write `Widget w{};` — empty braces cannot describe a parameter list, so the parse is unambiguous."
+    },
+    {
+      "id": "c05-m08",
+      "section": "Most vexing parse",
+      "difficulty": "medium",
+      "prompt": "`struct Config {}; struct Timer { explicit Timer(Config); };`. Inside a function, `Timer timer(Config());` does what?",
+      "choices": [
+        "Constructs a Timer from a value-initialized Config",
+        "Constructs a Timer, but leaves the Config indeterminate",
+        "Fails to compile because Timer's constructor is explicit",
+        "Declares a function returning Timer"
+      ],
+      "answer": 3,
+      "explain": "The same grammar rule applies one level down: `Config()` is read as an unnamed parameter of function type, so this declares a function named `timer`. No Timer object is created and the explicit constructor is never consulted. `Timer working{Config{}};` states the intent and constructs an object."
+    },
+    {
+      "id": "c05-m09",
+      "section": "Initialization versus assignment in constructors",
+      "difficulty": "medium",
+      "prompt": "A constructor body contains `symbol_ = symbol;` for a class-type member `symbol_`. What actually happens?",
+      "choices": [
+        "symbol_ is initialized once, directly from symbol",
+        "symbol_ is default-constructed before the body runs, then assigned",
+        "symbol_ remains uninitialized until the assignment",
+        "The compiler rewrites the assignment into a member initializer"
+      ],
+      "answer": 1,
+      "explain": "Statements in the constructor body run only after every member already exists, so the member is default-constructed and then assigned — two operations where the member initializer list does one. For a member such as std::string that can mean an allocation and deallocation the direct initialization would have avoided. Compilers do not silently promote a body assignment into an initializer."
+    },
+    {
+      "id": "c05-m10",
+      "section": "Initialization versus assignment in constructors",
+      "difficulty": "medium",
+      "prompt": "Which member CANNOT be given its value by an assignment in the constructor body?",
+      "choices": [
+        "A std::string member",
+        "A member of a class type with a default constructor",
+        "A reference member",
+        "A member of a fundamental type"
+      ],
+      "answer": 2,
+      "explain": "A reference must bind during initialization and can never be reseated afterwards, so there is no assignment that could bind it. The same is true of a const member and of a class member with no default constructor. A std::string member can be assigned in the body — it is merely wasteful, not impossible, which is the distinction the question turns on."
+    },
+    {
+      "id": "c05-m11",
+      "section": "Temporaries and lifetime extension",
+      "difficulty": "easy",
+      "prompt": "`const std::string& symbol = make_name();` where make_name returns std::string by value. When is the temporary destroyed?",
+      "choices": [
+        "At the end of the full-expression, leaving symbol dangling",
+        "Never; it is promoted to static storage",
+        "Immediately — a prvalue never materializes an object",
+        "At the end of symbol's scope; the binding extended its lifetime"
+      ],
+      "answer": 3,
+      "explain": "Binding a temporary *directly* to a local const reference extends the temporary's lifetime to the reference's scope. Most temporaries do die at the end of the full-expression — that is the default the extension rule carves an exception out of, and it is what happens the moment the binding stops being direct."
+    },
+    {
+      "id": "c05-m12",
+      "section": "Temporaries and lifetime extension",
+      "difficulty": "hard",
+      "prompt": "`const std::string& pass_through(const std::string& v) { return v; }` and then `const std::string& symbol = pass_through(make_name());`. What is the state of symbol on the next line?",
+      "choices": [
+        "Valid — the extension propagates through the parameter binding",
+        "Valid — the return type is const, so the temporary is preserved",
+        "Dangling — the temporary died at the end of that statement",
+        "Ill-formed — a reference cannot be returned from a const reference parameter"
+      ],
+      "answer": 2,
+      "explain": "Lifetime extension attaches to the *direct* binding of a temporary. The temporary does survive the call because it binds to the parameter, but returning that parameter's reference grants no second extension, so the temporary dies at the semicolon and symbol dangles. Passing a reference through a helper is the standard way to lose the extension without changing any of the visible types."
+    },
+    {
+      "id": "c05-m13",
+      "section": "Temporaries and lifetime extension",
+      "difficulty": "hard",
+      "prompt": "A constructor's member initializer list binds a `const std::string&` *member* to a temporary. What does current C++ say?",
+      "choices": [
+        "The temporary's lifetime is extended to the enclosing object's lifetime",
+        "The construction is ill-formed",
+        "It compiles and the member dangles once the constructor returns",
+        "It compiles, and the member is extended only if the object has static storage duration"
+      ],
+      "answer": 1,
+      "explain": "Current C++ makes that construction ill-formed. Older compilers once accepted it, and the temporary then died when the constructor returned, leaving a dangling member — that historical behavior is what makes the 'compiles and dangles' answer tempting. Either way, no useful extension ever occurs: a reference member is one of the bindings the rule deliberately excludes."
+    },
+    {
+      "id": "c05-m14",
+      "section": "Construction and destruction order",
+      "difficulty": "easy",
+      "prompt": "In what order are a class's parts destroyed?",
+      "choices": [
+        "Bases, then members in declaration order, then the destructor body",
+        "Members in reverse initializer-list order, then bases, then the destructor body",
+        "The destructor body, then bases, then members in declaration order",
+        "The destructor body, then members in reverse declaration order, then bases"
+      ],
+      "answer": 3,
+      "explain": "Destruction is the exact reverse of construction (bases, members in declaration order, body): body, members in reverse declaration order, then bases. Reverse order is what lets a later object depend on an earlier one — the dependent dies first, while what it uses is still alive. The initializer list plays no part in ordering, in either direction."
+    },
+    {
+      "id": "c05-m15",
+      "section": "Construction and destruction order",
+      "difficulty": "medium",
+      "prompt": "`class Packet { public: explicit Packet(int size) : size_(size), buffer_(size_) {} private: std::vector<int> buffer_; int size_; };` What is wrong?",
+      "choices": [
+        "Nothing; the initializer list runs left to right, so size_ is ready",
+        "buffer_ is initialized first, from an as-yet uninitialized size_",
+        "size_ is initialized twice",
+        "The initializer list is ill-formed because it names members out of order"
+      ],
+      "answer": 1,
+      "explain": "Members are initialized in *declaration* order, so buffer_ goes first and reads size_ before size_ has a value. The initializer list visually lies about the ordering — that is the whole trap. Compilers flag it with -Wreorder; the fix is to reorder the declarations, not just the initializer list."
+    },
+    {
+      "id": "c05-m16",
+      "section": "RAII — the idiom of the book",
+      "difficulty": "easy",
+      "prompt": "Why does the chapter's FileHandle delete both copy operations?",
+      "choices": [
+        "Because std::FILE* is not copyable",
+        "Because copying would make the destructor's null check unreliable",
+        "Because a class with a destructor may not be copied",
+        "Because copying the raw handle would create two apparent owners and two calls to fclose"
+      ],
+      "answer": 3,
+      "explain": "The memberwise copy would duplicate the pointer, not the file, so two objects would each close the same FILE on destruction. A std::FILE* is a perfectly copyable pointer — that is precisely the problem, since the type system would otherwise permit the double release. Nothing in the language forbids copying a class with a destructor; that is a choice this type makes about its invariant."
+    },
+    {
+      "id": "c05-m17",
+      "section": "RAII — the idiom of the book",
+      "difficulty": "medium",
+      "prompt": "What does RAII buy over a correct hand-written acquire/release pair?",
+      "choices": [
+        "There is one release site, and every scope exit — including an exception — runs it",
+        "The resource is released sooner",
+        "Release becomes cheaper than the manual call",
+        "Cleanup is deferred until the program can afford it"
+      ],
+      "answer": 0,
+      "explain": "RAII moves release into a destructor the compiler calls on every completed scope exit, so adding a return can no longer add a leak, and stack unwinding runs it too. It adds no ownership tax: the destructor performs the same fclose the manual version would. Nothing is deferred — that is the garbage-collection model, not this one."
+    },
+    {
+      "id": "c05-m18",
+      "section": "Statics and the initialization order fiasco",
+      "difficulty": "medium",
+      "prompt": "When is `static Logger instance;` inside a function initialized?",
+      "choices": [
+        "Before main, along with other static-storage objects",
+        "The first time control reaches its declaration, thread-safely since C++11",
+        "Once per call, since the object is reconstructed each time",
+        "At an unspecified point during startup, like a namespace-scope object"
+      ],
+      "answer": 1,
+      "explain": "A function-local static is initialized on first use, and since C++11 that initialization is thread-safe; the object is constructed before the first call returns and every later call sees the same object. Confusing it with a namespace-scope object is the mistake this idiom exists to avoid — the whole point is that first-use ordering is guaranteed where cross-translation-unit startup order is not."
+    },
+    {
+      "id": "c05-m19",
+      "section": "Statics and the initialization order fiasco",
+      "difficulty": "hard",
+      "prompt": "A namespace-scope `Config global_config;` in one translation unit uses a namespace-scope `Logger global_logger;` defined in another during its constructor. What is the correct diagnosis?",
+      "choices": [
+        "The relative initialization order across translation units is unspecified, so this can use Logger's storage before its lifetime begins",
+        "It is fine: extern declarations force the referenced object to be initialized first",
+        "It is fine as long as both objects are zero-initializable",
+        "It always fails, so the link would be rejected"
+      ],
+      "answer": 0,
+      "explain": "Within one translation unit dynamic initialization follows definition order, but across translation units the relative order is unspecified — so Config's constructor may run first and touch storage where no Logger object yet lives. The dangerous part is that a given linker invocation picks a repeatable order, so the bug survives testing; repeatable is not guaranteed. An extern declaration announces the object's existence, not its initialization order."
+    },
+    {
+      "id": "c05-m20",
+      "section": "Latency Lens",
+      "difficulty": "medium",
+      "prompt": "A hot loop calls the accessor `logger()` — which returns a function-local static — on every iteration. What is the latency argument for hoisting the call out?",
+      "choices": [
+        "Each call reconstructs the Logger",
+        "Each call pays a guarded first-use check, which is synchronized and atomic-like",
+        "Each call zero-initializes the static's storage again",
+        "Each call takes a mutex around the whole Logger"
+      ],
+      "answer": 1,
+      "explain": "Thread-safe first-use initialization is implemented with a guard variable, so every access re-tests it with a synchronized, atomic-like check even long after construction. Obtaining the reference once before the loop removes that per-iteration cost. The object is constructed exactly once, and its zero-initialized storage is set up before startup — neither is repeated."
+    }
+  ],
+  "reading": [
+    {
+      "id": "c05-r01",
+      "section": "Construction and destruction order",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n\nstruct Base {\n    Base() { std::cout << \"Base+ \"; }\n    ~Base() { std::cout << \"Base- \"; }\n};\n\nstruct M1 {\n    M1() { std::cout << \"M1+ \"; }\n    ~M1() { std::cout << \"M1- \"; }\n};\n\nstruct M2 {\n    M2() { std::cout << \"M2+ \"; }\n    ~M2() { std::cout << \"M2- \"; }\n};\n\nstruct Derived : Base {\n    Derived() { std::cout << \"Derived+ \"; }\n    ~Derived() { std::cout << \"Derived- \"; }\n\n    M1 first;\n    M2 second;\n};\n\nint main() {\n    Derived value;\n    std::cout << \"| \";\n}",
+      "kind": "value",
+      "accept": [
+        "Base+ M1+ M2+ Derived+ | Derived- M2- M1- Base-"
+      ],
+      "explain": "Construction goes bases, then members in declaration order, then the constructor body. Destruction is the exact reverse: body, members in reverse declaration order, then bases. Note that Derived's own body runs last on the way in and first on the way out — the sequence is not simply 'members, then everything else'."
+    },
+    {
+      "id": "c05-r02",
+      "section": "The initialization zoo",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n#include <vector>\n\nint main() {\n    std::vector<int> repeated(3, 5);\n    std::vector<int> elements{3, 5};\n\n    std::cout << repeated.size() << ':';\n    for (int value : repeated) {\n        std::cout << ' ' << value;\n    }\n    std::cout << '\\n';\n\n    std::cout << elements.size() << ':';\n    for (int value : elements) {\n        std::cout << ' ' << value;\n    }\n    std::cout << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "3: 5 5 5 2: 3 5"
+      ],
+      "explain": "Parentheses select the (count, value) constructor: three copies of 5. Braces prefer the std::initializer_list constructor, so the same two numbers become the elements 3 and 5. Braces are a good default, but for a type with an initializer_list constructor they are not interchangeable with parentheses — check the overloads before converting existing code."
+    },
+    {
+      "id": "c05-r03",
+      "section": "Initialization versus assignment in constructors",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n#include <string>\n\nclass TracedSymbol {\npublic:\n    TracedSymbol() { std::cout << \"default \"; }\n\n    explicit TracedSymbol(const std::string& value) : value_(value) {\n        std::cout << \"construct \";\n    }\n\n    TracedSymbol& operator=(const std::string& value) {\n        value_ = value;\n        std::cout << \"assign \";\n        return *this;\n    }\n\nprivate:\n    std::string value_;\n};\n\nstruct GoodOrder {\n    explicit GoodOrder(const std::string& s) : symbol_(s) {}\n    TracedSymbol symbol_;\n};\n\nstruct WastefulOrder {\n    explicit WastefulOrder(const std::string& s) { symbol_ = s; }\n    TracedSymbol symbol_;\n};\n\nint main() {\n    GoodOrder good{\"AAPL\"};\n    std::cout << \"| \";\n    WastefulOrder bad{\"MSFT\"};\n    std::cout << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "construct | default assign"
+      ],
+      "explain": "GoodOrder initializes symbol_ once from its final value. WastefulOrder's member already exists by the time the constructor body starts, so it is default-constructed and then assigned — two operations, and for a member that allocates, potentially two allocations. The body cannot initialize; it can only assign to something that is already there."
+    },
+    {
+      "id": "c05-r04",
+      "section": "Most vexing parse",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <iostream>\n\nclass Widget {\npublic:\n    void reset() { std::cout << \"reset\\n\"; }\n};\n\nint main() {\n    Widget w();\n    w.reset();\n}",
+      "kind": "no-compile",
+      "explain": "`Widget w();` is parsed as a declaration of a function taking no arguments and returning Widget, so no object exists. The declaration itself is legal — the diagnostic appears at `w.reset()`, where the base type 'Widget ()' is not an object. Writing `Widget w{};` removes the ambiguity, because empty braces cannot describe a parameter list."
+    },
+    {
+      "id": "c05-r05",
+      "section": "Temporaries and lifetime extension",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <iostream>\n#include <string>\n\nstd::string make_name() {\n    return \"EURUSD-SPOT-PRIMARY-VENUE-SESSION-01\";\n}\n\nconst std::string& pass_through(const std::string& value) {\n    return value;\n}\n\nint main() {\n    const std::string& symbol = pass_through(make_name());\n    std::cout << symbol << '\\n';\n}",
+      "kind": "ub",
+      "explain": "Lifetime extension applies only to a temporary bound *directly* to the reference. Here the temporary binds to pass_through's parameter, and returning that reference grants no further extension, so the temporary string is destroyed at the end of the initialization statement. Reading symbol afterwards is a lifetime violation; the string is long enough to allocate, so ASan reports a heap-use-after-free."
+    },
+    {
+      "id": "c05-r06",
+      "section": "Statics and the initialization order fiasco",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n\nstruct Counter {\n    int value = 0;\n\n    Counter() { std::cout << \"init \"; }\n};\n\nCounter& counter() {\n    static Counter instance;\n    return instance;\n}\n\nint main() {\n    std::cout << \"start \";\n    ++counter().value;\n    ++counter().value;\n    std::cout << counter().value << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "start init 2"
+      ],
+      "explain": "A function-local static is initialized the first time control reaches its declaration, not before main — so \"start\" prints first and \"init\" appears only on the first call to counter(). Later calls return the same object, so the two increments accumulate to 2. A namespace-scope Counter would instead have been constructed during startup, in an order unspecified relative to other translation units."
+    }
+  ],
+  "writing": [
+    {
+      "id": "c05-w01",
+      "section": "RAII — the idiom of the book",
+      "minutes": 12,
+      "prompt": "Write an RAII owner `FileHandle` for a `std::FILE*`. Its constructor takes a path and a mode and aborts if the file cannot be opened; its destructor closes the file; copying is disabled. Then write `bool write_report(const char* path, const char* text)` with at least three return paths and no explicit cleanup call.",
+      "checklist": [
+        "The constructor acquires the resource in its member initializer list and establishes the invariant (non-null handle) before the body finishes",
+        "The destructor releases the handle with no extra validity branch, because the invariant guarantees it",
+        "Both the copy constructor and the copy-assignment operator are `= delete`",
+        "write_report has multiple return statements and contains no fclose call",
+        "An accessor exposes the raw handle without transferring ownership"
+      ],
+      "solution": "#include <cstdio>\n#include <cstdlib>\n\nclass FileHandle {\npublic:\n    FileHandle(const char* path, const char* mode)\n        : file_(std::fopen(path, mode)) {\n        if (file_ == nullptr) {\n            std::abort();\n        }\n    }\n\n    ~FileHandle() {\n        std::fclose(file_);\n    }\n\n    FileHandle(const FileHandle&) = delete;\n    FileHandle& operator=(const FileHandle&) = delete;\n\n    std::FILE* get() const {\n        return file_;\n    }\n\nprivate:\n    std::FILE* file_;\n};\n\nbool write_report(const char* path, const char* text) {\n    FileHandle output{path, \"w\"};\n\n    if (text == nullptr) {\n        return false;  // output closes\n    }\n    if (std::fputs(text, output.get()) < 0) {\n        return false;  // output closes\n    }\n    return true;       // output closes\n}",
+      "notes": "The destructor needs no `if (file_ != nullptr)` because construction either establishes a valid handle or never completes. Copying the raw FILE* would create two apparent owners and two fclose calls, so both copy operations are deleted rather than left to the compiler. Aborting on acquisition failure is a placeholder for structured reporting (Chapter 6), and transferring ownership out of a FileHandle needs move operations (Chapter 7)."
+    },
+    {
+      "id": "c05-w02",
+      "section": "Initialization versus assignment in constructors",
+      "minutes": 8,
+      "prompt": "Write a class `Session` with a `const int id_`, a `std::string& log_` reference member, and a `std::string endpoint_`. Initialize all three properly. Add a short comment saying which of the three could not have been given their value in the constructor body, and why.",
+      "checklist": [
+        "All three members appear in the member initializer list, none assigned in the body",
+        "Members are listed in declaration order (no -Wreorder warning)",
+        "A comment states that the const member must receive its value during initialization",
+        "A comment states that the reference member must bind during initialization and can never be reseated",
+        "The std::string member is identified as merely wasteful to assign, not impossible"
+      ],
+      "solution": "#include <string>\n\nclass Session {\npublic:\n    Session(int id, std::string& log, const std::string& endpoint)\n        // A const member can only ever receive a value here: there is no\n        // assignment that could set it afterwards.\n        : id_(id),\n        // A reference must bind during initialization and can never be\n        // reseated, so the body could not have established it either.\n          log_(log),\n        // endpoint_ *could* have been assigned in the body — that would just\n        // default-construct it first and then assign, doing two operations\n        // (and possibly two allocations) where this does one.\n          endpoint_(endpoint) {}\n\n    const std::string& endpoint() const { return endpoint_; }\n\nprivate:\n    const int id_;\n    std::string& log_;\n    std::string endpoint_;\n};",
+      "notes": "The distinction is worth keeping sharp: const members, reference members, and class members without a default constructor make body assignment *impossible*; everything else makes it merely a construct-then-assign pair. The initializer list is written in declaration order not because the compiler cares about the list's order — it does not — but because writing it out of order invites -Wreorder and makes the code lie about what happens first."
+    },
+    {
+      "id": "c05-w03",
+      "section": "Construction and destruction order",
+      "minutes": 6,
+      "prompt": "Fix this class so that buffer_ is genuinely sized by size_, and add a comment naming the rule that makes the original wrong.\n\n```cpp\nclass Packet {\npublic:\n    explicit Packet(int size) : size_(size), buffer_(size_) {}\nprivate:\n    std::vector<int> buffer_;\n    int size_;\n};\n```",
+      "starter": "#include <vector>\n\nclass Packet {\npublic:\n    explicit Packet(int size) : size_(size), buffer_(size_) {}\n\nprivate:\n    std::vector<int> buffer_;\n    int size_;\n};",
+      "checklist": [
+        "size_ is declared before buffer_ — the fix changes declaration order, not just the initializer list",
+        "The initializer list is written in the same order as the declarations",
+        "A comment states that members are initialized in declaration order, regardless of initializer-list order",
+        "The int is converted to a size type explicitly, or the dependency is otherwise well-typed",
+        "No member is assigned in the constructor body"
+      ],
+      "solution": "#include <cstddef>\n#include <vector>\n\nclass Packet {\npublic:\n    // Members are initialized in *declaration* order, whatever order the\n    // initializer list uses. In the original, buffer_ was declared first and\n    // so read size_ before size_ had been initialized. Reordering only the\n    // initializer list would have changed nothing; the declarations are the\n    // dependency order. Compilers flag the mismatch with -Wreorder.\n    explicit Packet(int size)\n        : size_(size), buffer_(static_cast<std::size_t>(size_)) {}\n\n    std::size_t capacity() const { return buffer_.size(); }\n\nprivate:\n    int size_;\n    std::vector<int> buffer_;\n};",
+      "notes": "Rearranging the initializer list to match the declarations is the cosmetic half of the fix; it silences the warning without changing behavior. What actually repairs the bug is making the declaration order match the dependency order. If two members genuinely depend on each other in both directions, that is a signal to compute the shared value in a helper and pass it to both."
+    },
+    {
+      "id": "c05-w04",
+      "section": "Temporaries and lifetime extension",
+      "minutes": 10,
+      "prompt": "Write two functions that both bind a `const std::string&` to the result of a value-returning `make_name()`. One must be correct, the other must dangle by routing the binding through a pass-through helper. Comment each with when the temporary dies.",
+      "checklist": [
+        "The correct function binds the temporary directly to a local const reference",
+        "Its comment states the temporary lives until the end of the reference's scope",
+        "The dangling function routes the binding through a function returning a reference to its parameter",
+        "Its comment states the temporary dies at the end of that full-expression",
+        "A comment names the rule: extension attaches to the direct binding and does not propagate"
+      ],
+      "solution": "#include <iostream>\n#include <string>\n\nstd::string make_name() {\n    return \"EURUSD\";\n}\n\nconst std::string& pass_through(const std::string& value) {\n    return value;\n}\n\nvoid correct() {\n    // Direct binding of a temporary to a local const reference: the\n    // temporary's lifetime is extended to the end of this scope.\n    const std::string& symbol = make_name();\n    std::cout << symbol << '\\n';\n}  // temporary destroyed here\n\nvoid dangling() {\n    // The temporary binds to pass_through's *parameter*, which keeps it alive\n    // for the duration of the call and no longer. Returning that parameter's\n    // reference grants no second extension, so the temporary is destroyed at\n    // the semicolon below.\n    const std::string& symbol = pass_through(make_name());\n    std::cout << symbol << '\\n';  // UB: symbol dangles\n}",
+      "notes": "The rule to memorize is that extension is a property of a specific direct binding, not a property that travels with the reference. Copying the reference into another reference, returning it, or storing it in a member does not re-extend anything. Compilers catch the blatant 'return a reference to a local' shape with -Wall, but a temporary laundered through one or two helpers usually escapes diagnosis."
+    },
+    {
+      "id": "c05-w05",
+      "section": "Statics and the initialization order fiasco",
+      "minutes": 8,
+      "prompt": "Two translation units each define a namespace-scope object, and one constructor uses the other object. Rewrite the dependency so the ordering is guaranteed, and write a comment explaining what was unspecified before and what is guaranteed now.",
+      "starter": "// logger.cpp\nstruct Logger {\n    Logger();\n    void write(const char* message) const;\n};\n\nLogger global_logger;\n\n// config.cpp\nstruct Config {\n    Config();\n};\n\nConfig global_config;\n\nConfig::Config() {\n    global_logger.write(\"loading config\");  // may run first\n}",
+      "checklist": [
+        "The depended-upon object moves behind a function-local static accessor returning a reference",
+        "The dependent constructor calls the accessor instead of naming a namespace-scope object",
+        "A comment states that cross-translation-unit initialization order is unspecified",
+        "A comment states that a function-local static is initialized on first use, so it is alive before the accessor returns",
+        "No namespace-scope object depends on another namespace-scope object"
+      ],
+      "solution": "#include <cstdio>\n\nstruct Logger {\n    Logger() { /* acquire logging destination */ }\n\n    void write(const char* message) const { std::puts(message); }\n};\n\n// Before: `Logger global_logger;` in one translation unit and\n// `Config global_config;` in another. Within one translation unit dynamic\n// initialization follows definition order, but *across* translation units the\n// relative order is unspecified, so Config's constructor could touch storage\n// where no Logger object had begun its lifetime yet.\n//\n// After: a function-local static is initialized the first time control reaches\n// its declaration, so the Logger is fully constructed before logger() returns,\n// on every path that could ever use it.\nLogger& logger() {\n    static Logger instance;\n    return instance;\n}\n\nstruct Config {\n    Config() { logger().write(\"loading config\"); }\n};\n\nConfig global_config;",
+      "notes": "The reason this class of bug is dangerous is not that it fails often — it is that a given linker invocation picks a repeatable order, so it passes every test on the build that produced it and fails on a rearranged one. Destruction has the mirror problem: teardown order follows construction order, whose cross-unit relationship was never specified, so a global destructor can touch an already-destroyed object at shutdown. `constinit` (Chapter 22) enforces the other fix — constant initialization, with no startup ordering at all."
+    },
+    {
+      "id": "c05-w06",
+      "section": "The initialization zoo",
+      "minutes": 7,
+      "prompt": "Given `struct Quote { double bid; double ask; int venue; };`, write initializations demonstrating: value-initialization, positional aggregate initialization, designated initialization, and a braced initialization that is rejected for narrowing. Comment each with the form it uses and what it guarantees.",
+      "checklist": [
+        "`Quote q{};` is shown and identified as value-initialization producing zeros",
+        "A positional aggregate initialization initializes members in declaration order",
+        "A designated initializer names members and keeps them in declaration order",
+        "One line is commented as ill-formed because braces reject a narrowing conversion, and is left commented out so the file compiles",
+        "A comment notes that positional values are easy to transpose, which is what designated initializers fix"
+      ],
+      "solution": "struct Quote {\n    double bid;\n    double ask;\n    int venue;\n};\n\nvoid initialization_forms() {\n    // Value-initialization: every member is zero.\n    Quote zeroed{};\n\n    // Positional aggregate initialization: members are initialized in\n    // declaration order. Nothing stops bid and ask being transposed here --\n    // both are double, so the compiler cannot help.\n    Quote positional{99.50, 99.70, 3};\n\n    // Designated initializers (C++20) name the members and must follow\n    // declaration order. This is the form that survives a code review.\n    Quote named{.bid = 99.50, .ask = 99.70, .venue = 3};\n\n    // Ill-formed: braces reject narrowing, and 3.5 does not convert to int\n    // without losing value. With parentheses this would silently store 3.\n    // Quote narrowed{99.50, 99.70, 3.5};\n\n    (void)zeroed;\n    (void)positional;\n    (void)named;\n}",
+      "notes": "The narrowing rejection is the strongest practical argument for braces: a value that cannot round-trip is a compile error rather than a silent truncation. The one place to stop and check is a type with a std::initializer_list constructor, where braces change which constructor is selected rather than merely tightening the conversions allowed."
+    }
+  ]
+}

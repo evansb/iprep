@@ -8,7 +8,8 @@
     "start": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "astro": "astro"
+    "astro": "astro",
+    "verify:exercises": "node scripts/verify-exercises.mjs"
   },
   "dependencies": {
     "astro": "^5.6.0",

@@ -1,0 +1,442 @@
+{
+  "chapter": 7,
+  "mcq": [
+    {
+      "id": "c07-m01",
+      "section": "Copies, and where they hide",
+      "difficulty": "easy",
+      "prompt": "`void inspect_value(Snapshot s)` and `void inspect_reference(const Snapshot& s)` are each called once with the same named local. How many Snapshot objects are constructed?",
+      "choices": [
+        "One by inspect_value, none by inspect_reference",
+        "One by each",
+        "None by either — the compiler elides both",
+        "One by inspect_reference, none by inspect_value"
+      ],
+      "answer": 0,
+      "explain": "A by-value parameter needs its own object, so passing an lvalue copy-constructs one. A const reference aliases the caller's object and constructs nothing. Elision cannot help the by-value case here: there is a named source object that must survive the call, so there is a genuine copy to make."
+    },
+    {
+      "id": "c07-m02",
+      "section": "Copies, and where they hide",
+      "difficulty": "medium",
+      "prompt": "Given `std::vector<double> prices;`, which of `auto copied = prices;`, `auto& aliased = prices;`, `const auto& read_only = prices;` allocates?",
+      "choices": [
+        "All three",
+        "Only `auto& aliased`",
+        "Only `auto copied`",
+        "None — auto never copies a container"
+      ],
+      "answer": 2,
+      "explain": "Plain auto deduces std::vector<double>, so `copied` is an independent vector: a new allocation plus an element-by-element copy. Both reference forms bind to the existing object and allocate nothing. The hazard is that all three lines look equally cheap — the deduction, not the syntax, decides whether a copy happens."
+    },
+    {
+      "id": "c07-m03",
+      "section": "Move semantics: transfer, not teleportation",
+      "difficulty": "easy",
+      "prompt": "What does move-assignment have to do that move-construction does not?",
+      "choices": [
+        "Copy the source's elements before taking ownership",
+        "Dispose of the destination's existing resource first",
+        "Leave the source unchanged",
+        "Allocate storage for the destination"
+      ],
+      "answer": 1,
+      "explain": "Move construction builds a fresh object, so there is nothing to release. Move assignment targets an object that already exists and may already own a resource, which must be disposed of before taking the source's — otherwise it leaks. Neither operation allocates or copies elements, and both leave the source in a valid but unspecified state, so it is emphatically not unchanged."
+    },
+    {
+      "id": "c07-m04",
+      "section": "Move semantics: transfer, not teleportation",
+      "difficulty": "medium",
+      "prompt": "A hand-written move constructor copies the source's pointer member but does not null it. What is the consequence?",
+      "choices": [
+        "The source becomes unusable but is otherwise harmless",
+        "The move silently degrades into a copy",
+        "Both objects' destructors release the same resource, which is undefined behavior",
+        "The destination's destructor is skipped, leaking the resource"
+      ],
+      "answer": 2,
+      "explain": "There are now two owners of one allocation, and a moved-from object is not destroyed — its destructor still runs at the end of its lifetime. Both will release the same pointer, which is a double free. `std::exchange(other.data_, nullptr)` returns the old value while installing the null in one step, which is why the idiom reads so cleanly in an initializer list."
+    },
+    {
+      "id": "c07-m05",
+      "section": "Move semantics: transfer, not teleportation",
+      "difficulty": "medium",
+      "prompt": "Why does a move constructor include `if (this != &other)` in its *assignment* form but usually not in its constructor form?",
+      "choices": [
+        "Because a constructor cannot be called on an already-constructed object, so self-move-construction cannot arise",
+        "Because assignment is slower and the check pays for itself",
+        "Because the constructor's initializer list is exception-safe and the assignment body is not",
+        "Because the check is required by the standard for assignment operators"
+      ],
+      "answer": 0,
+      "explain": "`buffer = std::move(buffer)` is expressible and would otherwise delete the resource and then try to take it from the object it just emptied. A constructor is initializing a new object, so there is no way for the destination and source to be the same object. The standard requires no such check — it is the type's own way of keeping its invariant under a legal but odd call."
+    },
+    {
+      "id": "c07-m06",
+      "section": "Value categories and move eligibility",
+      "difficulty": "medium",
+      "prompt": "Inside `void relay(Order&& order) { sink(order); }` with overloads `sink(const Order&)` and `sink(Order&&)`, which overload is selected?",
+      "choices": [
+        "sink(Order&&), because order's type is Order&&",
+        "sink(Order&&), but only at -O2",
+        "It is ambiguous",
+        "sink(const Order&), because the expression `order` is an lvalue"
+      ],
+      "answer": 3,
+      "explain": "A variable expression is an lvalue even when the variable's declared type is an rvalue reference — the name gives repeated access to a particular object, so binding it to a move overload would let one call silently gut it. Writing `sink(std::move(order))` marks the point where relay intentionally passes the value onward. Declared type and value category are different questions."
+    },
+    {
+      "id": "c07-m07",
+      "section": "Value categories and move eligibility",
+      "difficulty": "medium",
+      "prompt": "Which value category does `std::move(order)` produce, and what does that mean?",
+      "choices": [
+        "A prvalue — a fresh value with no identity yet",
+        "An lvalue — it still names the same object",
+        "An xvalue — an expiring value identifying an object whose resources may be reused",
+        "It has no value category; std::move is a compiler intrinsic"
+      ],
+      "answer": 2,
+      "explain": "An xvalue has identity (it designates a specific object) and is movable (it is treated as expiring), which is exactly the combination a move overload wants. A prvalue is the category of a temporary such as `Order{42}`, which usually initializes its destination directly rather than being moved from. std::move is an ordinary library function template, not an intrinsic."
+    },
+    {
+      "id": "c07-m08",
+      "section": "Value categories and move eligibility",
+      "difficulty": "easy",
+      "prompt": "`sink(Order{});` with overloads `sink(const Order&)` and `sink(Order&&)`. Which is selected?",
+      "choices": [
+        "sink(const Order&)",
+        "sink(Order&&)",
+        "Ambiguous",
+        "sink(const Order&), because a temporary is const"
+      ],
+      "answer": 1,
+      "explain": "`Order{}` is a prvalue, so the rvalue-reference overload is the better match. Temporaries are not const — that misconception comes from the fact that a const lvalue reference *can* bind to one, which is what made pre-move C++ work at all; it just is not the preferred binding when an rvalue overload exists."
+    },
+    {
+      "id": "c07-m09",
+      "section": "std::move and std::forward",
+      "difficulty": "easy",
+      "prompt": "What does std::move do at runtime?",
+      "choices": [
+        "Nothing — it is a cast that changes the expression's value category and generates no instructions",
+        "Transfers the object's resources to a destination",
+        "Marks the object as moved-from so later reads can be diagnosed",
+        "Calls the type's move constructor"
+      ],
+      "answer": 0,
+      "explain": "std::move is conceptually a static_cast<T&&>: it changes what overload resolution sees and compiles to zero instructions. The actual transfer is done by whichever constructor or assignment operator that resolution then selects. Nothing is marked — Clang-Tidy's bugprone-use-after-move is static analysis, not a runtime flag."
+    },
+    {
+      "id": "c07-m10",
+      "section": "std::move and std::forward",
+      "difficulty": "hard",
+      "prompt": "`const Order original; auto copy = std::move(original);` for a type with both a copy and a move constructor. What runs?",
+      "choices": [
+        "The move constructor; std::move strips const",
+        "The move constructor, with the const object modified through a hidden const_cast",
+        "Neither — the initialization is ill-formed",
+        "The copy constructor; std::move preserves const, producing const Order&&, which cannot bind to Order&&"
+      ],
+      "answer": 3,
+      "explain": "std::move produces a const Order&& here, and the move constructor's Order&& parameter cannot bind to it, so the best viable overload is the copy constructor taking const Order&. The request to move was made and silently refused — the same thing happens for a type with no move operation at all. Do not add const to an object that must transfer ownership."
+    },
+    {
+      "id": "c07-m11",
+      "section": "Moved-from objects",
+      "difficulty": "medium",
+      "prompt": "What may you assume about a moved-from standard-library object?",
+      "choices": [
+        "It is empty",
+        "It is equal to a default-constructed object of its type",
+        "It is destructible and assignable; its value is unspecified",
+        "It must not be touched again in any way"
+      ],
+      "answer": 2,
+      "explain": "The guarantee is valid-but-unspecified: destroy it, assign it a fresh value, or call an operation with no preconditions such as clear(). Implementations commonly do leave a moved-from std::string empty, which is exactly why relying on it is a portability trap. Nor is the object off-limits — it still has a lifetime and its destructor will still run."
+    },
+    {
+      "id": "c07-m12",
+      "section": "Moved-from objects",
+      "difficulty": "medium",
+      "prompt": "Why must a hand-written move operation leave the source in a state that is safe to destroy?",
+      "choices": [
+        "Because the compiler inserts a destructor call immediately after any move",
+        "Because a moved-from object is not destroyed by the move; its destructor still runs at the end of its lifetime",
+        "Because the standard requires moved-from objects to compare equal to their default state",
+        "Because otherwise the destination cannot take ownership"
+      ],
+      "answer": 1,
+      "explain": "Moving transfers a resource; it does not end the source's lifetime. The source is still a live object whose destructor runs at its normal time, so if the move left it holding a pointer the destination now owns, that destructor performs a second release. The destructor is not called early, and no equality requirement exists."
+    },
+    {
+      "id": "c07-m13",
+      "section": "Elision: RVO, NRVO, and guaranteed elision",
+      "difficulty": "medium",
+      "prompt": "`Order make_direct(int id) { return Order{id}; }` where Order has both copy and move constructors deleted. What happens?",
+      "choices": [
+        "It fails to compile: a return requires an accessible copy or move constructor",
+        "It compiles at -O2 but not at -O0",
+        "It compiles, but a move is still performed and then optimized away",
+        "It compiles: returning a prvalue of the function's result type constructs directly in the caller's result object"
+      ],
+      "answer": 3,
+      "explain": "Guaranteed copy elision (C++17) is a language rule, not an optimization: no separate temporary Order ever needs to exist, so no copy or move constructor is required or called. -O0 does not restore a move, because there was never one to elide in the pre-C++17 sense — temporary materialization simply supplies an object only where one is needed."
+    },
+    {
+      "id": "c07-m14",
+      "section": "Elision: RVO, NRVO, and guaranteed elision",
+      "difficulty": "hard",
+      "prompt": "Why is `return std::move(local);` usually a pessimization?",
+      "choices": [
+        "std::move adds a runtime cast instruction on the return path",
+        "It makes the returned object const, so a copy is selected instead",
+        "It prevents the implicit move that a bare `return local;` would perform",
+        "It turns an NRVO candidate into an xvalue, forcing a move where direct construction was possible"
+      ],
+      "answer": 3,
+      "explain": "A bare `return local;` lets the compiler construct the local directly in the return destination (NRVO), and if NRVO does not happen the return expression is move-eligible anyway — so you get the move as a fallback for free. Writing std::move gives up the better case to guarantee the worse one. std::move generates no instructions and does not add const."
+    },
+    {
+      "id": "c07-m15",
+      "section": "Elision: RVO, NRVO, and guaranteed elision",
+      "difficulty": "medium",
+      "prompt": "Which return statement can NOT use NRVO?",
+      "choices": [
+        "return local; where local is a named local of the result type",
+        "return parameter; where parameter is a by-value parameter of the result type",
+        "return Order{1};",
+        "return local; inside a try block"
+      ],
+      "answer": 1,
+      "explain": "A by-value parameter lives in storage the caller helped establish, so it cannot be constructed in the return destination; the return is an implicit move instead. `return Order{1};` is not an NRVO case at all — it is guaranteed elision, which is stronger. Returning a subobject such as `local.member` also cannot use NRVO and copies unless you move it explicitly."
+    },
+    {
+      "id": "c07-m16",
+      "section": "Move-only types and defaulting rules",
+      "difficulty": "medium",
+      "prompt": "`struct Widget { Trace trace; ~Widget() { /* ... */ } };` and then `Widget second = std::move(first);`. Which of Trace's operations runs?",
+      "choices": [
+        "Trace's copy constructor",
+        "Trace's move constructor",
+        "Neither — Widget is not movable, so this is ill-formed",
+        "Trace's move constructor, then its destructor"
+      ],
+      "answer": 0,
+      "explain": "The user-declared destructor suppresses the implicit move constructor, so no Widget(Widget&&) exists. The generated copy constructor is still viable because its const Widget& parameter binds happily to an xvalue — so the code compiles and silently copies. Nothing warns; this is the failure mode the rule of zero exists to prevent."
+    },
+    {
+      "id": "c07-m17",
+      "section": "Move-only types and defaulting rules",
+      "difficulty": "medium",
+      "prompt": "A class holds only members that already manage their own resources. What does the rule of zero say to declare?",
+      "choices": [
+        "All five special members, defaulted, to state the intent",
+        "None of the five special members",
+        "The destructor, plus defaulted moves",
+        "Deleted copies and defaulted moves"
+      ],
+      "answer": 1,
+      "explain": "Declaring none of the five keeps copying, moving, destruction and the conditional noexcept specifications generated correctly and automatically, and keeps them correct as members change. Defaulting all five explicitly is the fallback for when a destructor is genuinely required — it works, but it is five more lines to keep in sync. Deleting copies would be wrong for a type whose members are all copyable."
+    },
+    {
+      "id": "c07-m18",
+      "section": "noexcept moves and the copy fallback",
+      "difficulty": "hard",
+      "prompt": "A vector must reallocate. Its element type has a copy constructor and a move constructor that is not marked noexcept. What does the vector do with the existing elements?",
+      "choices": [
+        "Moves them, and catches any exception to restore the old buffer",
+        "Refuses to compile, because reallocation requires a noexcept move",
+        "Moves them, since a move is always preferred when one exists",
+        "Copies them, so a throw leaves the original range intact"
+      ],
+      "answer": 3,
+      "explain": "std::move_if_noexcept yields a const lvalue in this case, which selects the copy constructor — so if an element operation throws, the original range has not been touched and the strong guarantee survives. Moving and then trying to undo is exactly what cannot work: the already-moved-from sources may be unrestorable. When no copy constructor exists, the library moves anyway and the strong guarantee is waived."
+    },
+    {
+      "id": "c07-m19",
+      "section": "noexcept moves and the copy fallback",
+      "difficulty": "medium",
+      "prompt": "Where does a defaulted move constructor's noexcept specification come from?",
+      "choices": [
+        "It is always noexcept",
+        "It is never noexcept unless written explicitly",
+        "It is noexcept if and only if every selected base and member move operation is non-throwing",
+        "It matches the destructor's specification"
+      ],
+      "answer": 2,
+      "explain": "Defaulted moves are conditionally noexcept: they inherit the promise from the operations they call, so a class of std::string and std::vector members gets a noexcept move for free. That is a strong argument for defaulting rather than hand-writing — a hand-written move that forgets noexcept turns every vector reallocation into full element copies, with an allocation and linear data movement each time."
+    },
+    {
+      "id": "c07-m20",
+      "section": "Latency Lens",
+      "difficulty": "medium",
+      "prompt": "A function stores its argument into a member. Comparing a `const T&` parameter that is then copied into storage against a by-value parameter that is then moved into storage, when the caller passes an existing named object:",
+      "choices": [
+        "The by-value version costs one copy plus one move; the const& version costs one copy",
+        "Both cost exactly one copy",
+        "The by-value version costs one copy; the const& version costs one copy plus one move",
+        "The by-value version avoids the copy entirely"
+      ],
+      "answer": 0,
+      "explain": "For an lvalue argument the by-value parameter is copy-constructed and then moved into storage — one copy plus one cheap move — while the const& version performs a single copy. The by-value sink wins on the other side of the trade: a caller passing a prvalue constructs the parameter directly, and an xvalue costs one move, where the const& version would still copy. Choose it when callers commonly hand over values they are finished with."
+    }
+  ],
+  "reading": [
+    {
+      "id": "c07-r01",
+      "section": "Copies, and where they hide",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n#include <string>\n\nstruct Snapshot {\n    std::string symbol;\n\n    explicit Snapshot(const char* value) : symbol(value) {}\n\n    Snapshot(const Snapshot& other) : symbol(other.symbol) {\n        std::cout << \"copy-ctor \";\n    }\n\n    Snapshot& operator=(const Snapshot& other) {\n        symbol = other.symbol;\n        std::cout << \"copy-assign \";\n        return *this;\n    }\n};\n\nvoid inspect_value(Snapshot) { std::cout << \"by-value \"; }\nvoid inspect_reference(const Snapshot&) { std::cout << \"by-ref \"; }\n\nint main() {\n    Snapshot first{\"EURUSD\"};\n    Snapshot second = first;\n    second = first;\n    inspect_value(first);\n    inspect_reference(first);\n    std::cout << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "copy-ctor copy-assign copy-ctor by-value by-ref"
+      ],
+      "explain": "`Snapshot second = first;` is copy *construction* of a new object, while `second = first;` is copy *assignment* to one that already exists — different operations, and only the punctuation distinguishes them. The by-value parameter needs its own object and so copy-constructs; the const reference aliases the caller's object and constructs nothing at all."
+    },
+    {
+      "id": "c07-r02",
+      "section": "Value categories and move eligibility",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n#include <utility>\n\nstruct Order {};\n\nvoid sink(const Order&) { std::cout << \"lvalue \"; }\nvoid sink(Order&&) { std::cout << \"rvalue \"; }\n\nvoid relay(Order&& order) {\n    sink(order);\n    sink(std::move(order));\n}\n\nint main() {\n    Order order;\n    sink(order);\n    sink(Order{});\n    relay(Order{});\n    std::cout << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "lvalue rvalue lvalue rvalue"
+      ],
+      "explain": "Inside relay, the expression `order` is an lvalue even though the parameter's declared type is Order&& — a name gives repeated access to one object, so it does not silently bind to a move overload. Only `std::move(order)` makes it an xvalue. Declared type and value category are separate questions, and this is the case where they most often get conflated."
+    },
+    {
+      "id": "c07-r03",
+      "section": "Elision: RVO, NRVO, and guaranteed elision",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n#include <utility>\n\nstruct Order {\n    explicit Order(int) { std::cout << \"ctor \"; }\n    Order(const Order&) { std::cout << \"copy-ctor \"; }\n    Order(Order&&) noexcept { std::cout << \"move-ctor \"; }\n};\n\nOrder make_prvalue() { return Order{1}; }\n\nOrder force_move() {\n    Order order{3};\n    return std::move(order);\n}\n\nOrder return_parameter(Order order) { return order; }\n\nint main() {\n    Order a = make_prvalue();\n    std::cout << \"| \";\n    Order b = force_move();\n    std::cout << \"| \";\n    Order c = return_parameter(Order{4});\n    std::cout << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "ctor | ctor move-ctor | ctor move-ctor"
+      ],
+      "explain": "make_prvalue returns a prvalue of the result type, so guaranteed elision constructs it straight into the caller's object: one ctor, no move, at any optimization level. force_move turns an NRVO candidate into an xvalue and pays for a move it did not need — the pessimization the chapter warns about. return_parameter must move because a by-value parameter can never use NRVO, and the Order{4} argument constructs the parameter directly."
+    },
+    {
+      "id": "c07-r04",
+      "section": "std::move and std::forward",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <iostream>\n#include <utility>\n\nstruct Order {\n    Order() = default;\n    Order(const Order&) = delete;\n    Order(Order&&) noexcept { std::cout << \"move-ctor\\n\"; }\n};\n\nint main() {\n    const Order original;\n    auto copy = std::move(original);\n}",
+      "kind": "no-compile",
+      "explain": "std::move preserves const, so the expression has type const Order&&, which cannot bind to the move constructor's Order&& parameter. Overload resolution falls back to the copy constructor — which is deleted here, making the program ill-formed. Had the copy constructor merely been present, this would have compiled and silently copied: the const is what refuses the move, not the deletion."
+    },
+    {
+      "id": "c07-r05",
+      "section": "Move semantics: transfer, not teleportation",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <cstddef>\n#include <iostream>\n#include <utility>\n\nclass Buffer {\npublic:\n    explicit Buffer(std::size_t size) : data_(new double[size]{}) {}\n\n    ~Buffer() { delete[] data_; }\n\n    Buffer(const Buffer&) = delete;\n    Buffer& operator=(const Buffer&) = delete;\n\n    Buffer(Buffer&& other) noexcept : data_(other.data_) {}\n\nprivate:\n    double* data_;\n};\n\nint main() {\n    Buffer first{4};\n    Buffer second = std::move(first);\n    std::cout << \"done\\n\";\n}",
+      "kind": "ub",
+      "explain": "The move constructor takes the source's pointer but never clears it, so both objects claim the same allocation. A moved-from object is not destroyed by the move — its destructor still runs at the end of its lifetime — so both destructors call delete[] on one array. ASan reports an attempted double-free. `data_(std::exchange(other.data_, nullptr))` fixes it in the initializer list."
+    },
+    {
+      "id": "c07-r06",
+      "section": "noexcept moves and the copy fallback",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n#include <vector>\n\nstruct MayThrowMove {\n    MayThrowMove() = default;\n    MayThrowMove(const MayThrowMove&) { std::cout << \"copy \"; }\n    MayThrowMove(MayThrowMove&&) { std::cout << \"move \"; }\n};\n\nstruct NoexceptMove {\n    NoexceptMove() = default;\n    NoexceptMove(const NoexceptMove&) { std::cout << \"copy \"; }\n    NoexceptMove(NoexceptMove&&) noexcept { std::cout << \"move \"; }\n};\n\nint main() {\n    std::vector<MayThrowMove> cautious;\n    cautious.reserve(2);\n    cautious.emplace_back();\n    cautious.emplace_back();\n    std::cout << \"grow: \";\n    cautious.emplace_back();\n    std::cout << \"| \";\n\n    std::vector<NoexceptMove> fast;\n    fast.reserve(2);\n    fast.emplace_back();\n    fast.emplace_back();\n    std::cout << \"grow: \";\n    fast.emplace_back();\n    std::cout << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "grow: copy copy | grow: move move"
+      ],
+      "explain": "The two types differ only in one keyword. On reallocation the library uses std::move_if_noexcept: a potentially throwing move with a copy available yields a const lvalue, so the two existing elements are copied and the original range stays intact if anything throws. The noexcept move is used directly. reserve(2) makes the third insertion reallocate without depending on any growth factor."
+    }
+  ],
+  "writing": [
+    {
+      "id": "c07-w01",
+      "section": "Move semantics: transfer, not teleportation",
+      "minutes": 12,
+      "prompt": "Write a `Buffer` class owning a `double*` allocated with `new double[n]{}`. Delete copying, and hand-write both move operations correctly: no double release, no leak on assignment, and safe under self-move-assignment.",
+      "checklist": [
+        "Both move operations are marked noexcept",
+        "The source's pointer is cleared as part of the transfer (std::exchange or an explicit assignment)",
+        "Move assignment releases the destination's existing allocation before taking the source's",
+        "Move assignment guards against self-assignment",
+        "Copy construction and copy assignment are `= delete`",
+        "The destructor releases with delete[] and is safe for a moved-from (null) object"
+      ],
+      "solution": "#include <cstddef>\n#include <utility>\n\nclass Buffer {\npublic:\n    explicit Buffer(std::size_t size)\n        : data_(new double[size]{}), size_(size) {}\n\n    ~Buffer() {\n        delete[] data_;  // delete[] on nullptr is well-defined\n    }\n\n    Buffer(const Buffer&) = delete;\n    Buffer& operator=(const Buffer&) = delete;\n\n    Buffer(Buffer&& other) noexcept\n        : data_(std::exchange(other.data_, nullptr)),\n          size_(std::exchange(other.size_, 0)) {}\n\n    Buffer& operator=(Buffer&& other) noexcept {\n        // Without this, `buffer = std::move(buffer)` would delete the\n        // allocation and then try to take it from the object just emptied.\n        if (this != &other) {\n            delete[] data_;  // dispose of what we already own, or we leak\n            data_ = std::exchange(other.data_, nullptr);\n            size_ = std::exchange(other.size_, 0);\n        }\n        return *this;\n    }\n\n    bool empty() const { return size_ == 0; }\n\nprivate:\n    double* data_;\n    std::size_t size_;\n};",
+      "notes": "std::exchange reads well precisely because it does the two halves of a transfer in one expression, which is what lets the move constructor stay in the initializer list. The noexcept is not decoration: a vector of Buffers would copy on reallocation without it — except that Buffer is noncopyable, so it would fail to compile instead. Clearing the source is what makes the moved-from object safe to destroy, since moving does not end its lifetime."
+    },
+    {
+      "id": "c07-w02",
+      "section": "Move-only types and defaulting rules",
+      "minutes": 10,
+      "prompt": "Write a move-only `Socket` owning an int file descriptor, using -1 as the empty state. Then write `void consume(Socket)` and a `hand_off()` that transfers ownership into it. Comment why defaulted moves would be wrong here.",
+      "checklist": [
+        "Copy construction and copy assignment are `= delete`",
+        "Both move operations are noexcept and set the source's descriptor to -1",
+        "The destructor closes only when the descriptor is valid",
+        "Move assignment closes the current descriptor first and guards against self-assignment",
+        "A comment explains that a defaulted move would merely copy the int, leaving two objects to close one descriptor",
+        "hand_off passes with std::move, not by copying"
+      ],
+      "solution": "#include <unistd.h>\n\n#include <utility>\n\nclass Socket {\npublic:\n    explicit Socket(int fd) : fd_(fd) {}\n\n    ~Socket() {\n        if (fd_ >= 0) {\n            ::close(fd_);\n        }\n    }\n\n    Socket(const Socket&) = delete;\n    Socket& operator=(const Socket&) = delete;\n\n    // A defaulted move would perform a memberwise move of an int -- which is\n    // just a copy. Both objects would then hold the same descriptor and both\n    // destructors would close it. A direct resource owner must write the\n    // transfer itself; only once ownership lives in a suitable member type\n    // can the enclosing class default its moves.\n    Socket(Socket&& other) noexcept : fd_(std::exchange(other.fd_, -1)) {}\n\n    Socket& operator=(Socket&& other) noexcept {\n        if (this != &other) {\n            if (fd_ >= 0) {\n                ::close(fd_);\n            }\n            fd_ = std::exchange(other.fd_, -1);\n        }\n        return *this;\n    }\n\nprivate:\n    int fd_;\n};\n\nvoid consume(Socket socket) {\n    (void)socket;  // socket now owns the connection\n}\n\nint open_connection();\n\nvoid hand_off() {\n    Socket connection{open_connection()};\n    consume(std::move(connection));  // ownership enters consume\n}",
+      "notes": "The int is the whole problem: a scalar does not implement ownership, so the compiler's memberwise move is indistinguishable from a copy. Move-only types deliberately fail to compile in code that requires copying, which is the point — `consume(connection)` without the std::move would be rejected rather than quietly duplicating the descriptor. In application code the move-only owner you actually reach for is std::unique_ptr (Chapter 8)."
+    },
+    {
+      "id": "c07-w03",
+      "section": "Move-only types and defaulting rules",
+      "minutes": 7,
+      "prompt": "This Widget silently copies its member when moved. Diagnose it in a comment and fix it two ways: the rule-of-zero version, and the version that keeps the destructor.",
+      "starter": "#include <iostream>\n\nstruct Trace {\n    Trace() = default;\n    Trace(const Trace&) { std::cout << \"member copy\\n\"; }\n    Trace(Trace&&) noexcept { std::cout << \"member move\\n\"; }\n};\n\nstruct Widget {\n    Trace trace;\n    ~Widget() { std::cout << \"destroy\\n\"; }\n};",
+      "checklist": [
+        "A comment states that the user-declared destructor suppresses the implicit move operations",
+        "A comment explains that the generated copy constructor stays viable because const Widget& binds to an xvalue, so the code compiles and copies silently",
+        "One version declares none of the five special members",
+        "The other version declares and defaults all five, keeping the destructor",
+        "The defaulted move operations are written noexcept"
+      ],
+      "solution": "#include <iostream>\n\nstruct Trace {\n    Trace() = default;\n    Trace(const Trace&) { std::cout << \"member copy\\n\"; }\n    Trace(Trace&&) noexcept { std::cout << \"member move\\n\"; }\n};\n\n// The bug: a user-declared destructor suppresses the implicit move\n// constructor and move assignment. `Widget b = std::move(a);` then finds the\n// generated *copy* constructor, whose const Widget& parameter binds happily to\n// an xvalue -- so it compiles, copies, and warns about nothing.\n\n// Fix 1, preferred: the type manages no resource directly, so declare none of\n// the five. Copying, moving, destruction and the conditional noexcept\n// specifications are all generated correctly and stay correct as members\n// change.\nstruct WidgetZero {\n    Trace trace;\n};\n\n// Fix 2: the destructor is genuinely required, so state every operation.\nstruct WidgetExplicit {\n    Trace trace;\n\n    WidgetExplicit() = default;\n    WidgetExplicit(const WidgetExplicit&) = default;\n    WidgetExplicit& operator=(const WidgetExplicit&) = default;\n    WidgetExplicit(WidgetExplicit&&) noexcept = default;\n    WidgetExplicit& operator=(WidgetExplicit&&) noexcept = default;\n\n    ~WidgetExplicit() { std::cout << \"destroy\\n\"; }\n};",
+      "notes": "The failure mode is worth dwelling on because nothing diagnoses it: the code is well-formed, the semantics are correct, and the only symptom is that a move-shaped call performs a copy. Defaulted moves take their noexcept specification from their members, so writing `noexcept = default` is a statement of expectation — if a member's move can throw, the compiler will reject the mismatch rather than let the promise be wrong."
+    },
+    {
+      "id": "c07-w04",
+      "section": "Elision: RVO, NRVO, and guaranteed elision",
+      "minutes": 8,
+      "prompt": "Write four functions returning the same type: one returning a prvalue, one returning a named local, one returning a by-value parameter, and one returning a member of a local. Comment each with what actually happens and whether it is guaranteed.",
+      "checklist": [
+        "The prvalue return is identified as guaranteed elision, not an optimization",
+        "The named-local return is identified as NRVO, with an implicit move as the fallback",
+        "A comment states that no std::move should be written on the named-local return",
+        "The by-value parameter return is identified as an implicit move that cannot use NRVO",
+        "The member return is identified as a copy unless explicitly moved"
+      ],
+      "solution": "#include <string>\n#include <utility>\n\nstruct Order {\n    std::string symbol;\n};\n\n// Guaranteed elision since C++17: a prvalue of the result type is constructed\n// directly in the caller's result object. This is a language rule, so -O0 does\n// not restore a move -- and it works even for a type with no copy or move\n// constructor at all.\nOrder make_prvalue() {\n    return Order{\"EURUSD\"};\n}\n\n// NRVO: the compiler is permitted to construct `order` directly in the return\n// destination and production compilers usually do. If it does not, the return\n// expression is move-eligible and the move constructor runs. Do NOT write\n// `return std::move(order);` -- that discards the NRVO case to guarantee the\n// worse one.\nOrder make_local() {\n    Order order{\"USDJPY\"};\n    return order;\n}\n\n// A by-value parameter lives in storage established for the call, so it can\n// never use NRVO. This is an implicit move, guaranteed.\nOrder return_parameter(Order order) {\n    return order;\n}\n\n// A subobject cannot use NRVO either, and a bare `return order.symbol;` copies.\n// The explicit std::move is warranted here precisely because there is no\n// elision to lose.\nstd::string return_member() {\n    Order order{\"GBPUSD\"};\n    return std::move(order.symbol);\n}",
+      "notes": "The rule that follows from the table: remove std::move from ordinary local returns, and keep it exactly where elision was never available — subobjects, and expressions such as a conditional that yields an lvalue. `return primary ? first : second;` is the classic case that copies, because a conditional over two named locals is an lvalue and neither local is the single return candidate. Prefer restructuring toward a prvalue over contorting code to chase optional NRVO."
+    },
+    {
+      "id": "c07-w05",
+      "section": "noexcept moves and the copy fallback",
+      "minutes": 9,
+      "prompt": "Write a small program that demonstrates, without depending on any growth-factor assumption, that a vector copies its existing elements on reallocation when the element's move constructor is not noexcept, and moves them when it is.",
+      "checklist": [
+        "Two element types differing only in the noexcept on the move constructor",
+        "Both types instrument copy and move construction with output",
+        "reserve(n) then n+1 insertions, so exactly one reallocation of a known element count occurs",
+        "No assumption is made about the vector's growth factor",
+        "A comment names std::move_if_noexcept as the mechanism"
+      ],
+      "solution": "#include <iostream>\n#include <vector>\n\nstruct MayThrowMove {\n    MayThrowMove() = default;\n    MayThrowMove(const MayThrowMove&) { std::cout << \"copy-ctor\\n\"; }\n    MayThrowMove(MayThrowMove&&) { std::cout << \"move-ctor\\n\"; }\n};\n\nstruct NoexceptMove {\n    NoexceptMove() = default;\n    NoexceptMove(const NoexceptMove&) { std::cout << \"copy-ctor\\n\"; }\n    NoexceptMove(NoexceptMove&&) noexcept { std::cout << \"move-ctor\\n\"; }\n};\n\nint main() {\n    // reserve(2) makes the third insertion require new storage, without\n    // claiming anything about the growth factor. The library relocates the two\n    // existing elements with std::move_if_noexcept: a potentially throwing\n    // move with a copy available yields a const lvalue, which selects copying\n    // so the original range survives a throw intact.\n    std::vector<MayThrowMove> cautious;\n    cautious.reserve(2);\n    cautious.emplace_back();\n    cautious.emplace_back();\n    cautious.emplace_back();  // copy-ctor twice\n\n    std::vector<NoexceptMove> fast;\n    fast.reserve(2);\n    fast.emplace_back();\n    fast.emplace_back();\n    fast.emplace_back();      // move-ctor twice\n}",
+      "notes": "The reason the library cannot simply move and roll back is that rollback is impossible: if the fourth move threw after three had succeeded, the original range would already be partly moved from with no way to restore it. Copying costs an allocation and linear data movement per growth step, so forgetting noexcept on a hand-written move of a heap-owning type is a real and silent throughput bug. Defaulted moves get the specification right automatically."
+    },
+    {
+      "id": "c07-w06",
+      "section": "Moved-from objects",
+      "minutes": 6,
+      "prompt": "Write a function that moves from a std::string and then legitimately reuses the source. Annotate each operation on the moved-from object as allowed or not allowed, and state what the standard actually guarantees.",
+      "checklist": [
+        "A comment states the guarantee: valid but unspecified value, unless the type documents more",
+        "Destroying and assigning a new value are marked allowed",
+        "Reading the value is marked allowed but unspecified",
+        "Relying on empty() being true is marked not allowed, with a note that implementations commonly do leave it empty",
+        "The reuse happens only after a fresh value has been assigned"
+      ],
+      "solution": "#include <iostream>\n#include <string>\n#include <utility>\n\nvoid reuse_after_move() {\n    std::string symbol = \"EURUSD\";\n    std::string destination = std::move(symbol);\n\n    std::cout << destination << '\\n';  // allowed: prints EURUSD\n\n    // The standard guarantees a moved-from library object is valid but holds\n    // an unspecified value. Its invariants hold; which ordinary value it\n    // contains is simply not specified.\n\n    // Reading it: allowed, but the output is unspecified.\n    std::cout << symbol.size() << '\\n';\n\n    // Calling an operation with no preconditions: allowed.\n    symbol.clear();\n\n    // NOT allowed to rely on: `assert(symbol.empty());`. Implementations\n    // commonly do leave a moved-from string empty, which is exactly what makes\n    // depending on it a portability trap rather than an obvious mistake.\n\n    // Assigning a fresh value: allowed, and this is what makes the object\n    // useful again -- every later read is now well defined.\n    symbol = \"USDJPY\";\n    std::cout << symbol << '\\n';  // prints USDJPY\n}",
+      "notes": "The baseline a user-defined type should offer is the same one: destructible and assignable, nothing more promised. A moved-from object is not destroyed by the move, so its destructor still runs at the end of its lifetime — which is why a resource-owning move must leave the source safe to destroy. Clang-Tidy's bugprone-use-after-move catches most accidental reads; it is conservative static analysis rather than a language rule, but it finds the common shape where a name is used again before it receives a new value."
+    }
+  ]
+}

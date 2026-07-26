@@ -1,0 +1,124 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import { books } from '../../../books';
+import { chapterNumber, chapterSlug, chapterTitle, getBookChapters } from '../../../lib/chapters';
+import { counts, exerciseChapterSlug, getBookExercises } from '../../../lib/exercises';
+import { href } from '../../../lib/url';
+
+export async function getStaticPaths() {
+  const paths = [];
+  for (const book of books) {
+    const sets = await getBookExercises(book.slug);
+    if (!sets.length) continue;
+    const chapters = await getBookChapters(book.slug);
+    const rows = sets
+      .map((ex) => {
+        const slug = exerciseChapterSlug(ex);
+        const entry = chapters.find((c) => chapterSlug(c) === slug);
+        if (!entry) return null;
+        return {
+          slug,
+          number: chapterNumber(entry),
+          title: chapterTitle(entry),
+          n: counts(ex),
+        };
+      })
+      .filter(Boolean);
+    paths.push({ params: { book: book.slug }, props: { book, rows } });
+  }
+  return paths;
+}
+
+const { book, rows } = Astro.props;
+const total = rows.reduce(
+  (a, r) => ({
+    mcq: a.mcq + r.n.mcq,
+    reading: a.reading + r.n.reading,
+    writing: a.writing + r.n.writing,
+    total: a.total + r.n.total,
+  }),
+  { mcq: 0, reading: 0, writing: 0, total: 0 },
+);
+---
+
+<BaseLayout
+  title={`Exercises — ${book.title}`}
+  description={`Self-test exercises for ${book.title}: ${total.mcq} multiple-choice questions, ${total.reading} code-reading problems and ${total.writing} code-writing drills.`}
+>
+  <div class="container">
+    <div class="book-head">
+      <span class="eyebrow">{book.badge} &nbsp;·&nbsp; {total.total} exercises</span>
+      <h1>Exercises</h1>
+      <p>
+        {total.mcq} multiple-choice questions, {total.reading} code-reading problems and{' '}
+        {total.writing} timed code-writing drills across {rows.length} chapters. Progress is kept in
+        this browser only.
+      </p>
+      <p class="quiz-index-links">
+        <a href={href(`/books/${book.slug}/`)}>Table of contents</a>
+        <button type="button" class="quiz-btn" id="quiz-reset">Reset all progress</button>
+      </p>
+    </div>
+
+    <ol class="toc quiz-index" data-book={book.slug}>
+      {
+        rows.map((r) => (
+          <li>
+            <a href={href(`/books/${book.slug}/${r.slug}/exercises/`)} data-chapter={r.slug}>
+              <span class="num">{String(r.number).padStart(2, '0')}</span>
+              <span class="ch-title">{r.title}</span>
+              <span class="quiz-index-counts">
+                {r.n.mcq} MC · {r.n.reading} read · {r.n.writing} write
+              </span>
+              <span class="quiz-index-progress" data-total={r.n.total} />
+            </a>
+          </li>
+        ))
+      }
+    </ol>
+  </div>
+
+  {/* Progress lives in localStorage, so it can only be filled in on the client.
+      Same key scheme the quiz itself writes: quiz:<book>:<chapterSlug>. */}
+  <script is:inline>
+    (() => {
+      const list = document.querySelector('.quiz-index');
+      if (!list) return;
+      const bookSlug = list.dataset.book;
+
+      const paint = () => {
+        for (const a of list.querySelectorAll('a[data-chapter]')) {
+          const slot = a.querySelector('.quiz-index-progress');
+          const total = Number(slot.dataset.total) || 0;
+          let right = 0;
+          let done = 0;
+          try {
+            const raw = JSON.parse(localStorage.getItem(`quiz:${bookSlug}:${a.dataset.chapter}`) || '{}');
+            for (const v of Object.values(raw.results || {})) {
+              done++;
+              if (v.r === 'right') right++;
+            }
+          } catch {
+            /* unreadable storage just means no progress to show */
+          }
+          if (!done) {
+            slot.textContent = '';
+            slot.removeAttribute('data-state');
+            continue;
+          }
+          slot.textContent = `${right}/${total}`;
+          slot.dataset.state = right === total ? 'complete' : 'partial';
+        }
+      };
+
+      document.getElementById('quiz-reset')?.addEventListener('click', () => {
+        for (const a of list.querySelectorAll('a[data-chapter]')) {
+          localStorage.removeItem(`quiz:${bookSlug}:${a.dataset.chapter}`);
+        }
+        paint();
+      });
+
+      paint();
+    })();
+  </script>
+</BaseLayout>

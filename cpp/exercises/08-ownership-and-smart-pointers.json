@@ -1,0 +1,560 @@
+{
+  "chapter": 8,
+  "mcq": [
+    {
+      "id": "c08-m01",
+      "section": "Owners and Views",
+      "difficulty": "easy",
+      "prompt": "Which parameter form states \"a required, read-only view\" — the argument must exist and the callee will not modify or own it?",
+      "choices": [
+        "T&",
+        "const T&",
+        "T*",
+        "const T*"
+      ],
+      "answer": 1,
+      "explain": "`const T&` cannot be null and cannot be written through, so it says exactly \"required, read-only\". `const T*` is the tempting near-miss: it is also read-only, but a pointer is nullable and rebindable, so it advertises an optional view and forces the callee to test for null."
+    },
+    {
+      "id": "c08-m02",
+      "section": "Owners and Views",
+      "difficulty": "medium",
+      "prompt": "The chapter calls the slogan \"never use raw pointers\" wrong. What is the narrower rule it replaces it with?",
+      "choices": [
+        "Do not use *owning* raw pointers in application code; non-owning raw pointers are idiomatic views",
+        "Raw pointers may only appear inside standard-library implementations",
+        "Raw pointers are undefined behaviour in modern C++ and must be replaced by references",
+        "Raw pointers are acceptable as long as every `new` has a matching `delete` in the same function"
+      ],
+      "answer": 0,
+      "explain": "A `T*` parameter or local that only borrows is the idiomatic spelling of a nullable view — nothing about it is unsafe. What breaks is a raw pointer that carries an ownership obligation the type does not state, like `OrderBook* create_book()`. The matching-new-and-delete answer is the habit RAII exists to remove: it fails on every early return and every exception."
+    },
+    {
+      "id": "c08-m03",
+      "section": "RAII Owners and the Decision Table",
+      "difficulty": "easy",
+      "prompt": "The chapter's decision table is a design order. What is that order?",
+      "choices": [
+        "`unique_ptr` always, because a value cannot hold a polymorphic object",
+        "They are interchangeable styles chosen by team convention",
+        "`shared_ptr` first, narrowing to `unique_ptr` only when profiling shows refcount cost",
+        "A value first; `unique_ptr` if the object must live on the heap; `shared_ptr` only when the last user cannot be known in advance"
+      ],
+      "answer": 3,
+      "explain": "Moving down the table buys more flexible lifetime management and pays with more runtime machinery, so you start at the top and move only when a requirement forces it. Starting at `shared_ptr` and narrowing later is backwards: shared ownership spreads through interfaces and is much harder to remove than to avoid."
+    },
+    {
+      "id": "c08-m04",
+      "section": "`unique_ptr`: The Default Owner",
+      "difficulty": "easy",
+      "prompt": "On the major standard-library implementations, how large is a `std::unique_ptr<T>` using the default deleter?",
+      "choices": [
+        "Two pointers: one for the object, one for a control block",
+        "Implementation-defined, and typically larger than `std::shared_ptr`",
+        "The same size as a raw `T*`",
+        "Two pointers: one for the object, one for the deleter"
+      ],
+      "answer": 2,
+      "explain": "The default deleter is an empty type and carries no per-handle state, so implementations store it without growing the handle — the chapter asserts `sizeof(std::unique_ptr<Strategy>) == sizeof(Strategy*)`. The control-block answer describes `shared_ptr`; `unique_ptr` has no control block and no reference count at all."
+    },
+    {
+      "id": "c08-m05",
+      "section": "`unique_ptr`: The Default Owner",
+      "difficulty": "medium",
+      "prompt": "How do `.get()` and `.release()` differ?",
+      "choices": [
+        "`release()` deletes the object and then returns nullptr",
+        "`get()` returns the pointer and keeps ownership; `release()` returns it and leaves the `unique_ptr` empty without deleting",
+        "`get()` gives up ownership; `release()` only observes",
+        "Both return the stored pointer and leave ownership unchanged"
+      ],
+      "answer": 1,
+      "explain": "`get()` hands out a view and the owner is still on the hook for destruction. `release()` abdicates: the object is now unowned, so if the returned pointer is discarded the object leaks. The \"deletes and returns nullptr\" answer confuses `release()` with `reset()`, which is the one that actually destroys."
+    },
+    {
+      "id": "c08-m06",
+      "section": "`unique_ptr`: The Default Owner",
+      "difficulty": "medium",
+      "prompt": "A function must take ownership of a heap `Strategy` from its caller. Which signature says that, and what does the caller write?",
+      "choices": [
+        "`void adopt(std::unique_ptr<Strategy>)`, called as `adopt(std::move(p))`",
+        "`void adopt(std::unique_ptr<Strategy>&)`, called as `adopt(p)`",
+        "`void adopt(const std::unique_ptr<Strategy>&)`, called as `adopt(p)`",
+        "`void adopt(Strategy*)`, called as `adopt(p.release())`"
+      ],
+      "answer": 0,
+      "explain": "By value is the transfer signature: the caller is forced to write `std::move`, which makes the handover visible at the call site and leaves the caller's handle demonstrably empty. `unique_ptr<T>&` should attract scrutiny — it means \"I may reseat *your* handle\", a much narrower contract. The raw-pointer form re-creates exactly the ambiguity the chapter warns about: nothing in `Strategy*` says who deletes."
+    },
+    {
+      "id": "c08-m07",
+      "section": "`unique_ptr`: The Default Owner",
+      "difficulty": "hard",
+      "prompt": "Two `std::unique_ptr<Order>` objects are constructed from the same raw `Order*`. What happens?",
+      "choices": [
+        "It compiles but leaks, because neither handle knows it owns the object",
+        "The second construction throws `std::logic_error`",
+        "The second `unique_ptr` is constructed empty, since the object already has an owner",
+        "Both destructors delete the same object, so the second destruction has undefined behaviour"
+      ],
+      "answer": 3,
+      "explain": "`unique_ptr` enforces uniqueness only against copying; nothing detects that you handed the same address to two constructors. Each one runs its deleter at scope exit and the second `delete` is undefined behaviour. There is no leak here — the opposite: the object is destroyed twice. Uniqueness is a claim you make when you construct the owner, not something the type can verify."
+    },
+    {
+      "id": "c08-m08",
+      "section": "Custom Deleters",
+      "difficulty": "medium",
+      "prompt": "Given `using CompactFile = std::unique_ptr<std::FILE, FCloser>;` where `FCloser` is an empty struct, and `using FunctionFile = std::unique_ptr<std::FILE, decltype(&std::fclose)>;`, how do their sizes compare?",
+      "choices": [
+        "`CompactFile` is two pointers; `FunctionFile` is one",
+        "Both are one pointer, because the deleter is a compile-time property",
+        "`CompactFile` is one pointer; `FunctionFile` is two",
+        "Both are two pointers, because `unique_ptr` always stores a deleter object"
+      ],
+      "answer": 2,
+      "explain": "`FCloser` is stateless, so an implementation stores it without adding a byte to the handle. A function *pointer* deleter is genuine per-handle state — an address that must be kept — so the handle grows to two pointers. The generalisation is that a `unique_ptr` costs one pointer plus whatever state its deleter carries; a captureless lambda deleter is stateless too and stays one pointer."
+    },
+    {
+      "id": "c08-m09",
+      "section": "Custom Deleters",
+      "difficulty": "medium",
+      "prompt": "Where does the deleter live for `unique_ptr` versus `shared_ptr`, and what follows from that?",
+      "choices": [
+        "Both type-erase it, so both handle types are unaffected by the deleter",
+        "`unique_ptr` encodes it in its type, so different deleters give non-assignable types; `shared_ptr` type-erases it into the control block, so `shared_ptr<T>` is one type regardless",
+        "`unique_ptr` type-erases it into a hidden control block; `shared_ptr` encodes it in its type",
+        "Both encode it in the type, so neither handle can be assigned across deleters"
+      ],
+      "answer": 1,
+      "explain": "The deleter is a template parameter of `unique_ptr`, so `unique_ptr<T, FCloser>` and `unique_ptr<T, OtherCloser>` are unrelated types — that is the price of a zero-overhead handle. `shared_ptr` already pays for a control block, so it stores the deleter there and keeps one handle type and one handle size no matter which deleter you supply."
+    },
+    {
+      "id": "c08-m10",
+      "section": "Custom Deleters",
+      "difficulty": "hard",
+      "prompt": "A `std::FILE*` from `std::fopen` is stored in a plain `std::unique_ptr<std::FILE>` with the default deleter. What is wrong?",
+      "choices": [
+        "The default deleter applies `delete` to storage that requires `std::fclose`, which is undefined behaviour",
+        "The file is closed twice, once by `delete` and once at program exit",
+        "Nothing; the default deleter recognises C library handles",
+        "It fails to compile, because `std::FILE` is an incomplete type on most implementations"
+      ],
+      "answer": 0,
+      "explain": "The default deleter does exactly one thing: `delete`. Pairing it with an acquisition that was not `new` — `fopen`, `malloc`, or any library-specific create call — mismatches the allocation and deallocation pair and is undefined behaviour. The deleter is what encodes the release policy, which is precisely why `unique_ptr` lets you supply one."
+    },
+    {
+      "id": "c08-m11",
+      "section": "`shared_ptr`: Control Blocks and Refcounts",
+      "difficulty": "easy",
+      "prompt": "What does a typical `std::shared_ptr<T>` handle store, and what lives in its control block?",
+      "choices": [
+        "An object pointer and a strong count; the deleter is stored in the handle",
+        "An object pointer only; the counts are stored inside the object",
+        "One pointer in the handle; the control block holds the object",
+        "An object pointer and a control-block pointer; the control block holds the strong count, the weak count, and the deleter"
+      ],
+      "answer": 3,
+      "explain": "The handle is two pointers — hence `sizeof(std::shared_ptr<T>) == 2 * sizeof(void*)` — and the shared bookkeeping is out of line so every copy can reach it. Storing the count inside the object is the *intrusive* design described later in the chapter; that is exactly what `shared_ptr` does not do, which is why it works with unmodified types."
+    },
+    {
+      "id": "c08-m12",
+      "section": "`shared_ptr`: Control Blocks and Refcounts",
+      "difficulty": "medium",
+      "prompt": "How do `std::make_shared<T>(args)` and `std::shared_ptr<T>(new T(args))` differ in allocation shape?",
+      "choices": [
+        "`make_shared` performs two allocations; the `new` spelling performs one",
+        "Both perform one allocation; `make_shared` only saves typing",
+        "`make_shared` usually performs one allocation with the object embedded beside the bookkeeping; the `new` spelling usually performs two, with the object separate",
+        "`make_shared` allocates the control block lazily, on the first `weak_ptr`"
+      ],
+      "answer": 2,
+      "explain": "One allocation means less allocator work and puts the object next to the counts, which usually helps locality — so `make_shared` is the default. The separate-allocation spelling is not merely wasteful, though: it lets the object's storage be freed as soon as the strong count hits zero, which is the fix for the weak-retention problem."
+    },
+    {
+      "id": "c08-m13",
+      "section": "`shared_ptr`: Control Blocks and Refcounts",
+      "difficulty": "medium",
+      "prompt": "Two threads each hold a `shared_ptr` to the same `MarketData`. What does `shared_ptr`'s thread safety guarantee?",
+      "choices": [
+        "Copying and destroying the handles is safe, and concurrent access to the object is also safe",
+        "Copying and destroying the handles is safe; concurrent mutation of the pointed-to object is still your problem",
+        "Nothing is safe without an external mutex, including the counts",
+        "Reads of the object are safe; only writes need synchronisation"
+      ],
+      "answer": 1,
+      "explain": "The counts are updated with a thread-safe read-modify-write, so ownership bookkeeping is race-free. That protects the *control block*, not `*p`. Assuming the object inherits that safety is the classic mistake: two threads writing the same `MarketData` through two `shared_ptr`s race exactly as they would through two raw pointers."
+    },
+    {
+      "id": "c08-m14",
+      "section": "Aliasing and `enable_shared_from_this`",
+      "difficulty": "medium",
+      "prompt": "`auto message = std::make_shared<Message>(...); std::shared_ptr<std::uint16_t> flags{message, &message->flags};` What keeps the storage alive, and what is `message.use_count()`?",
+      "choices": [
+        "`flags` shares `message`'s control block and keeps the whole `Message` allocation alive; `use_count()` is 2",
+        "`flags` copies the member into a fresh allocation; `use_count()` is 1",
+        "The aliasing constructor makes `flags` a non-owning observer, like a `weak_ptr`; `use_count()` is 1",
+        "`flags` owns only the two-byte member; `use_count()` is 1"
+      ],
+      "answer": 0,
+      "explain": "The aliasing constructor separates the stored pointer from the owned control block: `flags` dereferences to the member but counts as an owner of the whole `Message`. That is the feature and the trap — a two-byte alias handed downstream pins the entire allocation for as long as it lives. It is not an observer: unlike `weak_ptr`, it does raise the strong count."
+    },
+    {
+      "id": "c08-m15",
+      "section": "Aliasing and `enable_shared_from_this`",
+      "difficulty": "hard",
+      "prompt": "A `Session` derives from `std::enable_shared_from_this<Session>`. What happens if `shared_from_this()` is called on a stack-allocated `Session`?",
+      "choices": [
+        "It fails to compile, because `enable_shared_from_this` requires heap allocation",
+        "It returns a `shared_ptr` with a fresh control block, and destruction later deletes a stack object",
+        "It returns an empty `shared_ptr`, which the caller must test",
+        "It throws `std::bad_weak_ptr`, because no `shared_ptr` has established ownership"
+      ],
+      "answer": 3,
+      "explain": "`shared_from_this()` looks up an *existing* control block through the internal weak reference that a `shared_ptr` constructor installs; with no such block it throws `std::bad_weak_ptr` (C++17). Silently inventing a second control block is what `std::shared_ptr<Session>(this)` does, and that is the double-deletion bug the base class exists to prevent. The same throw is why a constructor is too early to call it."
+    },
+    {
+      "id": "c08-m16",
+      "section": "`weak_ptr` and Ownership Cycles",
+      "difficulty": "easy",
+      "prompt": "A `Parent` holds `shared_ptr<Child>` and the `Child` holds `shared_ptr<Parent>`. All external handles go out of scope. What happens?",
+      "choices": [
+        "The program has undefined behaviour at scope exit",
+        "Both objects are destroyed; the library detects and collects the cycle",
+        "Neither object is destroyed: each keeps the other's strong count above zero, so both leak",
+        "The `Parent` is destroyed and the `Child` leaks"
+      ],
+      "answer": 2,
+      "explain": "Reference counting collects unreachable objects only when the reference graph is acyclic; there is no tracing collector behind `shared_ptr` to notice a self-sustaining pair. Nothing is undefined here — the destructors are simply never reached, which is why the fix is a design change: make one direction a `weak_ptr` observation rather than ownership."
+    },
+    {
+      "id": "c08-m17",
+      "section": "`weak_ptr` and Ownership Cycles",
+      "difficulty": "medium",
+      "prompt": "What does `weak_ptr<T>::lock()` return, and why is it the right way to use a `weak_ptr`?",
+      "choices": [
+        "A raw `T*`, valid until the next statement",
+        "A `shared_ptr<T>` — empty if the object is gone, otherwise an owner that keeps it alive for the whole guarded body",
+        "A `bool` saying whether the object is still alive",
+        "A `T&`, throwing `std::bad_weak_ptr` if the object is gone"
+      ],
+      "answer": 1,
+      "explain": "`lock()` tests and conditionally acquires ownership as one operation, so the returned handle guarantees the object survives every use inside `if (auto owner = w.lock())`. Anything that merely *reports* liveness — a bool, or a raw pointer — leaves a window in which the last strong owner elsewhere can drop the object between the check and the use."
+    },
+    {
+      "id": "c08-m18",
+      "section": "`weak_ptr` and Ownership Cycles",
+      "difficulty": "medium",
+      "prompt": "Why is `if (!observer.expired()) { auto p = observer.lock(); use(*p); }` a bad pattern?",
+      "choices": [
+        "It is check-then-use: the object can expire between the two calls, so `lock()` may still return empty and `*p` dereferences an empty handle",
+        "`expired()` increments the weak count and must be paired with a decrement",
+        "`expired()` returns true for an object that is still alive but has no strong owners",
+        "`expired()` is more expensive than `lock()`, so it wastes time"
+      ],
+      "answer": 0,
+      "explain": "Two separate operations means two separate moments; the last strong owner on another thread can vanish in between, and the code then dereferences an empty `shared_ptr`. `lock()` already does the check atomically, so the correct shape tests the result of one call: `if (auto p = observer.lock())`. `expired()` is at best a hint for logging."
+    },
+    {
+      "id": "c08-m19",
+      "section": "The `make_shared` Weak-Retention Gotcha",
+      "difficulty": "medium",
+      "prompt": "An object created with `make_shared` loses its last `shared_ptr` while a `weak_ptr` still observes it. What is true?",
+      "choices": [
+        "Both the object and its storage are gone; the `weak_ptr` now points into freed memory",
+        "The destructor is deferred until the last `weak_ptr` disappears",
+        "The object is still alive; the strong count is held up by the `weak_ptr`",
+        "The object's destructor has run, but the combined allocation is not released until the last `weak_ptr` disappears"
+      ],
+      "answer": 3,
+      "explain": "Destruction and deallocation are separate events. The strong count reaching zero runs `~T` immediately — a `weak_ptr` never delays that — but the control block must survive for the observers, and with `make_shared` the control block and the object share one allocation. So the storage stays checked out while the object inside it is already dead. Nothing dangles: `lock()` correctly returns empty."
+    },
+    {
+      "id": "c08-m20",
+      "section": "The `make_shared` Weak-Retention Gotcha",
+      "difficulty": "hard",
+      "prompt": "A cache holds `weak_ptr`s to one-megabyte `Snapshot` objects that routinely outlive every owner. Which construction should the snapshots use?",
+      "choices": [
+        "`std::make_shared<Snapshot>()` with a periodic call to `shrink_to_fit()` on the cache",
+        "`std::make_shared<Snapshot>()`, because one allocation is always cheaper",
+        "`std::shared_ptr<Snapshot>(new Snapshot)`, so the megabyte is freed at strong-count zero and only the small control block is retained",
+        "`std::unique_ptr<Snapshot>`, since a cache does not own its entries"
+      ],
+      "answer": 2,
+      "explain": "This is the one case where the two-allocation spelling wins: separate storage lets the megabyte return to the allocator as soon as the last owner goes, leaving only the small control block pinned by the observers. `make_shared` is the right default everywhere else, but here its single combined allocation is exactly the problem. `unique_ptr` cannot be observed by a `weak_ptr` at all — weak observation requires a shared control block."
+    },
+    {
+      "id": "c08-m21",
+      "section": "Intrusive Reference Counting",
+      "difficulty": "medium",
+      "prompt": "Compared with `shared_ptr`, what does an intrusive reference-counted handle buy?",
+      "choices": [
+        "Built-in weak observation with a smaller control block",
+        "A one-word handle, one allocation, count locality with the object, and the freedom to use a plain non-atomic increment",
+        "Automatic cycle collection, because the count lives inside the object",
+        "Thread safety without any atomic operations"
+      ],
+      "answer": 1,
+      "explain": "The count lives in the object, so there is no control block at all: the handle is one pointer, creating the first owner is one allocation, and the count is already in a cache line the code is touching. The design also gets to *choose* a plain increment for single-threaded stages, whereas `shared_ptr` cannot opt out of thread-safe updates. What it gives up is general weak observation and the ability to work with unmodified types — and cycles still leak, exactly as with `shared_ptr`."
+    },
+    {
+      "id": "c08-m22",
+      "section": "Intrusive Reference Counting",
+      "difficulty": "hard",
+      "prompt": "Why can a member function of an intrusive-counted class safely build a new handle from `this`, when `std::shared_ptr<T>(this)` is a bug?",
+      "choices": [
+        "Because the count is inside the object, so every handle built from any pointer to it reaches the same count",
+        "Because intrusive handles use non-atomic increments, which cannot race",
+        "Because `RefCounted::release()` calls `delete this` rather than a deleter",
+        "Because intrusive handles never delete the object"
+      ],
+      "answer": 0,
+      "explain": "There is exactly one count and it is a member of the object, so there is no way to accidentally create a second, independent bookkeeping record. `shared_ptr<T>(this)` manufactures a *second control block* that knows nothing about the first, and both eventually delete the object — which is why `enable_shared_from_this` exists. The atomicity of the increment is a separate axis entirely and has nothing to do with this hazard."
+    },
+    {
+      "id": "c08-m23",
+      "section": "Smart Pointers on the Hot Path",
+      "difficulty": "medium",
+      "prompt": "A per-tick function is declared `int price(std::shared_ptr<const OrderBook> book)` and only reads from the book. What does the signature cost, and what should it be?",
+      "choices": [
+        "A heap allocation per call; take `std::unique_ptr<const OrderBook>` instead",
+        "A virtual dispatch per call; mark the function `final` instead",
+        "Nothing measurable; take `const std::shared_ptr<const OrderBook>&` for style only",
+        "A thread-safe count increment at the call and a decrement at return; take `const OrderBook&` instead"
+      ],
+      "answer": 3,
+      "explain": "Every by-value `shared_ptr` copy is an atomic read-modify-write on the shared count, and the destructor pays the matching decrement plus a branch on last ownership — per tick, on a line that other cores may also be touching. The function reads the book, so it should borrow it: `const OrderBook&`. `const shared_ptr&` removes the traffic but still advertises shared ownership at the interface, which the chapter also warns against."
+    },
+    {
+      "id": "c08-m24",
+      "section": "Smart Pointers on the Hot Path",
+      "difficulty": "medium",
+      "prompt": "`unique_ptr` has no reference count. Why is passing one *by value* still not equivalent to passing a raw pointer?",
+      "choices": [
+        "Because by-value transfer performs a heap allocation for the moved-from state",
+        "Because the deleter must be copied along with the pointer",
+        "Because it is a non-trivially copyable class type, so common calling conventions pass it indirectly in memory rather than in a register",
+        "Because the callee must run the deleter before returning"
+      ],
+      "answer": 2,
+      "explain": "The handle is pointer-sized, but size is not the whole ABI story: a class with a non-trivial destructor and move constructor is not passed like a scalar, so it goes through memory instead of a register. That is a real, if small, cost — and the point is that by-value `unique_ptr` should mean \"I am taking ownership\", not \"I want to look at the object\". If transfer is not the operation, take a view."
+    },
+    {
+      "id": "c08-m25",
+      "section": "Latency Lens",
+      "difficulty": "medium",
+      "prompt": "Which of these is the chapter's summary of where per-event ownership cost should go in a low-latency pipeline?",
+      "choices": [
+        "Replace every `shared_ptr` with `unique_ptr` on the hot path",
+        "Build ownership during startup and pass `T&` or `T*` through preallocated hot-path objects",
+        "Use the two-allocation `shared_ptr<T>(new T)` form so ownership operations touch fewer cache lines",
+        "Use `weak_ptr::lock()` in the event loop so no handle keeps an object alive longer than one event"
+      ],
+      "answer": 1,
+      "explain": "The cheapest reference count is the one never updated: connect owners at configuration time and let the tick path borrow. Swapping `shared_ptr` for `unique_ptr` on the hot path still leaves a by-value handle being moved around when a view would do. And `lock()` is one of the *more* expensive operations — a conditional strong-count acquisition touching the shared control-block line — so putting it in the event loop is the opposite of the advice."
+    }
+  ],
+  "reading": [
+    {
+      "id": "c08-r01",
+      "section": "`shared_ptr`: Control Blocks and Refcounts",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n#include <memory>\n\nstruct MarketData {\n    int sequence = 0;\n};\n\nint main() {\n    auto data = std::make_shared<MarketData>();\n    std::cout << data.use_count() << ' ';\n\n    {\n        auto copy = data;\n        std::cout << data.use_count() << ' ';\n    }\n\n    std::cout << data.use_count() << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "1 2 1"
+      ],
+      "explain": "Copying a `shared_ptr` increments the strong count in the shared control block, and the copy's destructor at the end of the inner block decrements it. Both handles see the same count because both point at the same control block — that is precisely what makes them joint owners rather than two independent ones."
+    },
+    {
+      "id": "c08-r02",
+      "section": "`unique_ptr`: The Default Owner",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <iostream>\n#include <memory>\n\nint main() {\n    auto owner = std::make_unique<int>(42);\n    std::unique_ptr<int> second = owner;\n    std::cout << *second << '\\n';\n}",
+      "kind": "no-compile",
+      "explain": "`unique_ptr`'s copy constructor is deleted: exclusive ownership is enforced by the type, not by convention. The fix is `std::unique_ptr<int> second = std::move(owner);`, which transfers the object and leaves `owner` empty. Note that a *move* would compile and leave `*owner` a dereference of nullptr — the compiler stops the copy, but it cannot stop you from using a moved-from handle."
+    },
+    {
+      "id": "c08-r03",
+      "section": "`weak_ptr` and Ownership Cycles",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n#include <memory>\n\nstruct Child;\n\nstruct Parent {\n    std::shared_ptr<Child> child;\n    ~Parent() { std::cout << \"~Parent \"; }\n};\n\nstruct Child {\n    std::weak_ptr<Parent> parent;\n    ~Child() { std::cout << \"~Child\"; }\n};\n\nint main() {\n    {\n        auto parent = std::make_shared<Parent>();\n        auto child = std::make_shared<Child>();\n        parent->child = child;\n        child->parent = parent;\n    }\n    std::cout << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "~Parent ~Child"
+      ],
+      "explain": "`child` is destroyed first, dropping the `Child` strong count from 2 to 1 — `parent->child` still owns it. Then `parent` is destroyed; because `child->parent` is only a `weak_ptr`, the `Parent` strong count reaches zero, `~Parent` runs, and destroying its `child` member finally releases the `Child`. Had that back link been a `shared_ptr`, neither destructor would ever run."
+    },
+    {
+      "id": "c08-r04",
+      "section": "`weak_ptr` and Ownership Cycles",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n#include <memory>\n\nstruct Child;\n\nstruct Parent {\n    std::shared_ptr<Child> child;\n};\n\nstruct Child {\n    std::shared_ptr<Parent> parent;\n};\n\nint main() {\n    auto parent = std::make_shared<Parent>();\n    auto child = std::make_shared<Child>();\n    parent->child = child;\n    child->parent = parent;\n\n    std::cout << parent.use_count() << ' ' << child.use_count() << '\\n';\n\n    parent->child.reset();\n}",
+      "kind": "value",
+      "accept": [
+        "2 2"
+      ],
+      "explain": "Each object now has two strong owners: the local handle and the member inside the other object. When the two locals go out of scope both counts fall to 1 and stay there forever — that is the cycle leak. The final `parent->child.reset()` is what saves this program: it cuts one edge so the remaining counts can reach zero."
+    },
+    {
+      "id": "c08-r05",
+      "section": "`unique_ptr`: The Default Owner",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <iostream>\n#include <memory>\n\nint main() {\n    int* raw = new int(7);\n    std::unique_ptr<int> first{raw};\n    std::unique_ptr<int> second{raw};\n    std::cout << *first + *second << '\\n';\n}",
+      "kind": "ub",
+      "explain": "Both handles believe they exclusively own the same object, so at the end of `main` the object is deleted twice. Double deletion is undefined behaviour; AddressSanitizer reports 'attempting double-free'. `unique_ptr` deletes the copy constructor, but it cannot detect that the same raw pointer was handed to two constructors — uniqueness is a claim you make, not one the type verifies."
+    },
+    {
+      "id": "c08-r06",
+      "section": "`weak_ptr` and Ownership Cycles",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <iostream>\n#include <memory>\n\nstruct MarketData {\n    int sequence = 11;\n};\n\nint main() {\n    auto data = std::make_shared<MarketData>();\n    std::weak_ptr<MarketData> observer = data;\n    std::cout << observer->sequence << '\\n';\n}",
+      "kind": "no-compile",
+      "explain": "`weak_ptr` has no `operator->` and no `operator*`: it deliberately offers no way to touch the object, because between the check and the access the object could be gone. You must go through `lock()`, which returns a `shared_ptr` that keeps the object alive for as long as you hold it: `if (auto owner = observer.lock()) { ... owner->sequence ... }`."
+    },
+    {
+      "id": "c08-r07",
+      "section": "`unique_ptr`: The Default Owner",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n#include <memory>\n\nint main() {\n    auto owner = std::make_unique<int>(5);\n\n    int* view = owner.get();\n    std::cout << std::boolalpha << (owner.get() != nullptr) << ' ';\n\n    std::unique_ptr<int> adopter{owner.release()};\n    std::cout << (owner.get() == nullptr) << ' ' << *adopter << ' ' << *view << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "true true 5 5"
+      ],
+      "explain": "`get()` hands out a view and changes nothing about ownership, so the first test is true. `release()` returns the pointer and empties the handle *without deleting*, so `owner.get()` is now null while the object is alive and owned by `adopter`. `view` still reads 5 because the object was never destroyed — but it would dangle the moment `adopter` dies, which is why `get()` results must never outlive the owner."
+    },
+    {
+      "id": "c08-r08",
+      "section": "Aliasing and `enable_shared_from_this`",
+      "prompt": "What does this print?",
+      "code": "#include <cstdint>\n#include <iostream>\n#include <memory>\n\nstruct Message {\n    std::uint64_t sequence;\n    std::uint16_t flags;\n};\n\nint main() {\n    auto message = std::make_shared<Message>(Message{42, 3});\n    std::shared_ptr<std::uint16_t> flags{message, &message->flags};\n\n    std::cout << *flags << ' ' << message.use_count() << ' '\n              << flags.use_count() << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "3 2 2"
+      ],
+      "explain": "The aliasing constructor stores a pointer to the member but shares `message`'s control block, so `*flags` is the two-byte field while both handles report the same strong count of 2. Ownership follows the control block, not the stored pointer — which is why handing `flags` downstream would keep the entire `Message` allocation alive even after `message` itself is gone."
+    }
+  ],
+  "writing": [
+    {
+      "id": "c08-w01",
+      "section": "Owners and Views",
+      "minutes": 7,
+      "prompt": "A legacy header declares `OrderBook* create_book(const char* symbol);` and `void destroy_book(OrderBook*);`. Write a modern wrapper that returns an owning handle whose type states the release policy, plus a `best_bid(const OrderBook&)` free function showing how downstream code should borrow it.",
+      "checklist": [
+        "Release policy is expressed as a deleter type or captureless lambda, not a comment",
+        "The factory returns the owning handle by value",
+        "The deleter is null-safe or the handle is never constructed from a null result",
+        "The consuming function takes a view (`const OrderBook&` or `const OrderBook*`), not the handle",
+        "No raw `delete` appears anywhere"
+      ],
+      "solution": "#include <memory>\n\nstruct OrderBook;\nOrderBook* create_book(const char* symbol);\nvoid destroy_book(OrderBook*);\nint raw_best_bid(const OrderBook*);\n\nstruct BookDeleter {\n    void operator()(OrderBook* book) const noexcept {\n        if (book != nullptr) {\n            destroy_book(book);\n        }\n    }\n};\n\nusing BookHandle = std::unique_ptr<OrderBook, BookDeleter>;\n\nBookHandle open_book(const char* symbol) {\n    return BookHandle{create_book(symbol)};\n}\n\n// Downstream code borrows; nothing here can end the book's lifetime.\nint best_bid(const OrderBook& book) {\n    return raw_best_bid(&book);\n}\n\nvoid use() {\n    auto book = open_book(\"EUR/USD\");\n    if (book) {\n        (void)best_bid(*book);\n    }\n}",
+      "notes": "`BookDeleter` is empty, so `BookHandle` stays pointer-sized. The whole point of moving the release policy into the type is that the ambiguity of `OrderBook*` — must the caller delete, call a cleanup function, or merely observe? — is now answered by the declaration instead of by documentation."
+    },
+    {
+      "id": "c08-w02",
+      "section": "`unique_ptr`: The Default Owner",
+      "minutes": 10,
+      "prompt": "Write a polymorphic factory: an abstract `Strategy` with a pure virtual `quote()`, two concrete strategies, and `make_strategy(const Config&)` returning `std::unique_ptr<Strategy>`. Then write `start_engine` that takes ownership by value and an `inspect` that only borrows, and a `configure` that exercises both.",
+      "checklist": [
+        "`Strategy` has a virtual destructor",
+        "Objects are created with `std::make_unique`, never a bare `new`",
+        "The factory returns `std::unique_ptr<Strategy>` by value",
+        "The ownership-taking function takes `std::unique_ptr<Strategy>` by value and is called with `std::move`",
+        "The borrowing function takes `const Strategy&` or `const Strategy*`",
+        "The owning class needs no hand-written destructor or move operations"
+      ],
+      "solution": "#include <memory>\n#include <utility>\n\nstruct Config {\n    bool passive;\n};\n\nstruct Strategy {\n    virtual ~Strategy() = default;\n    virtual int quote() const = 0;\n};\n\nstruct PassiveStrategy final : Strategy {\n    int quote() const override { return 101; }\n};\n\nstruct AggressiveStrategy final : Strategy {\n    int quote() const override { return 102; }\n};\n\nstd::unique_ptr<Strategy> make_strategy(const Config& config) {\n    if (config.passive) {\n        return std::make_unique<PassiveStrategy>();\n    }\n    return std::make_unique<AggressiveStrategy>();\n}\n\nvoid inspect(const Strategy& strategy) {\n    (void)strategy.quote();\n}\n\nstruct Engine {\n    std::unique_ptr<Strategy> strategy;  // rule of zero\n};\n\nvoid start_engine(std::unique_ptr<Strategy> strategy) {\n    Engine engine{std::move(strategy)};\n    inspect(*engine.strategy);\n}\n\nvoid configure(const Config& config) {\n    auto strategy = make_strategy(config);\n    inspect(*strategy);\n    start_engine(std::move(strategy));\n}",
+      "notes": "The virtual destructor is load-bearing: `unique_ptr<Strategy>` destroys a `PassiveStrategy` through a `Strategy*`, and without it that is undefined behaviour. `Engine` writes no destructor and no move operations because its only member already knows how to destroy and move itself — the rule of zero."
+    },
+    {
+      "id": "c08-w03",
+      "section": "Custom Deleters",
+      "minutes": 8,
+      "prompt": "Wrap `std::fopen` / `std::fclose` in a `unique_ptr` alias two ways: once with an empty function-object deleter and once with a function-pointer deleter. Add `static_assert`s showing the size difference and a factory for each.",
+      "checklist": [
+        "Function-object deleter is an empty struct with a null-safe `operator()`",
+        "Both aliases are `std::unique_ptr<std::FILE, Deleter>` spellings",
+        "The function-pointer alias uses `decltype(&std::fclose)` and passes the deleter at construction",
+        "`static_assert` shows one pointer for the empty deleter and two for the function pointer",
+        "Both factories return the handle by value"
+      ],
+      "solution": "#include <cstdio>\n#include <memory>\n\nstruct FCloser {\n    void operator()(std::FILE* file) const noexcept {\n        if (file != nullptr) {\n            std::fclose(file);\n        }\n    }\n};\n\nusing CompactFile = std::unique_ptr<std::FILE, FCloser>;\nusing FunctionFile = std::unique_ptr<std::FILE, decltype(&std::fclose)>;\n\nCompactFile open_compact(const char* path) {\n    return CompactFile{std::fopen(path, \"rb\")};\n}\n\nFunctionFile open_with_function(const char* path) {\n    return FunctionFile{std::fopen(path, \"rb\"), &std::fclose};\n}\n\nstatic_assert(sizeof(CompactFile) == sizeof(void*));\nstatic_assert(sizeof(FunctionFile) == 2 * sizeof(void*));",
+      "notes": "The deleter's type is part of the `unique_ptr` type, so `CompactFile` and `FunctionFile` are unrelated, non-assignable types. A captureless lambda gives the same zero-state result as `FCloser`; `shared_ptr` differs by type-erasing the deleter into its control block, so its handle type and size never change."
+    },
+    {
+      "id": "c08-w04",
+      "section": "`weak_ptr` and Ownership Cycles",
+      "minutes": 10,
+      "prompt": "Model a parent/child tree in which the parent owns the child and the child links back to the parent without keeping it alive. Give the child a `report_parent()` that safely uses the parent if it still exists, and add destructor tracing that demonstrates both objects are destroyed.",
+      "checklist": [
+        "Downward link is `std::shared_ptr`, upward link is `std::weak_ptr`",
+        "`report_parent()` uses a single `lock()` and tests its result",
+        "No `expired()`-then-`lock()` check-then-use sequence",
+        "The locked `shared_ptr` stays alive for the whole guarded body",
+        "Destructors print, showing that neither object leaks"
+      ],
+      "solution": "#include <iostream>\n#include <memory>\n\nstruct Child;\n\nstruct Parent {\n    std::shared_ptr<Child> child;\n    int level = 3;\n    ~Parent() { std::cout << \"~Parent\\n\"; }\n};\n\nstruct Child {\n    std::weak_ptr<Parent> parent;  // observation, not ownership\n    ~Child() { std::cout << \"~Child\\n\"; }\n\n    void report_parent() const {\n        // One lock(): the returned owner keeps the parent alive for the\n        // whole body, so there is no window between test and use.\n        if (auto owner = parent.lock()) {\n            std::cout << \"parent level \" << owner->level << '\\n';\n        } else {\n            std::cout << \"parent gone\\n\";\n        }\n    }\n};\n\nvoid use_tree() {\n    auto parent = std::make_shared<Parent>();\n    auto child = std::make_shared<Child>();\n    parent->child = child;\n    child->parent = parent;\n    child->report_parent();\n}",
+      "notes": "Choosing which direction becomes weak is a design decision, not a mechanical one: it should be the direction that does not own. A cache is the other common shape — store `weak_ptr` entries so a lookup can reuse a live object without the cache pinning every object it has ever seen."
+    },
+    {
+      "id": "c08-w05",
+      "section": "Aliasing and `enable_shared_from_this`",
+      "minutes": 9,
+      "prompt": "Write a `Session` that registers a `shared_ptr` to itself into a `Registry`. Show the correct mechanism, and add a commented-out wrong version explaining what goes wrong and when the correct call is not yet legal.",
+      "checklist": [
+        "`Session` inherits from `std::enable_shared_from_this<Session>` naming its own type",
+        "Registration uses `shared_from_this()`",
+        "A comment states that `std::shared_ptr<Session>(this)` creates a second control block and double-deletes",
+        "A comment states that calling `shared_from_this()` before shared ownership exists throws `std::bad_weak_ptr`",
+        "The object is created with `std::make_shared` before registration"
+      ],
+      "solution": "#include <memory>\n\nstruct Registry;\n\nstruct Session : std::enable_shared_from_this<Session> {\n    void register_self(Registry& registry);\n\n    // WRONG: a fresh shared_ptr from `this` builds a second control block\n    // that knows nothing about the first, so the object is deleted twice.\n    //\n    //   std::shared_ptr<Session> wrong() {\n    //       return std::shared_ptr<Session>(this);\n    //   }\n};\n\nstruct Registry {\n    std::shared_ptr<Session> current;\n};\n\nvoid Session::register_self(Registry& registry) {\n    // Finds the existing control block. Calling this from a constructor,\n    // or on a stack Session, throws std::bad_weak_ptr: no shared_ptr has\n    // established ownership yet.\n    registry.current = shared_from_this();\n}\n\nvoid connect(Registry& registry) {\n    auto session = std::make_shared<Session>();\n    session->register_self(registry);\n}",
+      "notes": "`enable_shared_from_this<Session>` naming `Session` itself is the curiously recurring pattern; Chapter 9 explains why a class template can take its own user as an argument. The base holds an internal weak reference that a `shared_ptr` constructor installs — which is exactly why the object must already be owned before `shared_from_this()` can work."
+    },
+    {
+      "id": "c08-w06",
+      "section": "Intrusive Reference Counting",
+      "minutes": 12,
+      "prompt": "Write a minimal intrusive reference-counted base with `add_ref()` and `release()`, a concrete class deriving from it, and a one-word handle providing copy, move, destruction, and `operator*` / `operator->`. Assert that the handle is one pointer wide.",
+      "checklist": [
+        "The count lives inside the object and starts at zero",
+        "`release()` deletes the object when the count reaches zero",
+        "The base's destructor is virtual (or protected and virtual) so deletion through it is well-defined",
+        "Copy constructor adds a reference; move constructor transfers without touching the count",
+        "Destructor releases only a non-null pointer",
+        "`static_assert(sizeof(Handle) == sizeof(void*))`"
+      ],
+      "solution": "#include <cassert>\n#include <cstddef>\n#include <utility>\n\nclass RefCounted {\npublic:\n    void add_ref() noexcept { ++references_; }\n\n    void release() noexcept {\n        assert(references_ > 0);\n        if (--references_ == 0) {\n            delete this;\n        }\n    }\n\nprotected:\n    virtual ~RefCounted() = default;\n\nprivate:\n    std::size_t references_ = 0;\n};\n\nclass OrderBook final : public RefCounted {\npublic:\n    explicit OrderBook(int levels) : levels_(levels) {}\n    int levels() const noexcept { return levels_; }\n\nprivate:\n    int levels_;\n};\n\nclass IntrusiveBookPtr {\npublic:\n    explicit IntrusiveBookPtr(OrderBook* pointer = nullptr)\n        : pointer_(pointer) {\n        if (pointer_ != nullptr) {\n            pointer_->add_ref();\n        }\n    }\n\n    IntrusiveBookPtr(const IntrusiveBookPtr& other)\n        : IntrusiveBookPtr(other.pointer_) {}\n\n    IntrusiveBookPtr(IntrusiveBookPtr&& other) noexcept\n        : pointer_(std::exchange(other.pointer_, nullptr)) {}\n\n    ~IntrusiveBookPtr() {\n        if (pointer_ != nullptr) {\n            pointer_->release();\n        }\n    }\n\n    OrderBook& operator*() const noexcept { return *pointer_; }\n    OrderBook* operator->() const noexcept { return pointer_; }\n\nprivate:\n    OrderBook* pointer_;\n};\n\nstatic_assert(sizeof(IntrusiveBookPtr) == sizeof(void*));",
+      "notes": "The move constructor deliberately does no counting: it steals the pointer and nulls the source, so the total number of references is unchanged. The plain `++`/`--` makes this single-thread-only; a production type would choose thread-safe updates where ownership crosses threads — a choice `shared_ptr` does not offer. Never mix these handles with a manual `delete`: the last `release()` is the sole destruction authority."
+    },
+    {
+      "id": "c08-w07",
+      "section": "Smart Pointers on the Hot Path",
+      "minutes": 8,
+      "prompt": "Given a tick handler that currently takes `std::shared_ptr<OrderBook>` by value and forwards it to three helpers that only read the book, rewrite it. Keep ownership at the boundary and remove all per-tick reference-count traffic, adding comments naming the cost each change removes.",
+      "checklist": [
+        "Helper functions take `const OrderBook&`, not any smart-pointer form",
+        "The handler takes at most one `const std::shared_ptr<OrderBook>&`, or better, a `const OrderBook&`",
+        "No by-value `shared_ptr` parameter remains",
+        "A comment names the atomic read-modify-write that the by-value copy performed",
+        "A comment notes that the shared handle is established once, outside the tick path"
+      ],
+      "solution": "#include <memory>\n\nstruct OrderBook {\n    int best_bid() const noexcept { return 101; }\n    int best_ask() const noexcept { return 102; }\n};\n\n// Each helper only reads, so each borrows. No count, no allocation.\nint bid(const OrderBook& book) noexcept { return book.best_bid(); }\nint ask(const OrderBook& book) noexcept { return book.best_ask(); }\nint mid(const OrderBook& book) noexcept { return (bid(book) + ask(book)) / 2; }\n\n// A by-value shared_ptr parameter cost a thread-safe increment at the\n// call and a decrement plus a last-owner branch at return, on a cache\n// line other cores may also be updating. The handler borrows instead.\nint on_tick(const OrderBook& book) noexcept {\n    return mid(book);\n}\n\nstruct Session {\n    // Ownership is established once, at session setup, not per tick.\n    std::shared_ptr<OrderBook> book = std::make_shared<OrderBook>();\n\n    int tick() noexcept { return on_tick(*book); }\n};",
+      "notes": "`const std::shared_ptr<OrderBook>&` would also remove the copy, but it still advertises shared ownership in the signature — reserve it for functions that genuinely examine, store, or reseat the handle. The general shape is: construct and connect owners during startup, then pass `T&` or `T*` through the event loop."
+    },
+    {
+      "id": "c08-w08",
+      "section": "The `make_shared` Weak-Retention Gotcha",
+      "minutes": 7,
+      "prompt": "Write a short program with two factories for a large `Snapshot` type — one using `make_shared`, one using `std::shared_ptr<Snapshot>(new Snapshot)` — and a commented walkthrough of what is destroyed and what is deallocated at each step when a `weak_ptr` outlives the last owner.",
+      "checklist": [
+        "Both construction spellings appear",
+        "A comment distinguishes destruction (object lifetime ends) from deallocation (storage returned)",
+        "States that with `make_shared` the combined allocation is retained until the last `weak_ptr` dies",
+        "States that with the two-allocation form the object's storage is freed at strong-count zero",
+        "Names the condition under which the two-allocation form is the better choice"
+      ],
+      "solution": "#include <array>\n#include <memory>\n\nstruct Snapshot {\n    std::array<char, 1'000'000> bytes{};\n};\n\nstd::shared_ptr<Snapshot> combined() {\n    return std::make_shared<Snapshot>();   // one allocation\n}\n\nstd::shared_ptr<Snapshot> separate() {\n    return std::shared_ptr<Snapshot>(new Snapshot);  // two allocations\n}\n\nvoid walkthrough() {\n    std::weak_ptr<Snapshot> observer;\n\n    {\n        auto snapshot = combined();\n        observer = snapshot;\n    }\n    // Strong count hit zero: ~Snapshot ran, so the object is DESTROYED.\n    // The control block must survive for `observer`, and with make_shared\n    // it shares one allocation with the object -- so the whole megabyte is\n    // still NOT DEALLOCATED. A profiler shows the block as live.\n\n    observer.reset();\n    // Weak count hit zero: the combined allocation is finally released.\n\n    {\n        auto snapshot = separate();\n        observer = snapshot;\n    }\n    // Strong count hit zero: destroyed AND the megabyte is deallocated,\n    // because the object had its own allocation. Only the small control\n    // block is retained for `observer`.\n\n    // Rule: prefer make_shared (one allocation, better locality) unless\n    // objects are large AND weak_ptrs routinely outlive every owner.\n}",
+      "notes": "This is retention, not an object-lifetime leak — `lock()` correctly returns an empty handle throughout, and no destructor was skipped. The symptom is memory that a profiler reports as allocated long after the objects it held are dead, which is why a weak-keyed cache over large objects is the canonical case for the two-allocation spelling."
+    }
+  ]
+}

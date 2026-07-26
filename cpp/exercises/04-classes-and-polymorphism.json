@@ -1,0 +1,734 @@
+{
+  "chapter": 4,
+  "mcq": [
+    {
+      "id": "c04-m01",
+      "section": "Classes for Java and Python refugees",
+      "difficulty": "easy",
+      "prompt": "In `Order order{\"EURUSD\", 200};`, what does the variable `order` hold?",
+      "choices": [
+        "The Order object itself",
+        "A pointer to an Order, implicitly dereferenced",
+        "A handle managed by the runtime",
+        "A reference to an Order allocated elsewhere"
+      ],
+      "answer": 0,
+      "explain": "A C++ variable of class type normally contains the object. This is the first thing to unlearn coming from Java or Python: the declaration chooses between value, pointer and reference, rather than every class variable being reference-like."
+    },
+    {
+      "id": "c04-m02",
+      "section": "Classes for Java and Python refugees",
+      "difficulty": "easy",
+      "prompt": "What is the only difference between `class` and `struct` in C++?",
+      "choices": [
+        "struct cannot participate in inheritance",
+        "Default member access (and default inheritance access)",
+        "struct objects are always trivially copyable",
+        "struct cannot have member functions"
+      ],
+      "answer": 1,
+      "explain": "class members are private by default, struct members public by default; otherwise they have identical capabilities. The convention — struct for passive data whose fields are independently valid, class when an invariant must hold — is a convention, not a language rule."
+    },
+    {
+      "id": "c04-m03",
+      "section": "Classes for Java and Python refugees",
+      "difficulty": "medium",
+      "prompt": "What does the trailing const in `std::int64_t quantity() const;` qualify?",
+      "choices": [
+        "Every parameter of the function",
+        "The return value, making it non-assignable",
+        "The object observed through this",
+        "The function, preventing it from being overridden"
+      ],
+      "answer": 2,
+      "explain": "It makes this a pointer to const, so the function may be called through a const Order& and cannot modify ordinary data members. A non-const member function requires a non-const object — which is why `snapshot.add_quantity(10)` on a const reference fails to compile."
+    },
+    {
+      "id": "c04-m04",
+      "section": "Invariants and access control",
+      "difficulty": "medium",
+      "prompt": "What is an invariant, in the sense this chapter uses the word?",
+      "choices": [
+        "A compile-time constant belonging to the class",
+        "A field that no member function writes to",
+        "A member declared const",
+        "A condition that holds after construction and after every public operation"
+      ],
+      "answer": 3,
+      "explain": "The point of encapsulation is to put every state-changing path behind one boundary so that illegal states are unrepresentable outside it. If every private field has an unrestricted setter, the type is a public struct wearing access labels."
+    },
+    {
+      "id": "c04-m05",
+      "section": "Invariants and access control",
+      "difficulty": "medium",
+      "prompt": "A `friend` declaration inside a class does what?",
+      "choices": [
+        "Grants the named non-member function access to private state",
+        "Makes the class's private members public to the enclosing namespace",
+        "Inherits the friend's interface into the class",
+        "Makes the named function a member of the class"
+      ],
+      "answer": 0,
+      "explain": "friend grants access; it does not confer membership. A hidden friend — defined inside the class — is invisible to ordinary namespace lookup and found only by ADL on its arguments, which keeps it out of unrelated overload sets."
+    },
+    {
+      "id": "c04-m06",
+      "section": "Constructors, destructors, and member initializer lists",
+      "difficulty": "medium",
+      "prompt": "In what order are data members initialised?",
+      "choices": [
+        "In the order they appear in the member initializer list",
+        "In declaration order within the class",
+        "Alphabetically, so the order is deterministic",
+        "Unspecified — the compiler may choose"
+      ],
+      "answer": 1,
+      "explain": "Declaration order is construction order, and the written order of the initializer list is ignored for this purpose (-Wreorder warns when they disagree). Destruction is the exact reverse. Treat -Wreorder as a correctness warning: a member initialised from a not-yet-initialised sibling reads indeterminate storage."
+    },
+    {
+      "id": "c04-m07",
+      "section": "Constructors, destructors, and member initializer lists",
+      "difficulty": "medium",
+      "prompt": "Why prefer a member initializer list over assignment in the constructor body?",
+      "choices": [
+        "It allows members to be initialised out of declaration order",
+        "Purely stylistic — the generated code is identical",
+        "It initialises directly instead of default-constructing then assigning, and it is the only way to set const and reference members",
+        "It runs before the base class is constructed"
+      ],
+      "answer": 2,
+      "explain": "Assignment in the body first default-constructs the member (an empty std::string, say) and then overwrites it. const and reference members cannot be assigned at all, so they must be bound in the initializer list."
+    },
+    {
+      "id": "c04-m08",
+      "section": "Constructors, destructors, and member initializer lists",
+      "difficulty": "easy",
+      "prompt": "What does declaring any constructor do to the implicit default constructor?",
+      "choices": [
+        "It suppresses the implicit copy constructor as well",
+        "It makes the default constructor deleted but still declared",
+        "Nothing — the default constructor is always generated",
+        "It suppresses the implicit default constructor"
+      ],
+      "answer": 3,
+      "explain": "A user-declared ordinary constructor removes only the implicit default constructor. Copy and move operations survive. If the type also needs `T{}`, declare it deliberately — and make it choose a valid state."
+    },
+    {
+      "id": "c04-m09",
+      "section": "Special member functions and the rules",
+      "difficulty": "hard",
+      "prompt": "A class declares `~T() = default;` and nothing else. Which operations does the compiler still implicitly declare?",
+      "choices": [
+        "Default ctor and both copies (the copies deprecated); no implicit moves",
+        "Default ctor only",
+        "Both moves but not the copies",
+        "All five others: default ctor, both copies, both moves"
+      ],
+      "answer": 0,
+      "explain": "= default still counts as a user declaration. A declared destructor leaves the copy operations implicitly generated but deprecated, and suppresses both implicit moves. This is the trap behind 'adding a logging destructor made my container slow': relocation falls back to copying."
+    },
+    {
+      "id": "c04-m10",
+      "section": "Special member functions and the rules",
+      "difficulty": "hard",
+      "prompt": "A class declares a move constructor and nothing else. What is the status of its copy constructor?",
+      "choices": [
+        "Deprecated but generated",
+        "Defined as deleted",
+        "Not declared at all",
+        "Implicitly generated"
+      ],
+      "answer": 1,
+      "explain": "Declaring a move operation causes the implicit copies to be defined as deleted. Deleted is not the same as absent: overload resolution still finds the function, and selecting it is a compile error rather than a silent fallback to something else."
+    },
+    {
+      "id": "c04-m11",
+      "section": "Special member functions and the rules",
+      "difficulty": "medium",
+      "prompt": "What is the rule of zero?",
+      "choices": [
+        "Give every class a zero-argument constructor",
+        "Declare all five special members as = default",
+        "Declare none of the copy, move or destruction operations, letting members manage their own behaviour",
+        "Use zero-initialisation for every member"
+      ],
+      "answer": 2,
+      "explain": "If std::string and Price already know how to copy, move and destroy themselves, the compiler-generated operations do the right thing member-wise. Rules of three and five apply only once the class itself owns a resource — and then you declare the whole set, so a later reader does not have to reconstruct the suppression matrix."
+    },
+    {
+      "id": "c04-m12",
+      "section": "Special member functions and the rules",
+      "difficulty": "medium",
+      "prompt": "Why declare `void set_quantity(double) = delete;` alongside `void set_quantity(std::int64_t);`?",
+      "choices": [
+        "To force the double to be truncated at the call site",
+        "To make the integer overload a better match",
+        "To document that doubles are not supported, with no effect on compilation",
+        "Because a deleted overload still participates in overload resolution, so a double argument selects it and fails instead of silently converting"
+      ],
+      "answer": 3,
+      "explain": "Deleted functions are declared, so they compete normally. set_quantity(250.5) picks the exact deleted match and errors, rather than quietly converting to 250. This is a general technique for closing off unwanted conversions."
+    },
+    {
+      "id": "c04-m13",
+      "section": "Converting and explicit constructors",
+      "difficulty": "medium",
+      "prompt": "`void submit(Order);` where Order has a non-explicit `Order(std::int64_t)`. What does `submit(42)` do?",
+      "choices": [
+        "Constructs an Order implicitly from 42 and calls submit(Order)",
+        "Calls submit with an uninitialised Order",
+        "Is ambiguous",
+        "Fails to compile — no submit(int) overload exists"
+      ],
+      "answer": 0,
+      "explain": "A constructor callable with one argument defines a user-defined conversion, which overload resolution will apply. The source reads as though it submits an integer. Mark single-argument constructors explicit by default; omit it only for a natural, lossless, unsurprising conversion."
+    },
+    {
+      "id": "c04-m14",
+      "section": "Converting and explicit constructors",
+      "difficulty": "medium",
+      "prompt": "With `explicit SafeOrder(std::int64_t)`, which line still compiles?",
+      "choices": [
+        "SafeOrder order = 42;",
+        "SafeOrder order{42};",
+        "None of them",
+        "submit(42);"
+      ],
+      "answer": 1,
+      "explain": "explicit removes the constructor from copy-initialisation and from implicit conversion during overload resolution, but direct construction with braces or parentheses is exactly how you spell the conversion when you mean it."
+    },
+    {
+      "id": "c04-m15",
+      "section": "Converting and explicit constructors",
+      "difficulty": "medium",
+      "prompt": "Why is `explicit operator bool() const` usually the right spelling for a conversion operator?",
+      "choices": [
+        "Because bool cannot be returned from a non-explicit operator",
+        "Because implicit conversion operators are ill-formed in C++23",
+        "Because it still works in a condition, while blocking broad implicit conversion to integer types",
+        "Because explicit conversion operators are cheaper at runtime"
+      ],
+      "answer": 2,
+      "explain": "Conditions are a contextual-conversion context, so `if (status)` works even for an explicit operator bool. Without explicit, the type would also convert to int and participate in arithmetic and comparisons that make no sense for it."
+    },
+    {
+      "id": "c04-m16",
+      "section": "Delegating and inherited constructors, statics, and ref-qualifiers",
+      "difficulty": "medium",
+      "prompt": "What is true of a delegating constructor?",
+      "choices": [
+        "It must delegate to a base-class constructor",
+        "It runs before the target constructor",
+        "It may also have its own member initializer list",
+        "Only the target constructor initialises members; the delegating body may add work afterwards"
+      ],
+      "answer": 3,
+      "explain": "The delegation replaces the member initializer list entirely — you cannot delegate and also initialise members directly. The delegating constructor's body runs after the target completes, which is where any extra setup goes."
+    },
+    {
+      "id": "c04-m17",
+      "section": "Delegating and inherited constructors, statics, and ref-qualifiers",
+      "difficulty": "medium",
+      "prompt": "What do the ref-qualifiers in `Order build() &&;` and `Order build() & = delete;` accomplish?",
+      "choices": [
+        "They restrict the value category of the object the function may be called on",
+        "They control whether the return value is moved or copied",
+        "They mark the function as taking an rvalue parameter",
+        "They are required for any function returning by value"
+      ],
+      "answer": 0,
+      "explain": "Ref-qualifiers apply Chapter 3's value categories to the implicit object. Only an rvalue OrderBuilder can be built from, so `OrderBuilder{250}.build()` compiles and `builder.build()` on a named object does not — communicating that building consumes the builder's logical state."
+    },
+    {
+      "id": "c04-m18",
+      "section": "Delegating and inherited constructors, statics, and ref-qualifiers",
+      "difficulty": "easy",
+      "prompt": "What can a static member function access directly?",
+      "choices": [
+        "Only members declared inline static",
+        "Only static members — it has no this pointer",
+        "All members, through an implicit this",
+        "Only public members"
+      ],
+      "answer": 1,
+      "explain": "A static member function belongs to the class, not to an object, so there is no this. `inline static` (C++17) is the companion feature that lets a static data member be defined inside the class rather than needing a separate out-of-line definition."
+    },
+    {
+      "id": "c04-m19",
+      "section": "Bit-fields",
+      "difficulty": "medium",
+      "prompt": "Which operation is ill-formed on a bit-field member?",
+      "choices": [
+        "Assigning to it",
+        "Reading it",
+        "Taking its address",
+        "Comparing it"
+      ],
+      "answer": 2,
+      "explain": "A bit-field has no addressable storage of its own, so neither `&flags.urgent` nor a reference to it is allowed. Adjacent nonzero-width bit-fields also normally share one memory location, which matters for data races (Chapter 25)."
+    },
+    {
+      "id": "c04-m20",
+      "section": "Bit-fields",
+      "difficulty": "hard",
+      "prompt": "Why should a wire format use explicit shifts and masks rather than a bit-field struct?",
+      "choices": [
+        "Bit-fields cannot use unsigned base types",
+        "static_assert cannot be applied to bit-field structs",
+        "Bit-fields are slower to read",
+        "Bit-field allocation order and straddling rules are implementation-defined, so bit positions are not portable"
+      ],
+      "answer": 3,
+      "explain": "Allocation may proceed from low to high bits or the reverse, and whether a field may straddle an allocation unit is up to the implementation. static_assert(sizeof(MsgFlags) == 2) checks the size, not the bit positions. Bit-fields are for internal packing under a fixed ABI."
+    },
+    {
+      "id": "c04-m21",
+      "section": "Inheritance and composition",
+      "difficulty": "easy",
+      "prompt": "In what order do construction and destruction proceed for a derived object?",
+      "choices": [
+        "Base constructor then derived; derived destructor then base",
+        "Base constructor then derived; base destructor then derived",
+        "Unspecified",
+        "Derived constructor then base; base destructor then derived"
+      ],
+      "answer": 0,
+      "explain": "Construction starts with the base subobject, then derived members, then the derived constructor body. Destruction mirrors it exactly — derived body first, then derived members, then the base subobject."
+    },
+    {
+      "id": "c04-m22",
+      "section": "Inheritance and composition",
+      "difficulty": "medium",
+      "prompt": "What does private inheritance express?",
+      "choices": [
+        "is-a, with the base interface hidden from callers",
+        "implemented-in-terms-of: no base conversion is available to outside code",
+        "The base's private members become accessible to the derived class",
+        "The derived class cannot be inherited from further"
+      ],
+      "answer": 1,
+      "explain": "Under private inheritance the base's public names are inaccessible outside and no implicit derived-to-base conversion is available to callers. It is rare — a member of the policy type usually communicates the same relationship more directly."
+    },
+    {
+      "id": "c04-m23",
+      "section": "Object slicing",
+      "difficulty": "medium",
+      "prompt": "`std::vector<Order> orders; orders.push_back(limitOrder);` — what is stored?",
+      "choices": [
+        "A reference to the original LimitOrder",
+        "A copy of the LimitOrder, with its dynamic type preserved",
+        "An Order constructed from the Order subobject; the derived members are sliced away",
+        "The code fails to compile"
+      ],
+      "answer": 2,
+      "explain": "The vector's slots are exactly sizeof(Order); there is nowhere to put limit_, and the new object's runtime type is Order — so even a virtual kind() returns \"Order\". This is where Java or Python reference intuition fails: the container stores values."
+    },
+    {
+      "id": "c04-m24",
+      "section": "Object slicing",
+      "difficulty": "medium",
+      "prompt": "Which of these does NOT prevent slicing?",
+      "choices": [
+        "Storing pointers to polymorphic objects instead of values",
+        "Making the polymorphic base abstract",
+        "Keeping a homogeneous value container and not using inheritance for its elements",
+        "Making the base destructor virtual"
+      ],
+      "answer": 3,
+      "explain": "A virtual destructor fixes deletion through a base pointer, an entirely different bug. Slicing is a copy-construction problem: making the base abstract is what makes constructing a base value ill-formed and thus catches it at compile time."
+    },
+    {
+      "id": "c04-m25",
+      "section": "Virtual functions, vtables, and abstract classes",
+      "difficulty": "medium",
+      "prompt": "Which is the larger cost of virtual dispatch in typical hot code?",
+      "choices": [
+        "The lost inlining, which blocks constant propagation and register scheduling across the boundary",
+        "The RTTI metadata added to the binary",
+        "The extra pointer of storage per object",
+        "The two dependent loads and the indirect call instruction"
+      ],
+      "answer": 0,
+      "explain": "The dispatch instructions themselves are cheap. An unresolved indirect call prevents the optimiser from seeing into the callee at all — no constant exposure, no branch removal, no keeping intermediates in registers. That is usually what shows up in a profile."
+    },
+    {
+      "id": "c04-m26",
+      "section": "Virtual functions, vtables, and abstract classes",
+      "difficulty": "hard",
+      "prompt": "A base constructor calls a virtual function that the derived class overrides. Which body runs?",
+      "choices": [
+        "The derived override, as with any virtual call",
+        "The base version — the derived part is not alive yet",
+        "It is undefined behaviour",
+        "The program fails to compile"
+      ],
+      "answer": 1,
+      "explain": "While the base subobject is being constructed, the active runtime type is the base; dispatch does not reach a more-derived part that is not yet alive. The mirror restriction applies during base destruction. Calling a virtual hook from a constructor expecting derived behaviour is the bug."
+    },
+    {
+      "id": "c04-m27",
+      "section": "Virtual destructors and deleting through base pointers",
+      "difficulty": "medium",
+      "prompt": "Deleting a derived object through a base pointer with a non-virtual destructor is:",
+      "choices": [
+        "Implementation-defined",
+        "Well-defined — only the base destructor runs",
+        "Undefined behaviour",
+        "A compile error"
+      ],
+      "answer": 2,
+      "explain": "'Only the base destructor runs' is a common symptom, not the rule. The behaviour is undefined: the implementation may also use the wrong deallocation size, or optimise on the assumption that the execution never happens. Sanitizers catch some instances, not all."
+    },
+    {
+      "id": "c04-m28",
+      "section": "Virtual destructors and deleting through base pointers",
+      "difficulty": "hard",
+      "prompt": "What does a protected non-virtual destructor on a polymorphic base express?",
+      "choices": [
+        "That derived classes must declare their own virtual destructor",
+        "That the class is abstract",
+        "That the base may only be destroyed by friends",
+        "A non-owning callback interface: calls are allowed, deletion through the base is a compile error"
+      ],
+      "answer": 3,
+      "explain": "It is the other half of the rule: a polymorphic base is either publicly destructible through a virtual destructor, or not publicly destructible through the base at all. The protected form permits `listener->on_message()` while making `delete listener` fail to compile."
+    },
+    {
+      "id": "c04-m29",
+      "section": "`override`, `final`, and covariant returns",
+      "difficulty": "medium",
+      "prompt": "A derived class declares `void handle(long) const` where the base has `virtual void handle(int) const`. Without `override`, what happens?",
+      "choices": [
+        "It silently declares a different function; calls through a base reference reach the base version",
+        "The program is ill-formed",
+        "It overrides, but only for long arguments",
+        "It overrides the base function — long and int are compatible"
+      ],
+      "answer": 0,
+      "explain": "An override must match the signature exactly, including parameter types and member qualifiers. A near-miss quietly becomes a new function that hides nothing and overrides nothing. Writing `override` turns that silent drift into a compile error — and do not also repeat `virtual`."
+    },
+    {
+      "id": "c04-m30",
+      "section": "`override`, `final`, and covariant returns",
+      "difficulty": "medium",
+      "prompt": "A derived class declares `void parse(const std::string&)` while the base has `parse(int)` and `parse(double)`. What does `derived.parse(7)` do?",
+      "choices": [
+        "Calls Parser::parse(int)",
+        "Fails: the derived declaration hides all base overloads of that name",
+        "Calls the derived parse with 7 converted to a string",
+        "Is ambiguous between the three candidates"
+      ],
+      "answer": 1,
+      "explain": "Name lookup stops at the first scope containing the name, so the derived declaration hides the entire base overload set — even signatures it does not override. `using Parser::parse;` in the derived class re-exposes them."
+    },
+    {
+      "id": "c04-m31",
+      "section": "Multiple inheritance, virtual inheritance, and RTTI",
+      "difficulty": "medium",
+      "prompt": "In a non-virtual diamond, why is `order.id` ambiguous?",
+      "choices": [
+        "Because virtual inheritance is required for any multiple inheritance",
+        "Because the two intermediate bases declare conflicting members",
+        "Because the derived object contains two separate Identity subobjects",
+        "Because id is private in one path"
+      ],
+      "answer": 2,
+      "explain": "Each non-virtual base contributes its own subobject, so RoutedOrder holds two Identity::id fields and the unqualified name cannot pick one — you must write order.VenueIdentity::id. Virtual inheritance requests a single shared top-base subobject instead, at the cost of runtime-adjusted offsets."
+    },
+    {
+      "id": "c04-m32",
+      "section": "Multiple inheritance, virtual inheritance, and RTTI",
+      "difficulty": "hard",
+      "prompt": "What does `typeid(a) == typeid(b)` compare?",
+      "choices": [
+        "Whether the two objects have the same size and layout",
+        "Whether both are polymorphic",
+        "Whether a's type derives from b's type",
+        "Exact runtime types"
+      ],
+      "answer": 3,
+      "explain": "typeid equality is exact-type equality; it never answers the derives-from question — that is dynamic_cast's job. And dynamic_cast is not one tag comparison: it may query a runtime type graph and adjust a pointer across a multiple-inheritance hierarchy."
+    },
+    {
+      "id": "c04-m33",
+      "section": "CRTP and type erasure",
+      "difficulty": "hard",
+      "prompt": "What can CRTP NOT do that a virtual base can?",
+      "choices": [
+        "Hold several derived types in one heterogeneous runtime container",
+        "Access members of the derived class",
+        "Avoid a per-object vptr",
+        "Inline the dispatched call"
+      ],
+      "answer": 0,
+      "explain": "FeedBase<SimFeed> and FeedBase<LiveFeed> are unrelated types — there is no common runtime base to point at. CRTP trades runtime flexibility for compile-time coupling and generates code per specialisation; type erasure is what recovers a heterogeneous container without an intrusive base."
+    },
+    {
+      "id": "c04-m34",
+      "section": "CRTP and type erasure",
+      "difficulty": "medium",
+      "prompt": "Does type erasure remove virtual dispatch?",
+      "choices": [
+        "Yes — that is the point of the technique",
+        "No: this implementation hides a private vtable behind a value interface; the win is decoupling and uniform storage",
+        "Only when the stored type is trivially copyable",
+        "Only in builds compiled with -fno-rtti"
+      ],
+      "answer": 1,
+      "explain": "Poller pays an indirect call plus, in this sketch, a heap allocation per model. What it buys is that the stored types need not inherit from anything. Construct erased wrappers outside per-message paths and keep them long-lived."
+    }
+  ],
+  "reading": [
+    {
+      "id": "c04-r01",
+      "section": "Constructors, destructors, and member initializer lists",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n\nclass Trace {\npublic:\n    explicit Trace(const char* name) : name_{name} {\n        std::cout << \"ctor \" << name_ << '\\n';\n    }\n\n    ~Trace() {\n        std::cout << \"dtor \" << name_ << '\\n';\n    }\n\nprivate:\n    const char* name_;\n};\n\nint main() {\n    Trace first{\"A\"};\n    Trace second{\"B\"};\n}",
+      "kind": "value",
+      "accept": [
+        "ctor A ctor B dtor B dtor A"
+      ],
+      "explain": "Objects in the same scope are destroyed in reverse construction order — the stack discipline that makes RAII work. The same rule governs members, by declaration order rather than construction site."
+    },
+    {
+      "id": "c04-r02",
+      "section": "Object slicing",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n#include <vector>\n\nclass Order {\npublic:\n    explicit Order(long quantity) : quantity_{quantity} {}\n    virtual ~Order() = default;\n\n    virtual const char* kind() const { return \"Order\"; }\n\nprivate:\n    long quantity_;\n};\n\nclass LimitOrder : public Order {\npublic:\n    LimitOrder(long quantity, long limit)\n        : Order{quantity}, limit_{limit} {}\n\n    const char* kind() const override { return \"LimitOrder\"; }\n\nprivate:\n    long limit_;\n};\n\nint main() {\n    LimitOrder limit{100, 42};\n    std::vector<Order> orders;\n    orders.push_back(limit);\n\n    std::cout << limit.kind() << ' ' << orders[0].kind() << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "LimitOrder Order"
+      ],
+      "explain": "push_back constructs an Order from the Order subobject of limit. The vector's slot is exactly sizeof(Order), so limit_ has nowhere to go and the stored object's runtime type really is Order — virtual dispatch is working correctly on a genuinely sliced object."
+    },
+    {
+      "id": "c04-r03",
+      "section": "Virtual functions, vtables, and abstract classes",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n\nclass Base {\npublic:\n    Base() { identify(); }\n    virtual ~Base() = default;\n\n    virtual void identify() const { std::cout << \"Base\\n\"; }\n};\n\nclass Derived : public Base {\npublic:\n    void identify() const override { std::cout << \"Derived\\n\"; }\n};\n\nint main() {\n    Derived object;\n}",
+      "kind": "value",
+      "accept": [
+        "Base"
+      ],
+      "explain": "While the Base subobject is under construction the active runtime type is Base, so the call does not reach Derived::identify. The derived state is not initialised yet, which is exactly why the language refuses to dispatch there."
+    },
+    {
+      "id": "c04-r04",
+      "section": "Converting and explicit constructors",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <iostream>\n\nclass SafeOrder {\npublic:\n    explicit SafeOrder(long quantity) : quantity_{quantity} {}\n\n    long quantity() const { return quantity_; }\n\nprivate:\n    long quantity_;\n};\n\nvoid submit(SafeOrder order) {\n    std::cout << order.quantity() << '\\n';\n}\n\nint main() {\n    submit(42);\n}",
+      "kind": "no-compile",
+      "explain": "explicit removes the constructor from consideration as an implicit conversion during overload resolution, so there is no viable submit. Writing submit(SafeOrder{42}) makes the conversion visible and compiles."
+    },
+    {
+      "id": "c04-r05",
+      "section": "Multiple inheritance, virtual inheritance, and RTTI",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <iostream>\n\nstruct Identity {\n    int id{};\n};\n\nstruct VenueIdentity : Identity {};\nstruct StrategyIdentity : Identity {};\nstruct RoutedOrder : VenueIdentity, StrategyIdentity {};\n\nint main() {\n    RoutedOrder order;\n    order.VenueIdentity::id = 7;\n    order.StrategyIdentity::id = 9;\n    std::cout << order.id << '\\n';\n}",
+      "kind": "no-compile",
+      "explain": "Non-virtual inheritance gives RoutedOrder two independent Identity subobjects, so the unqualified name id is ambiguous. The two qualified assignments above are fine — it is only the unqualified read that cannot choose."
+    },
+    {
+      "id": "c04-r06",
+      "section": "Multiple inheritance, virtual inheritance, and RTTI",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n\nstruct Identity {\n    int id{};\n};\n\nstruct VenueIdentity : virtual Identity {};\nstruct StrategyIdentity : virtual Identity {};\nstruct RoutedOrder : VenueIdentity, StrategyIdentity {};\n\nint main() {\n    RoutedOrder order;\n    order.id = 7;\n    std::cout << order.id << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "7"
+      ],
+      "explain": "virtual inheritance requests a single shared Identity subobject, so there is exactly one id and no ambiguity. The cost is runtime-adjusted offsets in common ABIs and more complicated construction — treat needing it as a prompt to reconsider composition."
+    },
+    {
+      "id": "c04-r07",
+      "section": "`override`, `final`, and covariant returns",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <iostream>\n#include <string>\n\nclass Parser {\npublic:\n    void parse(int) { std::cout << \"int\\n\"; }\n    void parse(double) { std::cout << \"double\\n\"; }\n};\n\nclass NamedParser : public Parser {\npublic:\n    void parse(const std::string& name) { std::cout << name << '\\n'; }\n};\n\nint main() {\n    NamedParser parser;\n    parser.parse(7);\n}",
+      "kind": "no-compile",
+      "explain": "The derived parse hides the whole base overload set, so the only candidate takes a std::string — and an int does not convert to one. Adding `using Parser::parse;` to NamedParser re-exposes the base overloads and makes this print 'int'."
+    },
+    {
+      "id": "c04-r08",
+      "section": "`override`, `final`, and covariant returns",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n\nclass Handler {\npublic:\n    virtual ~Handler() = default;\n\n    virtual void handle(int code) const {\n        std::cout << \"Handler \" << code << '\\n';\n    }\n};\n\nclass BrokenHandler : public Handler {\npublic:\n    void handle(long code) const {\n        std::cout << \"BrokenHandler \" << code << '\\n';\n    }\n};\n\nint main() {\n    BrokenHandler derived;\n    Handler& base = derived;\n    base.handle(7);\n}",
+      "kind": "value",
+      "accept": [
+        "Handler 7"
+      ],
+      "explain": "handle(long) does not override handle(int) — the signature differs, so it is simply a different function. The call through Handler& dispatches to the only override there is, which is Handler's own. Writing `override` on the derived declaration would have made this a compile error."
+    },
+    {
+      "id": "c04-r09",
+      "section": "Virtual destructors and deleting through base pointers",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <iostream>\n\nclass Feed {\npublic:\n    virtual ~Feed() = default;\n    virtual int poll() { return 1; }\n};\n\nclass SimFeed : public Feed {\npublic:\n    int poll() override { return 7; }\n};\n\nint main() {\n    Feed* feed = new SimFeed{};\n    delete feed;\n    std::cout << feed->poll() << '\\n';\n}",
+      "kind": "ub",
+      "explain": "The delete is correct — the destructor is virtual. The defect is the call afterwards: feed is a dangling pointer, and reading its vptr to dispatch is a use-after-free. ASan reports heap-use-after-free; without it, this often appears to 'work'."
+    },
+    {
+      "id": "c04-r10",
+      "section": "CRTP and type erasure",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n\ntemplate <typename Derived>\nclass FeedBase {\npublic:\n    int poll() {\n        return static_cast<Derived&>(*this).poll_impl();\n    }\n};\n\nclass SimFeed : public FeedBase<SimFeed> {\npublic:\n    int poll_impl() { return 7; }\n};\n\nclass LiveFeed : public FeedBase<LiveFeed> {\npublic:\n    int poll_impl() { return 11; }\n};\n\nint main() {\n    SimFeed sim;\n    LiveFeed live;\n    std::cout << sim.poll() << ' ' << live.poll() << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "7 11"
+      ],
+      "explain": "FeedBase<SimFeed>::poll names SimFeed::poll_impl at compile time, so both calls are direct and fully inlinable with no vptr anywhere. Note that FeedBase<SimFeed> and FeedBase<LiveFeed> are unrelated types — there is no common base to store these in one container."
+    }
+  ],
+  "writing": [
+    {
+      "id": "c04-w01",
+      "section": "Invariants and access control",
+      "minutes": 12,
+      "prompt": "Write a Price class holding nonnegative integer ticks. Give it an explicit constructor that enforces the invariant, a ticks() accessor, a hidden-friend operator+ that checks for signed overflow before constructing the result, a defaulted operator==, and a hidden-friend operator<<.",
+      "checklist": [
+        "Constructor is explicit and rejects negative ticks",
+        "operator+ checks rhs > INT64_MAX - lhs before adding",
+        "operator== is declared as `friend bool operator==(Price, Price) = default;`",
+        "operator<< and operator+ are hidden friends (defined inside the class)",
+        "The tick member is private",
+        "Accessor is a const member function"
+      ],
+      "solution": "#include <cstdint>\n#include <exception>\n#include <ostream>\n\nclass Price {\npublic:\n    explicit Price(std::int64_t ticks) : ticks_{ticks} {\n        if (ticks < 0) {\n            std::terminate();\n        }\n    }\n\n    std::int64_t ticks() const {\n        return ticks_;\n    }\n\n    friend Price operator+(Price lhs, Price rhs) {\n        if (rhs.ticks_ > INT64_MAX - lhs.ticks_) {\n            std::terminate();\n        }\n        return Price{lhs.ticks_ + rhs.ticks_};\n    }\n\n    friend bool operator==(Price, Price) = default;\n\n    friend std::ostream& operator<<(std::ostream& output, Price price) {\n        return output << price.ticks_;\n    }\n\nprivate:\n    std::int64_t ticks_;\n};",
+      "notes": "The overflow check is written as `rhs > INT64_MAX - lhs` rather than testing the sum afterwards, because signed overflow is undefined — by the time you could inspect the result, the program has already lost. Terminating is a placeholder policy; Chapter 6 replaces it."
+    },
+    {
+      "id": "c04-w02",
+      "section": "Special member functions and the rules",
+      "minutes": 8,
+      "prompt": "Write a ConnectionHandle that owns an int file descriptor: non-copyable, with an explicit constructor and a destructor. Declare the full special-member set explicitly so a reader does not have to reconstruct the suppression matrix, and comment which rule you are following.",
+      "checklist": [
+        "Copy constructor and copy assignment are = delete",
+        "Move constructor and move assignment are declared (defaulted or deleted), not left implicit",
+        "Destructor is user-declared",
+        "Constructor is explicit",
+        "Comment names the rule of five (or explains why the whole set is declared)"
+      ],
+      "solution": "class ConnectionHandle {\npublic:\n    explicit ConnectionHandle(int descriptor) : descriptor_{descriptor} {}\n\n    // Rule of five: this type owns a resource, so every operation in the\n    // set is declared rather than left to the suppression matrix.\n    ConnectionHandle(const ConnectionHandle&) = delete;\n    ConnectionHandle& operator=(const ConnectionHandle&) = delete;\n    ConnectionHandle(ConnectionHandle&&) = delete;\n    ConnectionHandle& operator=(ConnectionHandle&&) = delete;\n\n    ~ConnectionHandle() {\n        // close(descriptor_);\n    }\n\nprivate:\n    int descriptor_;\n};",
+      "notes": "Declaring the destructor alone would have left the copies implicitly generated (but deprecated) and killed the moves silently. Spelling out all five makes the decision auditable — Chapter 7 supplies real move implementations for a type like this."
+    },
+    {
+      "id": "c04-w03",
+      "section": "Delegating and inherited constructors, statics, and ref-qualifiers",
+      "minutes": 6,
+      "prompt": "Write an Order class with a two-argument constructor that validates its quantity, and a default constructor that delegates to it with a zero price and zero quantity. Do not duplicate the validation.",
+      "checklist": [
+        "Default constructor delegates with `: Order{...}` syntax",
+        "Only the target constructor has a member initializer list for the members",
+        "Validation lives in exactly one constructor",
+        "The delegating constructor has no member initialisers of its own"
+      ],
+      "solution": "#include <cstdint>\n#include <exception>\n\nclass Order {\npublic:\n    Order() : Order{0, 0} {}   // delegates; no member initialisers here\n\n    Order(std::int64_t price_ticks, std::int64_t quantity)\n        : price_ticks_{price_ticks}, quantity_{quantity} {\n        if (quantity < 0 || price_ticks < 0) {\n            std::terminate();\n        }\n    }\n\nprivate:\n    std::int64_t price_ticks_;\n    std::int64_t quantity_;\n};",
+      "notes": "You cannot delegate and also initialise members — the delegation replaces the initializer list entirely. The delegating constructor's body still runs after the target finishes, if there is extra setup to do."
+    },
+    {
+      "id": "c04-w04",
+      "section": "Virtual destructors and deleting through base pointers",
+      "minutes": 8,
+      "prompt": "Write an abstract Feed interface with one pure virtual poll() returning const char*, plus two concrete feeds. Make it safe to own and delete a derived object through a Feed*.",
+      "checklist": [
+        "poll() is pure virtual (= 0)",
+        "Destructor is public and virtual (defaulted is fine)",
+        "Both derived classes write `override` on poll",
+        "Neither derived class repeats `virtual` on the override",
+        "The base cannot be instantiated"
+      ],
+      "solution": "class Feed {\npublic:\n    virtual ~Feed() = default;\n    virtual const char* poll() = 0;\n};\n\nclass SimFeed : public Feed {\npublic:\n    const char* poll() override { return \"sim\"; }\n};\n\nclass LiveFeed : public Feed {\npublic:\n    const char* poll() override { return \"live\"; }\n};",
+      "notes": "The rule to recall: a polymorphic base is either publicly destructible through a virtual destructor, or not publicly destructible through the base at all. The second option is a protected non-virtual destructor, for non-owning callback interfaces."
+    },
+    {
+      "id": "c04-w05",
+      "section": "Bit-fields",
+      "minutes": 10,
+      "prompt": "Write a MsgFlags bit-field struct packing a 4-bit venue, 1-bit side, 1-bit urgent and 10 reserved bits into a std::uint16_t, with a static_assert on its size. Then write the portable equivalent: a pack_flags function using explicit shifts and masks.",
+      "checklist": [
+        "All bit-fields use an explicitly unsigned base type",
+        "Widths sum to 16 and static_assert(sizeof(MsgFlags) == 2)",
+        "pack_flags masks venue to 4 bits before OR-ing",
+        "Shift amounts match the documented bit positions",
+        "The result is static_cast back to std::uint16_t",
+        "A comment notes that the bit-field version is not portable across ABIs"
+      ],
+      "solution": "#include <cstdint>\n\n// Internal packing only: allocation order and straddling are\n// implementation-defined, so these bit positions are not portable.\nstruct MsgFlags {\n    std::uint16_t venue : 4;\n    std::uint16_t side : 1;\n    std::uint16_t urgent : 1;\n    std::uint16_t reserved : 10;\n};\n\nstatic_assert(sizeof(MsgFlags) == 2);\n\n// Wire-facing: explicit and portable.\nstd::uint16_t pack_flags(std::uint16_t venue, bool sell, bool urgent) {\n    return static_cast<std::uint16_t>(\n        (venue & 0xFu) |\n        (static_cast<std::uint16_t>(sell) << 4) |\n        (static_cast<std::uint16_t>(urgent) << 5));\n}",
+      "notes": "The static_assert checks the size, not the bit positions — it will happily pass on a target that lays the fields out in the opposite direction. Also remember that writing one bit-field is a load-mask-merge-store on the whole containing unit."
+    },
+    {
+      "id": "c04-w06",
+      "section": "Delegating and inherited constructors, statics, and ref-qualifiers",
+      "minutes": 8,
+      "prompt": "Write an OrderBuilder whose build() may only be called on a temporary, so that `OrderBuilder{250}.build()` compiles but calling build() on a named builder does not.",
+      "checklist": [
+        "build() is qualified with && ",
+        "An & -qualified overload is declared and = delete",
+        "Both overloads have the same name and parameter list",
+        "The constructor is explicit",
+        "A comment explains what the restriction communicates"
+      ],
+      "solution": "#include <cstdint>\n\nstruct Order {\n    std::int64_t quantity;\n};\n\nclass OrderBuilder {\npublic:\n    explicit OrderBuilder(std::int64_t quantity) : quantity_{quantity} {}\n\n    // Building consumes the builder's logical state, so only a temporary\n    // (an rvalue) may be built from.\n    Order build() && {\n        return Order{quantity_};\n    }\n\n    Order build() & = delete;\n\nprivate:\n    std::int64_t quantity_;\n};",
+      "notes": "The same pattern gives a getter two shapes: `const std::string& name() const &` returning an alias for a stable object, and `std::string name() &&` returning a value so a temporary cannot leak a reference to a member about to disappear."
+    },
+    {
+      "id": "c04-w07",
+      "section": "Delegating and inherited constructors, statics, and ref-qualifiers",
+      "minutes": 7,
+      "prompt": "Write a LiveOrder class that counts how many instances are currently alive, exposing the count through a static member function. Make it non-copyable so the count cannot drift.",
+      "checklist": [
+        "Counter is an inline static data member initialised in-class",
+        "Constructor increments and destructor decrements",
+        "Accessor is a static member function",
+        "Copy constructor and copy assignment are = delete",
+        "Counter is private"
+      ],
+      "solution": "#include <cstdint>\n\nclass LiveOrder {\npublic:\n    LiveOrder() { ++live_orders_; }\n    ~LiveOrder() { --live_orders_; }\n\n    LiveOrder(const LiveOrder&) = delete;\n    LiveOrder& operator=(const LiveOrder&) = delete;\n\n    static std::int64_t live_orders() {\n        return live_orders_;\n    }\n\nprivate:\n    inline static std::int64_t live_orders_ = 0;  // C++17\n};",
+      "notes": "Deleting the copies is what keeps the count honest: an implicitly generated copy constructor would not increment. A static member function has no this and can reach only static members — which is exactly what is wanted here."
+    },
+    {
+      "id": "c04-w08",
+      "section": "`override`, `final`, and covariant returns",
+      "minutes": 5,
+      "prompt": "A Parser base declares parse(int) and parse(double). A NamedParser derives from it and adds parse(const std::string&), but `parser.parse(7)` now fails to compile. Fix it, and say in a comment what rule caused the breakage.",
+      "checklist": [
+        "Adds `using Parser::parse;` in the derived class",
+        "The using-declaration is in the public section",
+        "Comment names name hiding: a derived declaration hides the whole base overload set",
+        "The derived overload is still declared"
+      ],
+      "solution": "#include <iostream>\n#include <string>\n\nclass Parser {\npublic:\n    void parse(int) {}\n    void parse(double) {}\n};\n\nclass NamedParser : public Parser {\npublic:\n    // Any declaration of `parse` here hides *all* base overloads, even the\n    // ones with unrelated signatures. Re-expose the base set explicitly.\n    using Parser::parse;\n\n    void parse(const std::string& name) {\n        std::cout << name << '\\n';\n    }\n};",
+      "notes": "This is the same unqualified-lookup rule from Chapter 3 — lookup stops at the first scope containing the name — applied to class scope. It bites hardest when a base later gains an overload that the derived class silently hides."
+    },
+    {
+      "id": "c04-w09",
+      "section": "Multiple inheritance, virtual inheritance, and RTTI",
+      "minutes": 10,
+      "prompt": "Replace a dynamic_cast-based downcast with a kind tag: a Feed base carrying a FeedKind enum set by a protected constructor, a SimFeed that passes its own tag, and a function that checks the tag before a static_cast. Comment on the invariant the design depends on.",
+      "checklist": [
+        "FeedKind is a scoped enum with an explicit underlying type",
+        "The base constructor taking the tag is protected, not public",
+        "The tag member is private with a public const accessor",
+        "The downcast is a static_cast guarded by a tag comparison",
+        "A comment states that tag and runtime type must never disagree",
+        "The base still has a public virtual destructor"
+      ],
+      "solution": "#include <cstdint>\n#include <iostream>\n\nenum class FeedKind : std::uint8_t {\n    Sim,\n    Live\n};\n\nclass Feed {\npublic:\n    virtual ~Feed() = default;\n\n    FeedKind kind() const { return kind_; }\n\nprotected:\n    // Protected: only a derived class can set the tag, and it sets its own.\n    explicit Feed(FeedKind kind) : kind_{kind} {}\n\nprivate:\n    FeedKind kind_;\n};\n\nclass SimFeed : public Feed {\npublic:\n    SimFeed() : Feed{FeedKind::Sim} {}\n\n    void seek(std::int64_t sequence) { std::cout << sequence << '\\n'; }\n};\n\nvoid tagged_seek(Feed& feed) {\n    // The static_cast is unchecked: if the tag could ever disagree with the\n    // runtime type this would be undefined behaviour. The protected\n    // constructor is what enforces the agreement.\n    if (feed.kind() == FeedKind::Sim) {\n        static_cast<SimFeed&>(feed).seek(42);\n    }\n}",
+      "notes": "A tag check is a load, a compare and a branch; dynamic_cast may query and traverse a runtime type graph. But the tag only pays off for a closed hierarchy where construction enforces the invariant — and repeated downcasts in a hot loop usually mean the behaviour belongs on the type as a virtual function."
+    },
+    {
+      "id": "c04-w10",
+      "section": "CRTP and type erasure",
+      "minutes": 8,
+      "prompt": "Write a CRTP base FeedBase<Derived> exposing poll(), which forwards to the derived class's poll_impl(), plus two derived feeds. Add a comment on the one thing this design cannot do.",
+      "checklist": [
+        "Base is a class template parameterised by the derived type",
+        "poll() downcasts with static_cast<Derived&>(*this)",
+        "Each derived class inherits from FeedBase<itself>",
+        "Derived classes provide poll_impl, not an override of poll",
+        "Comment notes there is no common runtime base for a heterogeneous container"
+      ],
+      "solution": "template <typename Derived>\nclass FeedBase {\npublic:\n    int poll() {\n        return static_cast<Derived&>(*this).poll_impl();\n    }\n};\n\nclass SimFeed : public FeedBase<SimFeed> {\npublic:\n    int poll_impl() { return 7; }\n};\n\nclass LiveFeed : public FeedBase<LiveFeed> {\npublic:\n    int poll_impl() { return 11; }\n};\n\n// FeedBase<SimFeed> and FeedBase<LiveFeed> are unrelated types: there is no\n// single base that can hold both in one heterogeneous runtime container.\n// That is the trade for direct, inlinable, vptr-free dispatch.",
+      "notes": "The static_cast in the base is safe only because Derived really is the class that inherited from this specialisation — the pattern's namesake recursion is what guarantees it. Concepts (Chapter 9) cover many static-interface uses more directly."
+    }
+  ]
+}

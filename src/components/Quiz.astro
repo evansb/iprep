@@ -1,0 +1,622 @@
+---
+/**
+ * The quiz app. A single vanilla-JS island, in the style of the other scripts in
+ * this project — no framework runtime.
+ *
+ * Code snippets are *not* highlighted in the browser. Every snippet is rendered
+ * server-side into a hidden <template> with Astro's <Code> component, using the
+ * same Shiki dual themes as the book's markdown (see astro.config.mjs), and the
+ * script clones the template it needs. That keeps quiz code identical to chapter
+ * code and ships no highlighter.
+ */
+import { Code } from 'astro:components';
+import type { ExerciseSet } from '../lib/exercises';
+import { items as setItems, sectionKey, sectionLabel, snippets } from '../lib/exercises';
+import { href } from '../lib/url';
+
+export interface QuizSource {
+  ex: ExerciseSet;
+  chapter: number;
+  chapterSlug: string;
+  chapterTitle: string;
+  /** Chapter heading text -> anchor slug, used for the "review" link. */
+  sectionSlugs: Record<string, string>;
+}
+
+interface Props {
+  bookSlug: string;
+  sources: QuizSource[];
+  /** localStorage namespace; distinct per chapter and for the book-wide drill. */
+  storageKey: string;
+}
+
+const { bookSlug, sources, storageKey } = Astro.props;
+
+const THEMES = { light: 'github-light', dark: 'github-dark' } as const;
+
+// Snippet keys are prefixed with the chapter so the book-wide drill can mix
+// chapters without collisions.
+const codeBlocks = sources.flatMap((s) =>
+  snippets(s.ex).map(({ key, code }) => ({ key: `${s.chapterSlug}/${key}`, code })),
+);
+
+// The payload deliberately omits the raw `code`, `starter` and `solution` text:
+// that content is already on the page, highlighted, inside the templates.
+const payload = {
+  storageKey,
+  items: sources.flatMap((s) =>
+    setItems(s.ex).map((item) => {
+      const slug = s.sectionSlugs[sectionKey(item.section)];
+      const common = {
+        key: `${s.chapterSlug}/${item.id}`,
+        id: item.id,
+        mode: item.mode,
+        // Displayed without markdown markup: the quiz renders plain text.
+        section: sectionLabel(item.section),
+        sectionHref: slug ? href(`/books/${bookSlug}/${s.chapterSlug}/#${slug}`) : null,
+        chapter: s.chapter,
+        chapterTitle: s.chapterTitle,
+      };
+      if (item.mode === 'mcq') {
+        const { id, section, mode, code, ...rest } = item;
+        return { ...common, ...rest, hasCode: Boolean(code) };
+      }
+      if (item.mode === 'reading') {
+        const { id, section, mode, code, ...rest } = item;
+        return { ...common, ...rest };
+      }
+      const { id, section, mode, starter, solution, ...rest } = item;
+      return { ...common, ...rest, hasStarter: Boolean(starter) };
+    }),
+  ),
+};
+---
+
+<section class="quiz" id="quiz" data-empty={payload.items.length === 0 ? '' : null}>
+  <div class="quiz-modes" role="tablist" aria-label="Exercise type">
+    <button type="button" role="tab" data-mode="mcq">Multiple choice</button>
+    <button type="button" role="tab" data-mode="reading">Code reading</button>
+    <button type="button" role="tab" data-mode="writing">Code writing</button>
+    <button type="button" role="tab" data-mode="mixed">Mixed</button>
+  </div>
+
+  <div class="quiz-head">
+    <div class="quiz-progress" role="presentation"><span id="quiz-fill"></span></div>
+    <p class="quiz-meta">
+      <span id="quiz-count"></span>
+      <span id="quiz-score"></span>
+    </p>
+  </div>
+
+  <div id="quiz-stage"></div>
+  <p class="quiz-live" id="quiz-live" role="status" aria-live="polite"></p>
+</section>
+
+{/* Server-rendered, Shiki-highlighted snippets, cloned into questions on demand. */}
+{
+  codeBlocks.map(({ key, code }) => (
+    <template data-code={key}>
+      <Code code={code} lang="cpp" themes={THEMES} />
+    </template>
+  ))
+}
+
+<script type="application/json" id="quiz-data" set:html={JSON.stringify(payload)} />
+
+<script is:inline>
+  (() => {
+    const root = document.getElementById('quiz');
+    const dataEl = document.getElementById('quiz-data');
+    if (!root || !dataEl) return;
+
+    const DATA = JSON.parse(dataEl.textContent);
+    const ALL = DATA.items;
+    if (!ALL.length) return;
+
+    const stage = document.getElementById('quiz-stage');
+    const live = document.getElementById('quiz-live');
+    const fill = document.getElementById('quiz-fill');
+    const countEl = document.getElementById('quiz-count');
+    const scoreEl = document.getElementById('quiz-score');
+    const tabs = [...root.querySelectorAll('.quiz-modes button')];
+
+    const VERDICTS = {
+      'no-compile': "Doesn't compile",
+      ub: 'Undefined behaviour',
+      crash: 'Crashes or hangs',
+    };
+
+    /* ---- persistence ------------------------------------------------------
+       Same convention as the theme/sidebar keys: one small JSON blob, and a
+       failure to read or write it must never break the page. */
+    const STORE = DATA.storageKey;
+    const load = () => {
+      try {
+        const raw = JSON.parse(localStorage.getItem(STORE) || '{}');
+        return raw && raw.v === 1 && raw.results ? raw.results : {};
+      } catch {
+        return {};
+      }
+    };
+    const results = load();
+    const save = () => {
+      try {
+        localStorage.setItem(STORE, JSON.stringify({ v: 1, results }));
+      } catch {
+        /* private mode or quota — progress is a nicety, not a requirement */
+      }
+    };
+    const record = (key, ok) => {
+      results[key] = { r: ok ? 'right' : 'wrong', t: Date.now() };
+      save();
+    };
+
+    /* ---- helpers ---------------------------------------------------------- */
+    const el = (tag, cls, text) => {
+      const n = document.createElement(tag);
+      if (cls) n.className = cls;
+      if (text != null) n.textContent = text;
+      return n;
+    };
+
+    const codeFor = (key) => {
+      const tpl = document.querySelector(`template[data-code="${key}"]`);
+      if (!tpl) return null;
+      const wrap = el('div', 'quiz-code');
+      wrap.appendChild(tpl.content.cloneNode(true));
+      return wrap;
+    };
+
+    const shuffle = (arr) => {
+      const a = arr.slice();
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    };
+
+    // Answers are compared loosely: case, surrounding space, a trailing period
+    // and the usual spellings of a boolean should not decide a C++ question.
+    const SYNONYMS = [
+      ['true', 'yes', '1'],
+      ['false', 'no', '0'],
+    ];
+    const norm = (s) =>
+      String(s)
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .replace(/\.$/, '');
+    const matches = (given, accept) => {
+      const g = norm(given);
+      if (!g) return false;
+      const group = SYNONYMS.find((set) => set.includes(g));
+      return accept.some((a) => {
+        const n = norm(a);
+        return n === g || (group && group.includes(n));
+      });
+    };
+
+    /* ---- state ------------------------------------------------------------ */
+    const pool = (mode) => (mode === 'mixed' ? ALL : ALL.filter((q) => q.mode === mode));
+    const available = ['mcq', 'reading', 'writing'].filter((m) => pool(m).length);
+    for (const t of tabs) {
+      if (t.dataset.mode !== 'mixed' && !pool(t.dataset.mode).length) t.remove();
+    }
+
+    let state = null;
+
+    const start = (mode, queue) => {
+      const list = queue || shuffle(pool(mode));
+      state = { mode, queue: list, i: 0, right: 0, wrong: [], answered: false };
+      for (const t of tabs) {
+        if (!t.isConnected) continue;
+        const on = t.dataset.mode === mode;
+        t.classList.toggle('active', on);
+        t.setAttribute('aria-selected', String(on));
+      }
+      renderCurrent();
+    };
+
+    const finish = (ok) => {
+      const q = state.queue[state.i];
+      state.answered = true;
+      if (ok) state.right++;
+      else state.wrong.push(q);
+      record(q.key, ok);
+      updateMeta();
+    };
+
+    const updateMeta = () => {
+      const n = state.queue.length;
+      const done = state.i + (state.answered ? 1 : 0);
+      fill.style.width = `${(done / n) * 100}%`;
+      countEl.textContent = state.i >= n ? `${n} of ${n}` : `Question ${state.i + 1} of ${n}`;
+      scoreEl.textContent = done ? `· ${state.right}/${done} correct` : '';
+    };
+
+    const next = () => {
+      state.i++;
+      state.answered = false;
+      renderCurrent();
+    };
+
+    /* ---- question chrome -------------------------------------------------- */
+    const header = (q) => {
+      const h = el('div', 'quiz-q-head');
+      const tags = el('div', 'quiz-tags');
+      tags.appendChild(el('span', 'quiz-tag', q.section));
+      if (state.mode === 'mixed') tags.appendChild(el('span', 'quiz-tag ch', `Ch. ${q.chapter}`));
+      if (q.difficulty) tags.appendChild(el('span', `quiz-tag d-${q.difficulty}`, q.difficulty));
+      h.appendChild(tags);
+      h.appendChild(el('p', 'quiz-prompt', q.prompt));
+      return h;
+    };
+
+    // Verdict, explanation, and a link back to the section the question came from.
+    const feedback = (ok, headline, explain, q) => {
+      const box = el('div', `quiz-feedback ${ok ? 'ok' : 'bad'}`);
+      box.appendChild(el('strong', null, headline));
+      if (explain) box.appendChild(el('p', null, explain));
+      if (q.sectionHref) {
+        const a = el('a', 'quiz-review', `Review “${q.section}” →`);
+        a.href = q.sectionHref;
+        box.appendChild(a);
+      }
+      live.textContent = headline;
+      return box;
+    };
+
+    const nextButton = () => {
+      const b = el('button', 'quiz-btn primary', state.i + 1 >= state.queue.length ? 'See results' : 'Next question');
+      b.type = 'button';
+      b.addEventListener('click', next);
+      return b;
+    };
+
+    /* ---- multiple choice --------------------------------------------------- */
+    const renderMcq = (q) => {
+      const form = el('form', 'quiz-card');
+      form.appendChild(header(q));
+      if (q.hasCode) {
+        const c = codeFor(q.key);
+        if (c) form.appendChild(c);
+      }
+
+      const fs = el('fieldset', 'quiz-choices');
+      const legend = el('legend', 'sr-only', 'Choose one answer');
+      fs.appendChild(legend);
+
+      // Presentation order is shuffled so a remembered position can't stand in
+      // for a remembered answer.
+      const order = shuffle(q.choices.map((_, i) => i));
+      const inputs = [];
+      order.forEach((original, pos) => {
+        const label = el('label', 'quiz-choice');
+        const input = document.createElement('input');
+        input.type = 'radio';
+        input.name = 'choice';
+        input.value = String(original);
+        label.appendChild(input);
+        label.appendChild(el('span', 'quiz-key', 'ABCD'[pos]));
+        label.appendChild(el('span', 'quiz-choice-text', q.choices[original]));
+        fs.appendChild(label);
+        inputs.push({ input, label, original });
+      });
+      form.appendChild(fs);
+
+      const actions = el('div', 'quiz-actions');
+      const submit = el('button', 'quiz-btn primary', 'Submit');
+      submit.type = 'submit';
+      actions.appendChild(submit);
+      form.appendChild(actions);
+
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        if (state.answered) return;
+        const picked = inputs.find((x) => x.input.checked);
+        if (!picked) {
+          live.textContent = 'Select an answer first.';
+          return;
+        }
+        const ok = picked.original === q.answer;
+        for (const x of inputs) {
+          x.input.disabled = true;
+          if (x.original === q.answer) x.label.classList.add('correct');
+          else if (x.input.checked) x.label.classList.add('incorrect');
+        }
+        finish(ok);
+        actions.replaceChildren(nextButton());
+        form.appendChild(
+          feedback(ok, ok ? 'Correct.' : `Incorrect — the answer is ${q.choices[q.answer]}`, q.explain, q),
+        );
+      });
+
+      // Number and letter keys select; Enter submits.
+      form.dataset.pick = 'mcq';
+      form._pick = (n) => {
+        if (state.answered || !inputs[n]) return;
+        inputs[n].input.checked = true;
+      };
+      return form;
+    };
+
+    /* ---- code reading ------------------------------------------------------ */
+    const renderReading = (q) => {
+      const form = el('form', 'quiz-card');
+      form.appendChild(header(q));
+      const c = codeFor(q.key);
+      if (c) form.appendChild(c);
+
+      const row = el('div', 'quiz-answer-row');
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'quiz-input';
+      input.placeholder = 'Type the output…';
+      input.autocomplete = 'off';
+      input.spellcheck = false;
+      const submit = el('button', 'quiz-btn primary', 'Submit');
+      submit.type = 'submit';
+      row.appendChild(input);
+      row.appendChild(submit);
+      form.appendChild(row);
+
+      form.appendChild(el('p', 'quiz-or', '…or, if the program never gets that far:'));
+
+      const verdictRow = el('div', 'quiz-verdicts');
+      const buttons = [];
+      for (const [kind, label] of Object.entries(VERDICTS)) {
+        const b = el('button', 'quiz-btn verdict', label);
+        b.type = 'button';
+        b.dataset.kind = kind;
+        b.addEventListener('click', () => grade(kind));
+        verdictRow.appendChild(b);
+        buttons.push(b);
+      }
+      form.appendChild(verdictRow);
+
+      const expected =
+        q.kind === 'value' ? `it prints ${q.accept[0]}` : VERDICTS[q.kind].toLowerCase();
+
+      const grade = (verdict) => {
+        if (state.answered) return;
+        let ok;
+        if (verdict) {
+          ok = q.kind === verdict;
+          for (const b of buttons) {
+            if (b.dataset.kind === q.kind) b.classList.add('correct');
+            else if (b.dataset.kind === verdict) b.classList.add('incorrect');
+          }
+        } else {
+          if (!input.value.trim()) {
+            live.textContent = 'Type an answer, or choose one of the buttons below.';
+            return;
+          }
+          ok = q.kind === 'value' && matches(input.value, q.accept);
+          input.classList.add(ok ? 'correct' : 'incorrect');
+          if (!ok && q.kind !== 'value') {
+            const hit = buttons.find((b) => b.dataset.kind === q.kind);
+            if (hit) hit.classList.add('correct');
+          }
+        }
+        input.disabled = true;
+        submit.disabled = true;
+        for (const b of buttons) b.disabled = true;
+        finish(ok);
+        const actions = el('div', 'quiz-actions');
+        actions.appendChild(nextButton());
+        form.appendChild(feedback(ok, ok ? 'Correct.' : `Incorrect — ${expected}.`, q.explain, q));
+        form.appendChild(actions);
+      };
+
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        grade(null);
+      });
+      return form;
+    };
+
+    /* ---- code writing ------------------------------------------------------ */
+    const renderWriting = (q) => {
+      const card = el('div', 'quiz-card');
+      card.appendChild(header(q));
+
+      const bar = el('div', 'quiz-timer-bar');
+      const clock = el('span', 'quiz-clock', `${q.minutes}:00`);
+      const timerBtn = el('button', 'quiz-btn', 'Start timer');
+      timerBtn.type = 'button';
+      bar.appendChild(clock);
+      bar.appendChild(timerBtn);
+      bar.appendChild(el('span', 'quiz-hint', 'Write it from memory — no lookups.'));
+      card.appendChild(bar);
+
+      // Countdown only; it expires visibly but never blocks the answer.
+      let left = q.minutes * 60;
+      let tick = null;
+      const paint = () => {
+        const m = Math.floor(Math.abs(left) / 60);
+        const s = String(Math.abs(left) % 60).padStart(2, '0');
+        clock.textContent = `${left < 0 ? '-' : ''}${m}:${s}`;
+        clock.classList.toggle('over', left <= 0);
+      };
+      timerBtn.addEventListener('click', () => {
+        if (tick) {
+          clearInterval(tick);
+          tick = null;
+          timerBtn.textContent = 'Resume';
+          return;
+        }
+        timerBtn.textContent = 'Pause';
+        tick = setInterval(() => {
+          left--;
+          paint();
+        }, 1000);
+      });
+
+      const ta = document.createElement('textarea');
+      ta.className = 'quiz-editor';
+      ta.spellcheck = false;
+      ta.autocapitalize = 'off';
+      ta.setAttribute('autocorrect', 'off');
+      ta.rows = 14;
+      ta.placeholder = 'Your implementation…';
+      if (q.hasStarter) {
+        const tpl = document.querySelector(`template[data-code="${q.key}:starter"]`);
+        // The starter is highlighted for display elsewhere; the editor needs the
+        // plain text, which is exactly the template's textContent.
+        if (tpl) ta.value = tpl.content.textContent.replace(/\n$/, '');
+      }
+      card.appendChild(ta);
+
+      const actions = el('div', 'quiz-actions');
+      const reveal = el('button', 'quiz-btn primary', 'Reveal solution');
+      reveal.type = 'button';
+      actions.appendChild(reveal);
+      card.appendChild(actions);
+
+      reveal.addEventListener('click', () => {
+        if (tick) clearInterval(tick);
+        reveal.remove();
+
+        const sol = el('div', 'quiz-solution');
+        sol.appendChild(el('h3', null, 'Reference solution'));
+        const c = codeFor(`${q.key}:solution`);
+        if (c) sol.appendChild(c);
+        if (q.notes) sol.appendChild(el('p', 'quiz-notes', q.notes));
+
+        sol.appendChild(el('h3', null, 'Did your version do all of this?'));
+        const list = el('ul', 'quiz-checklist');
+        for (const c2 of q.checklist) {
+          const li = document.createElement('li');
+          const label = el('label', null);
+          const box = document.createElement('input');
+          box.type = 'checkbox';
+          label.appendChild(box);
+          label.appendChild(el('span', null, c2));
+          li.appendChild(label);
+          list.appendChild(li);
+        }
+        sol.appendChild(list);
+        card.insertBefore(sol, actions);
+
+        const grade = (ok) => {
+          if (state.answered) return;
+          finish(ok);
+          actions.replaceChildren(nextButton());
+          card.appendChild(
+            feedback(ok, ok ? 'Marked as recalled.' : 'Marked for review.', null, q),
+          );
+        };
+        const got = el('button', 'quiz-btn ok', 'I got it');
+        got.type = 'button';
+        got.addEventListener('click', () => grade(true));
+        const missed = el('button', 'quiz-btn bad', 'I missed it');
+        missed.type = 'button';
+        missed.addEventListener('click', () => grade(false));
+        actions.replaceChildren(got, missed);
+      });
+
+      card.dataset.reveal = '1';
+      card._reveal = () => reveal.isConnected && reveal.click();
+      return card;
+    };
+
+    /* ---- summary ----------------------------------------------------------- */
+    const renderSummary = () => {
+      const n = state.queue.length;
+      const card = el('div', 'quiz-card quiz-summary');
+      card.appendChild(el('h2', null, `${state.right} / ${n} correct`));
+
+      const pct = Math.round((state.right / n) * 100);
+      card.appendChild(
+        el(
+          'p',
+          'quiz-summary-line',
+          pct === 100
+            ? 'Clean sweep.'
+            : `${pct}% — ${state.wrong.length} to revisit.`,
+        ),
+      );
+
+      if (state.wrong.length) {
+        const list = el('ul', 'quiz-missed');
+        for (const q of state.wrong) {
+          const li = document.createElement('li');
+          li.appendChild(el('span', 'quiz-tag', q.section));
+          li.appendChild(el('span', null, q.prompt));
+          list.appendChild(li);
+        }
+        card.appendChild(list);
+      }
+
+      const actions = el('div', 'quiz-actions');
+      if (state.wrong.length) {
+        const retry = el('button', 'quiz-btn primary', `Retry the ${state.wrong.length} missed`);
+        retry.type = 'button';
+        const missed = state.wrong.slice();
+        retry.addEventListener('click', () => start(state.mode, shuffle(missed)));
+        actions.appendChild(retry);
+      }
+      const again = el('button', 'quiz-btn', 'Start over');
+      again.type = 'button';
+      again.addEventListener('click', () => start(state.mode));
+      actions.appendChild(again);
+      card.appendChild(actions);
+
+      live.textContent = `Finished. ${state.right} of ${n} correct.`;
+      return card;
+    };
+
+    /* ---- driver ------------------------------------------------------------ */
+    const renderCurrent = () => {
+      updateMeta();
+      if (state.i >= state.queue.length) {
+        stage.replaceChildren(renderSummary());
+        return;
+      }
+      const q = state.queue[state.i];
+      const view =
+        q.mode === 'mcq' ? renderMcq(q) : q.mode === 'reading' ? renderReading(q) : renderWriting(q);
+      stage.replaceChildren(view);
+      const first = view.querySelector('input, textarea, button');
+      if (first && first.type !== 'submit') first.focus({ preventScroll: true });
+    };
+
+    for (const t of tabs) {
+      if (t.isConnected) t.addEventListener('click', () => start(t.dataset.mode));
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (!state) return;
+      const tag = e.target.tagName;
+      const typing = tag === 'INPUT' || tag === 'TEXTAREA';
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      if (e.key === 'Enter' && !typing) {
+        const btn = stage.querySelector('.quiz-actions .primary, .quiz-actions button');
+        if (btn) {
+          e.preventDefault();
+          btn.click();
+        }
+        return;
+      }
+      if (typing) return;
+
+      const card = stage.firstElementChild;
+      if (!card) return;
+      if (card.dataset.pick === 'mcq') {
+        const i = '1234'.indexOf(e.key) >= 0 ? '1234'.indexOf(e.key) : 'abcd'.indexOf(e.key.toLowerCase());
+        if (i >= 0) {
+          e.preventDefault();
+          card._pick(i);
+        }
+      } else if (card.dataset.reveal && e.key.toLowerCase() === 'r') {
+        e.preventDefault();
+        card._reveal();
+      }
+    });
+
+    start(available[0] || 'mixed');
+  })();
+</script>

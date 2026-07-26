@@ -1,0 +1,558 @@
+{
+  "chapter": 26,
+  "mcq": [
+    {
+      "id": "c26-m01",
+      "section": "Blocking, non-blocking, and the progress ladder",
+      "difficulty": "easy",
+      "prompt": "A spinlock is built from `std::atomic_flag::test_and_set` and contains no `std::mutex`. Where does it sit on the progress ladder?",
+      "choices": [
+        "Lock-free, because every operation is an atomic instruction",
+        "Blocking — if the thread inside the critical section is descheduled, every spinner waits",
+        "Obstruction-free, because a thread running in isolation always completes",
+        "Wait-free, because test_and_set takes a bounded number of steps"
+      ],
+      "answer": 1,
+      "explain": "The ladder is about progress, not about which primitives appear in the source. Removing `std::mutex` did not remove a holder: a suspended owner still stops every other thread, which is the definition of blocking. Note that `test_and_set` itself is a bounded operation — the blocking comes from the protocol built on top of it."
+    },
+    {
+      "id": "c26-m02",
+      "section": "Blocking, non-blocking, and the progress ladder",
+      "difficulty": "medium",
+      "prompt": "Which statement about the progress ladder is correct?",
+      "choices": [
+        "Lock-free guarantees that every thread's operation completes in bounded steps",
+        "Wait-free implies lock-free implies obstruction-free, and none of the reverse implications hold",
+        "Lock-free implies wait-free once backoff is added",
+        "Obstruction-free is the strongest guarantee, since it tolerates interference"
+      ],
+      "answer": 1,
+      "explain": "The levels form a strict ladder in that direction. Lock-free promises only that *the system* continually completes operations — one participant may starve indefinitely while others make progress, which is exactly what a CAS-retry stack permits. Backoff can improve observed fairness but cannot promote an algorithm to wait-free."
+    },
+    {
+      "id": "c26-m03",
+      "section": "Blocking, non-blocking, and the progress ladder",
+      "difficulty": "medium",
+      "prompt": "What does \"bounded steps\" mean in the definition of wait-free?",
+      "choices": [
+        "A bounded number of algorithmic steps taken by a scheduled thread — preemption, cache misses and interrupts can still delay it",
+        "A bounded wall-clock latency, so a wait-free operation cannot be delayed by a cache miss",
+        "A bounded number of retries, after which the operation reports failure",
+        "That the operation never executes an atomic read-modify-write"
+      ],
+      "answer": 0,
+      "explain": "The bound is on algorithmic steps, not on time. A wait-free operation can still be preempted or take a page fault; what it cannot do is retry indefinitely because of another participant's actions. Confusing the two makes people claim latency guarantees the algorithm never offered."
+    },
+    {
+      "id": "c26-m04",
+      "section": "Linearizability and its limits",
+      "difficulty": "medium",
+      "prompt": "Where is the linearization point of the CAS-based `push`, and what makes it that point?",
+      "choices": [
+        "The store to `node->next`, because that is when the node's state is complete",
+        "The initial relaxed load of `head`, because that is when the operation observes the stack",
+        "The successful compare-exchange on `head` — before it the node is not in the stack, after it an acquiring reader can observe it fully initialised",
+        "The return statement, because that is when the operation is visible to its caller"
+      ],
+      "answer": 2,
+      "explain": "The linearization point is the single instant at which the operation appears to take effect. Failed attempts change nothing about the abstract stack, and `node->next` is thread-local until the CAS publishes it. Preparing `next` *before* the release CAS is what preserves the invariant — publishing the node first and filling `next` afterwards would expose an invalid chain even for one instruction."
+    },
+    {
+      "id": "c26-m05",
+      "section": "Linearizability and its limits",
+      "difficulty": "hard",
+      "prompt": "`contains()` and `insert()` are each linearizable. `if (!map.contains(k)) map.insert(k, v);` still produces duplicate inserts. What is the correct fix?",
+      "choices": [
+        "Strengthen both operations to memory_order_seq_cst",
+        "Retry the pair in a loop until `contains` and `insert` agree",
+        "Make `contains` return a snapshot with a version number the insert can validate",
+        "Introduce a new compound operation such as `insert_if_absent`, or hold a lock across the pair"
+      ],
+      "answer": 3,
+      "explain": "Linearizability composes at the object-operation level but does not turn a client-side sequence of operations into one atomic transaction — another thread can linearize between the two calls. The missing boundary is a new *operation*, not a stronger memory order, so seq_cst changes nothing. The version-snapshot answer is a real technique, but it is a way of *building* such a compound operation, not a substitute for having one."
+    },
+    {
+      "id": "c26-m06",
+      "section": "Contention and retry reality",
+      "difficulty": "medium",
+      "prompt": "Why can a lock-free CAS loop be slower than an uncontended `std::mutex` under heavy contention?",
+      "choices": [
+        "Because atomics are implemented with library locks under contention",
+        "Because the compiler inserts full barriers around every CAS",
+        "Because compare_exchange_weak fails spuriously more often when several threads run",
+        "Because each attempt needs exclusive ownership of the cache line, and failed attempts keep migrating that line between cores"
+      ],
+      "answer": 3,
+      "explain": "A successful CAS requires exclusive ownership of its line, so contenders repeatedly request it, invalidate one another's copies, fail, and retry — the coherence round-trip dominates the arithmetic. An uncontended mutex commonly takes a short atomic fast path and pays none of that. The lock-free advantage is immunity to a stalled holder, not throughput."
+    },
+    {
+      "id": "c26-m07",
+      "section": "Contention and retry reality",
+      "difficulty": "medium",
+      "prompt": "You add exponential backoff to a contended CAS loop and contention throughput improves. What have you NOT achieved?",
+      "choices": [
+        "Reduced coherence traffic",
+        "A promotion from lock-free to wait-free, and a guarantee that no individual caller starves",
+        "Better observed fairness among contenders",
+        "A trade of individual latency for a more stable ownership pattern"
+      ],
+      "answer": 1,
+      "explain": "Backoff spreads retry requests, which genuinely reduces line migration and can improve observed fairness — but CAS fairness is not guaranteed, and one core can keep winning while another keeps refreshing `expected`. Starvation of a particular caller does not violate the lock-free progress guarantee, and no amount of delay tuning changes the guarantee's name. Structural fixes such as sharding or SPSC handoffs usually beat retry tuning."
+    },
+    {
+      "id": "c26-m08",
+      "section": "Seqlocks",
+      "difficulty": "easy",
+      "prompt": "In a seqlock, what does an odd sequence counter mean, and what must a reader do on seeing one?",
+      "choices": [
+        "A write is in progress; the reader must retry rather than accept the payload",
+        "The payload is stable; the reader may proceed",
+        "The previous write failed; the reader should fall back to a mutex",
+        "The counter has wrapped; the reader must reset it"
+      ],
+      "answer": 0,
+      "explain": "The writer moves the counter even-to-odd before touching the payload and odd-to-even after finishing, so odd marks an in-progress generation. The reader's acceptance rule is stricter than \"not odd\": it needs *equal even* values bracketing its payload reads, since a whole write could complete between them."
+    },
+    {
+      "id": "c26-m09",
+      "section": "Seqlocks",
+      "difficulty": "hard",
+      "prompt": "A production seqlock reads and writes the payload as plain (non-atomic) fields, arguing that a torn snapshot is discarded by the sequence recheck. What is wrong with that argument in standard C++?",
+      "choices": [
+        "Nothing — the recheck is exactly what makes the pattern sound",
+        "The recheck happens too late; it should occur before the payload reads",
+        "The concurrent plain accesses are already a data race and therefore undefined behaviour, which the later recheck cannot repair",
+        "It is sound only if the payload fits in one cache line"
+      ],
+      "answer": 2,
+      "explain": "Undefined behaviour is a property of the execution, not of the value you eventually keep: once the racing accesses happen the optimiser is entitled to assume they did not, and no subsequent test undoes that. The chapter's implementation uses relaxed *atomic* payload fields (or `std::atomic_ref` over a wire-layout struct) precisely so that every conflicting access is atomic while the sequence protocol supplies snapshot consistency. Real-world seqlocks that read plain bytes rely on compiler extensions or platform behaviour, not on the standard."
+    },
+    {
+      "id": "c26-m10",
+      "section": "Seqlocks",
+      "difficulty": "medium",
+      "prompt": "Compared with `std::shared_mutex`, which property is characteristic of a seqlock?",
+      "choices": [
+        "Readers block the writer, guaranteeing that no read ever retries",
+        "Readers write no shared synchronization state, so they avoid the bouncing shared-reader count — but the writer is never blocked and readers may starve during write bursts",
+        "It supports multiple concurrent writers without extra machinery",
+        "It handles arbitrary protected state, including pointer-rich graphs"
+      ],
+      "answer": 1,
+      "explain": "The reader-side asymmetry is the whole point: a seqlock reader performs only atomic loads, so there is no shared reader count to ping-pong between cores, and the writer never waits. The costs are the mirror image — reader starvation under write bursts, and a payload constrained to a small trivially copyable snapshot. Multiple writers need a separate serialization mechanism."
+    },
+    {
+      "id": "c26-m11",
+      "section": "ABA and tagged pointers",
+      "difficulty": "medium",
+      "prompt": "In the ABA interleaving on a lock-free stack, thread 1's CAS succeeds even though the world changed underneath it. What exactly did the successful CAS prove?",
+      "choices": [
+        "That `head` still pointed to the node thread 1 inspected",
+        "That no other thread modified `head` since thread 1's load",
+        "That the node thread 1 saved is still allocated",
+        "Only that `head`'s bits equalled thread 1's `expected` at that instant — not that the node is the same object thread 1 read `next` from"
+      ],
+      "answer": 3,
+      "explain": "CAS compares bits, not history. Address `A` was freed and handed back by the allocator for a different node, so the comparison passes while thread 1's saved `next` is a stale pointer to an already-freed node — which it then installs as the new head. The other options are precisely the things people assume a successful CAS establishes, and it establishes none of them."
+    },
+    {
+      "id": "c26-m12",
+      "section": "ABA and tagged pointers",
+      "difficulty": "medium",
+      "prompt": "A tagged pointer packs a 16-bit generation into the top bits of a 64-bit word alongside a 48-bit address. Which claim about this design is accurate?",
+      "choices": [
+        "It is portable C++, since all 64-bit pointers fit in 48 bits",
+        "It removes both the identity problem and the need for a reclamation protocol",
+        "It relies on a deployment-specific address-layout convention, and a 16-bit generation can still wrap and recreate an old packed value",
+        "It makes the CAS wait-free, because retries can no longer be caused by reuse"
+      ],
+      "answer": 2,
+      "explain": "The 48-bit assumption is an x86-64 lower-address convention, invalidated by five-level paging, hardware pointer tags, capability pointers, and other layouts — and a 16-bit generation wraps after 65,536 mutations, so the proof must *bound* mutations during any outstanding observation rather than call wraparound unlikely. Crucially, tagging fixes identity comparison only: thread 1 still dereferences `observed->next`, which needs a reclamation protocol to keep that node alive."
+    },
+    {
+      "id": "c26-m13",
+      "section": "ABA and tagged pointers",
+      "difficulty": "medium",
+      "prompt": "Which design removes pointer ABA without packing anything into an address?",
+      "choices": [
+        "A preallocated pool addressed by index, with a per-slot generation counter incremented on reuse",
+        "Using compare_exchange_strong instead of compare_exchange_weak",
+        "Raising every CAS to memory_order_seq_cst",
+        "Allocating each node with `new` and never calling `delete`"
+      ],
+      "answer": 0,
+      "explain": "Pool-and-index keeps every slot alive for the process and versions its reuse, so both the lifetime problem and pointer identity disappear from the hot path; capacity becomes an explicit system limit instead. The MPMC ring applies the same idea as per-slot sequence numbers. Stronger CAS variants and stronger memory orders address neither problem — ABA is an identity question, not an ordering one."
+    },
+    {
+      "id": "c26-m14",
+      "section": "Safe memory reclamation",
+      "difficulty": "medium",
+      "prompt": "In the hazard-pointer read protocol, why must a thread publish its candidate pointer *before* re-reading the shared pointer, rather than validating first and publishing after?",
+      "choices": [
+        "Because publishing first lets the reclaimer skip the scan entirely",
+        "Because the store is cheaper when it precedes the load",
+        "Because validating first leaves a window in which the node can be unlinked and freed before the hazard becomes visible to a reclaimer",
+        "Because the hazard slot must be written with release semantics, which requires a prior read"
+      ],
+      "answer": 2,
+      "explain": "The protection is only real once a scanning reclaimer can see it. Publish-then-validate means: if the re-read still names the node, the hazard was already visible at a point where the node was still linked, so a reclaimer scanning afterwards must observe it. Validate-then-publish inverts the order and reopens exactly the reuse-before-read race the protocol exists to close."
+    },
+    {
+      "id": "c26-m15",
+      "section": "Safe memory reclamation",
+      "difficulty": "medium",
+      "prompt": "What is the characteristic failure mode of epoch-based reclamation that hazard pointers avoid?",
+      "choices": [
+        "It cannot protect more than one pointer per operation",
+        "One stalled reader inside a protected region prevents the grace period from completing, so deferred lists grow without bound",
+        "It requires a double-width compare-exchange",
+        "It makes the read side more expensive than publishing a pointer per dereference"
+      ],
+      "answer": 1,
+      "explain": "Epoch reclamation is cheaper on the read side — enter and leave a region once and protect many dereferences — but reclamation latency is set by the slowest reader, so a stalled participant retains every subsequently retired node. Hazard pointers pay a shared ordered store per protection and, with bounded participants and a scan threshold, give a bounded amount of unreclaimed memory."
+    },
+    {
+      "id": "c26-m16",
+      "section": "Safe memory reclamation",
+      "difficulty": "hard",
+      "prompt": "A `try_pop` clears its own hazard slot and then retires the node onto its private retired list. Which statement about that sequence is correct?",
+      "choices": [
+        "It is fine: this thread is done with the node, and the scan still retains it while any *other* thread's slot names it",
+        "Clearing before retiring is a bug; the node can be freed while this thread still holds it",
+        "The retired list must be shared between all threads for the scan to be sound",
+        "Retirement can free the node immediately, since a successful CAS proves nobody else observed it"
+      ],
+      "answer": 0,
+      "explain": "The hazard slot advertises \"I may dereference this\"; once this thread has extracted the value it no longer needs the protection, so clearing is correct. Safety comes from the scan, which frees a retired node only when *no* slot names it — another thread may still have published that node between its own load and validation. A successful CAS proves logical removal, never that no reader holds the address; that is exactly the safe-memory-reclamation tax."
+    },
+    {
+      "id": "c26-m17",
+      "section": "Queue topologies",
+      "difficulty": "easy",
+      "prompt": "What makes SPSC the cheapest queue topology?",
+      "choices": [
+        "It uses smaller atomic types than MPSC or MPMC",
+        "It needs no atomics at all, since there is only one thread on each end",
+        "It can be implemented without bounds, so it never reports full",
+        "Each index has exactly one writer, so neither end needs a CAS contest"
+      ],
+      "answer": 3,
+      "explain": "Single ownership of each index is what removes the ticket contest: the producer owns the tail and the consumer owns the head, so each can load its own index relaxed and publish with a single release store. Atomics are still required — the two threads communicate through those indices — and the ring is still bounded."
+    },
+    {
+      "id": "c26-m18",
+      "section": "Queue topologies",
+      "difficulty": "medium",
+      "prompt": "Many strategy threads must feed one journaler. What does the chapter recommend considering before reaching for an MPSC queue?",
+      "choices": [
+        "An MPMC queue, since it generalises MPSC at similar cost",
+        "Giving each producer its own SPSC queue that the journaler polls, trading producer-to-producer contention for an explicit merge policy",
+        "A single mutex-protected std::deque, which is simpler and always faster",
+        "Sharding the journaler across several consumer threads"
+      ],
+      "answer": 1,
+      "explain": "MPSC is often the right boundary — many producers pay one tail claim while a single consumer writes records in queue order — but if the thread graph allows it, per-producer SPSC queues remove the producer contest entirely. The cost is that ordering across producers becomes an explicit merge policy rather than a free consequence of one shared tail. MPMC is strictly more coordination than an MPSC edge needs."
+    },
+    {
+      "id": "c26-m19",
+      "section": "Bounded SPSC ring buffer",
+      "difficulty": "medium",
+      "prompt": "In the SPSC ring, why does the producer load `tail_` with `memory_order_relaxed` but `head_` with `memory_order_acquire`?",
+      "choices": [
+        "Because `tail_` is producer-owned so its own last store is trivially visible to it, whereas `head_` is written by the consumer and its release store must be acquired to observe the freed slot",
+        "Because `tail_` is smaller than `head_` and needs no barrier",
+        "Because relaxed loads are illegal on an index another thread writes",
+        "Because the acquire is only needed to prevent the compiler reordering the two loads"
+      ],
+      "answer": 0,
+      "explain": "Ownership decides the ordering. Only the producer writes `tail_`, so no cross-thread edge is needed to read it. `head_` carries the consumer's release publication that a slot has been drained and destroyed, and the producer must acquire that before reusing the storage — otherwise it could overwrite a slot the consumer has not finished with."
+    },
+    {
+      "id": "c26-m20",
+      "section": "Bounded SPSC ring buffer",
+      "difficulty": "medium",
+      "prompt": "What do the cached peer indices (`cached_head_`, `cached_tail_`) buy, and why is a stale cache safe?",
+      "choices": [
+        "They remove the acquire load from the common path; a stale value is conservative — it can only make the queue look fuller or emptier than it is, causing a refresh, never an overrun",
+        "They remove the need for atomics on the indices entirely",
+        "They allow the producer to advance the consumer's index when the queue is full",
+        "They make `size()` exact by caching both ends at the same instant"
+      ],
+      "answer": 0,
+      "explain": "The producer refreshes `head_` only when its stale cache claims the ring is full; because the consumer only ever advances `head_`, a stale lower value understates the free space and the worst outcome is one extra acquire load. `size()` computed from independent loads stays advisory, since the peer can move between the two observations. The indices themselves must remain atomic — they are the publication channel."
+    },
+    {
+      "id": "c26-m21",
+      "section": "Bounded SPSC ring buffer",
+      "difficulty": "hard",
+      "prompt": "The ring's capacity is enforced by `static_assert(N > 0 && (N & (N - 1)) == 0)`. Why is that a hard requirement rather than a suggestion?",
+      "choices": [
+        "Because std::array requires a power-of-two extent",
+        "Because unsigned subtraction `tail - head` only works for power-of-two sizes",
+        "Because the position-to-slot mapping is `position & (N - 1)`, which silently computes the wrong slot for any other N",
+        "Because alignas(64) only works when N is a power of two"
+      ],
+      "answer": 2,
+      "explain": "`position & (N - 1)` equals `position % N` only when N is a power of two; for any other N the mask silently selects a wrong slot rather than failing, which is why the condition is compiled in as an assertion. The occupancy `tail - head` works by unsigned wraparound for any N — it is the *masking* that constrains the capacity."
+    },
+    {
+      "id": "c26-m22",
+      "section": "MPMC and per-slot sequences",
+      "difficulty": "hard",
+      "prompt": "In the Vyukov-style ring, a producer computes `difference = (intptr_t)(cell.sequence - ticket)`. What does `difference < 0` mean?",
+      "choices": [
+        "Another producer already claimed this ticket; reload and retry",
+        "The slot is ready to be claimed",
+        "The counters have overflowed and the ring must be reset",
+        "The slot still belongs to an earlier generation — the queue is full, so report failure"
+      ],
+      "answer": 3,
+      "explain": "`difference == 0` means the cell is at exactly this ticket's generation and may be claimed; a positive difference means the observed ticket is stale and the producer reloads; negative means the cell has not yet been advanced past the previous lap, i.e. the ring is full. The signed reinterpretation is sound only because the bounded-capacity invariant keeps the counters from separating by half their range."
+    },
+    {
+      "id": "c26-m23",
+      "section": "MPMC and per-slot sequences",
+      "difficulty": "medium",
+      "prompt": "A producer claims the next FIFO ticket and is suspended before publishing its cell. What does the chapter say about the queue's progress guarantee?",
+      "choices": [
+        "Nothing changes; consumers simply skip the hole and continue",
+        "The design is wait-free, since each operation performs bounded work",
+        "Consumers stop at that hole even if later cells are filled, so under the strict definition that stalled claimant prevents global completion once the ring fills — despite the design commonly being called lock-free",
+        "The per-slot sequence numbers let a consumer reclaim the abandoned ticket"
+      ],
+      "answer": 2,
+      "explain": "FIFO order forces consumers to wait for the hole, so a single suspended participant can stop the whole structure once the ring fills — the same failure shape as a preempted lock holder. The chapter flags this explicitly: \"commonly called lock-free\" and \"meets the strict global-progress definition\" are not the same claim, which is why a progress argument has to be stated rather than assumed from the absence of a mutex."
+    },
+    {
+      "id": "c26-m24",
+      "section": "Backpressure and the close",
+      "difficulty": "medium",
+      "prompt": "A bounded queue carrying order acknowledgements and fills is full. Which overflow policy is acceptable?",
+      "choices": [
+        "Conflate — replace the queued state for that instrument with the newest value",
+        "Drop-new — discard the arriving message and keep the backlog",
+        "Drop-old — discard the oldest queued message to make room",
+        "Return failure so the caller decides explicitly, escalating the overload"
+      ],
+      "answer": 3,
+      "explain": "Orders, acknowledgements and fills are an event *history*: every transition matters, so drop-new, drop-old and conflation all destroy required information — a silent drop on an order path is a compliance incident, not a queue optimisation. Returning failure keeps the decision at the caller, where it can be escalated or made fatal. Conflation is excellent for quotes precisely because a newer top-of-book supersedes an older one."
+    },
+    {
+      "id": "c26-m25",
+      "section": "Backpressure and the close",
+      "difficulty": "medium",
+      "prompt": "Why can drop-old NOT be added to the SPSC ring by simply letting the producer advance `head_`?",
+      "choices": [
+        "Because `head_` is const in the producer's view",
+        "Because it would break the single-writer invariant for the consumer-owned index, which is what makes the relaxed/release protocol sound",
+        "Because `head_` and `tail_` are on different cache lines",
+        "Because the consumer would then need a CAS, making the queue MPMC"
+      ],
+      "answer": 1,
+      "explain": "The whole SPSC protocol rests on each index having exactly one writer: the consumer loads `head_` relaxed because nobody else writes it, and publishes with a plain release store. A second writer invalidates that reasoning and would need a CAS on `head_` — at which point the queue is no longer SPSC. Drop-old needs consumer cooperation, or a purpose-built conflation slot with its own publication protocol."
+    }
+  ],
+  "reading": [
+    {
+      "id": "c26-r01",
+      "section": "Blocking, non-blocking, and the progress ladder",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <atomic>\n#include <iostream>\n\nclass SpinLock {\npublic:\n    void lock() { while (held_.test_and_set(std::memory_order_acquire)) {} }\n    void unlock() { held_.clear(std::memory_order_release); }\n\nprivate:\n    std::atomic_flag held_ = ATOMIC_FLAG_INIT;\n};\n\nint main() {\n    SpinLock gate;\n    SpinLock spare = gate;\n    spare.lock();\n    std::cout << \"locked\\n\";\n}",
+      "kind": "no-compile",
+      "explain": "`std::atomic_flag` has a deleted copy constructor, which deletes SpinLock's implicit one, so `SpinLock spare = gate;` is ill-formed. That is a feature: a copied lock would be a second, independent flag protecting nothing, and the mistake is easy to make by passing a lock-bearing object by value. Locks are pinned resources — hold them by reference, and delete the copy operations explicitly if you want a clearer diagnostic."
+    },
+    {
+      "id": "c26-r02",
+      "section": "MPMC and per-slot sequences",
+      "prompt": "What does this print?",
+      "code": "#include <cstddef>\n#include <cstdint>\n#include <iostream>\n\nconst char* classify(std::size_t cell_sequence, std::size_t ticket) {\n    auto difference =\n        static_cast<std::intptr_t>(cell_sequence - ticket);\n    if (difference == 0) return \"claim\";\n    if (difference < 0) return \"full\";\n    return \"stale\";\n}\n\nint main() {\n    std::cout << classify(8, 8) << ' '\n              << classify(7, 8) << ' '\n              << classify(9, 8) << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "claim full stale"
+      ],
+      "explain": "The subtraction happens in `std::size_t` and wraps, and the result is then reinterpreted as signed: 7 - 8 wraps to SIZE_MAX and reads back as -1. A zero difference means the cell has reached exactly this ticket's generation and may be claimed; negative means the cell still belongs to the previous lap, so the ring is full; positive means the producer's cached ticket is stale and must be reloaded. The signed reinterpretation is only sound because bounded capacity keeps the counters from separating by half their range."
+    },
+    {
+      "id": "c26-r03",
+      "section": "Seqlocks",
+      "prompt": "What does this print?",
+      "code": "#include <atomic>\n#include <cstdint>\n#include <iostream>\n\nclass QuoteSeqLock {\npublic:\n    void store(std::int64_t bid) {\n        sequence_.fetch_add(1, std::memory_order_relaxed);\n        std::atomic_thread_fence(std::memory_order_release);\n        bid_.store(bid, std::memory_order_relaxed);\n        sequence_.fetch_add(1, std::memory_order_release);\n    }\n    std::uint64_t sequence() const {\n        return sequence_.load(std::memory_order_relaxed);\n    }\n    std::int64_t bid() const {\n        return bid_.load(std::memory_order_relaxed);\n    }\n\nprivate:\n    std::atomic<std::uint64_t> sequence_{0};\n    std::atomic<std::int64_t> bid_{0};\n};\n\nint main() {\n    QuoteSeqLock quotes;\n    std::cout << quotes.sequence();\n    quotes.store(101);\n    std::cout << ' ' << quotes.sequence();\n    quotes.store(103);\n    std::cout << ' ' << quotes.sequence() << ' ' << quotes.bid() << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "0 2 4 103"
+      ],
+      "explain": "Each `store` increments the counter twice — even to odd on entry, odd to even on publication — so a completed write advances it by two, never by one. The counter therefore counts write *transitions*, not writes, and its parity is the reader's in-progress signal. A reader that saw 1 or 3 would be looking at a half-written generation and would have to retry."
+    },
+    {
+      "id": "c26-r04",
+      "section": "ABA and tagged pointers",
+      "prompt": "What does this print?",
+      "code": "#include <cstdint>\n#include <iostream>\n\nstruct Node { int value; Node* next; };\n\nstruct Tagged {\n    static constexpr std::uint64_t address_mask =\n        (std::uint64_t{1} << 48) - 1;\n    static std::uint64_t pack(Node* pointer, std::uint16_t tag) {\n        auto address = reinterpret_cast<std::uintptr_t>(pointer);\n        return (std::uint64_t{tag} << 48) | (address & address_mask);\n    }\n    static Node* pointer(std::uint64_t packed) {\n        return reinterpret_cast<Node*>(\n            static_cast<std::uintptr_t>(packed & address_mask));\n    }\n    static std::uint16_t tag(std::uint64_t packed) {\n        return static_cast<std::uint16_t>(packed >> 48);\n    }\n};\n\nint main() {\n    Node node{5, nullptr};\n    std::uint64_t first = Tagged::pack(&node, 1);\n    std::uint64_t second = Tagged::pack(&node, 2);\n    std::cout << std::boolalpha << (first == second) << ' '\n              << (Tagged::pointer(second) == &node) << ' '\n              << Tagged::tag(second) << ' '\n              << Tagged::pointer(second)->value << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "false true 2 5"
+      ],
+      "explain": "The same address packed with two different generations produces two different words, which is exactly the ABA fix: a CAS against `first` can no longer succeed once the generation has advanced, even though the address came back. Unpacking round-trips because this deployment's usable addresses fit in the low 48 bits — a convention, not a portable C++ property, and one that five-level paging or hardware pointer tagging invalidates. Note also that the tag fixes identity only; dereferencing `pointer(second)` safely still requires a reclamation protocol."
+    },
+    {
+      "id": "c26-r05",
+      "section": "Bounded SPSC ring buffer",
+      "prompt": "What does this print?",
+      "code": "#include <array>\n#include <atomic>\n#include <cstdint>\n#include <iostream>\n#include <optional>\n#include <thread>\n\ntemplate<class T, std::size_t N>\nclass SpscRing {\n    static_assert(N > 0 && (N & (N - 1)) == 0);\npublic:\n    bool push(T value) noexcept {\n        std::uint64_t tail = tail_.load(std::memory_order_relaxed);\n        if (tail - head_.load(std::memory_order_acquire) == N) return false;\n        slots_[tail & (N - 1)].emplace(std::move(value));\n        tail_.store(tail + 1, std::memory_order_release);\n        return true;\n    }\n    bool pop(T& value) noexcept {\n        std::uint64_t head = head_.load(std::memory_order_relaxed);\n        if (tail_.load(std::memory_order_acquire) == head) return false;\n        auto& slot = slots_[head & (N - 1)];\n        value = std::move(*slot);\n        slot.reset();\n        head_.store(head + 1, std::memory_order_release);\n        return true;\n    }\nprivate:\n    alignas(64) std::atomic<std::uint64_t> head_{0};\n    alignas(64) std::atomic<std::uint64_t> tail_{0};\n    alignas(64) std::array<std::optional<T>, N> slots_{};\n};\n\nint main() {\n    SpscRing<int, 4> ring;\n    long total = 0;\n    std::thread producer{[&] {\n        for (int i = 1; i <= 1000; ++i) while (!ring.push(i)) {}\n    }};\n    std::thread consumer{[&] {\n        for (int i = 0; i < 1000; ++i) {\n            int value = 0;\n            while (!ring.pop(value)) {}\n            total += value;\n        }\n    }};\n    producer.join();\n    consumer.join();\n    std::cout << total << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "500500"
+      ],
+      "explain": "A four-slot ring carries a thousand items because it is a ring: `push` and `pop` return false at full and empty and the callers spin, so capacity bounds occupancy, not throughput. The result is fully determined — SPSC preserves FIFO order, no item is lost or duplicated, and both joins happen before the print — so the sum is 1+2+...+1000 = 500500. What varies between runs is only how often each spin loop turns."
+    },
+    {
+      "id": "c26-r06",
+      "section": "Bounded SPSC ring buffer",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <array>\n#include <cstddef>\n#include <iostream>\n#include <optional>\n\ntemplate<class T, std::size_t N>\nclass SpscRing {\n    static_assert(N > 0 && (N & (N - 1)) == 0,\n                  \"capacity must be a power of two: slots are\"\n                  \" addressed with position & (N - 1)\");\n\n    std::array<std::optional<T>, N> slots_{};\n};\n\nint main() {\n    SpscRing<int, 1'000> ring;\n    (void)ring;\n    std::cout << \"constructed\\n\";\n}",
+      "kind": "no-compile",
+      "explain": "1000 is not a power of two, so the static_assert fires at instantiation. The assertion is not defensive style — `position & (N - 1)` equals `position % N` only for power-of-two N, and for 1000 the mask 999 would silently select wrong slots rather than failing, corrupting the queue in a way no test would attribute to the capacity. Turning a silent-wrong-answer bug into a build failure is what the assertion is for; a caller who wants 1000 elements asks for 1024."
+    },
+    {
+      "id": "c26-r07",
+      "section": "Safe memory reclamation",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <atomic>\n#include <iostream>\n\nstruct Node { int value; Node* next; };\n\nint main() {\n    std::atomic<Node*> head{nullptr};\n    head.store(new Node{2, nullptr}, std::memory_order_release);\n    head.store(new Node{7, head.load(std::memory_order_acquire)},\n               std::memory_order_release);\n\n    // A reader has loaded the head and is about to dereference it.\n    Node* observed = head.load(std::memory_order_acquire);\n\n    // Meanwhile the popping thread unlinks and frees it.\n    Node* next = observed->next;\n    head.compare_exchange_strong(observed, next,\n                                 std::memory_order_acq_rel);\n    delete observed;\n\n    std::cout << observed->value << '\\n';  // the reader dereferences\n}",
+      "kind": "ub",
+      "explain": "This is the safe-memory-reclamation tax in one function: the CAS proved logical removal, but nothing proved that no reader still held the address, so the `delete` turns the reader's dereference into a use-after-free — AddressSanitizer reports it as heap-use-after-free. Note what does *not* help: the orderings are already acq_rel and acquire, and a tagged pointer would fix identity comparison while leaving this dereference exactly as unsafe. The fixes are protocols — hazard pointers, epochs, RCU, or a pool that never frees."
+    },
+    {
+      "id": "c26-r08",
+      "section": "Seqlocks",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <atomic>\n#include <cstdint>\n#include <iostream>\n#include <thread>\n\nstd::atomic<std::uint64_t> sequence{0};\nstd::int64_t bid = 0;   // plain payload\nstd::int64_t ask = 0;   // plain payload\nint accepted = 0;\n\nint main() {\n    std::thread writer{[] {\n        for (std::int64_t i = 1; i <= 200'000; ++i) {\n            sequence.fetch_add(1, std::memory_order_relaxed);\n            bid = i;\n            ask = i + 1;\n            sequence.fetch_add(1, std::memory_order_release);\n        }\n    }};\n    std::thread reader{[] {\n        for (int i = 0; i < 200'000; ++i) {\n            auto before = sequence.load(std::memory_order_acquire);\n            std::int64_t b = bid, a = ask;\n            if ((before & 1u) == 0 &&\n                before == sequence.load(std::memory_order_acquire)) {\n                accepted += (a == b + 1);\n            }\n        }\n    }};\n    writer.join();\n    reader.join();\n    std::cout << \"done\\n\";\n}",
+      "kind": "ub",
+      "explain": "The sequence protocol is correct, but `bid` and `ask` are ordinary `std::int64_t`, so the writer's stores and the reader's loads are conflicting non-atomic accesses with no happens-before edge: a data race, and the whole execution is undefined. Discarding a torn snapshot afterwards cannot repair it — UB is a property of the execution, not of the value you keep, and the optimiser may already have assumed the race away. The chapter's fix is to make the payload relaxed atomics (or `std::atomic_ref` over a wire-layout struct), leaving the sequence protocol to supply snapshot consistency. ASan and UBSan do not detect races, so a quiet run here is expected; ThreadSanitizer is the tool that flags it."
+    }
+  ],
+  "writing": [
+    {
+      "id": "c26-w01",
+      "section": "Blocking, non-blocking, and the progress ladder",
+      "minutes": 8,
+      "prompt": "Write a `SpinLock` over `std::atomic_flag` with correct acquire/release orderings and an RAII guard. Add a comment stating precisely why it is blocking rather than lock-free, and delete the copy operations.",
+      "checklist": [
+        "lock() uses test_and_set with memory_order_acquire in a loop",
+        "unlock() uses clear with memory_order_release",
+        "Copy constructor and copy assignment are deleted (or the flag member makes them implicitly deleted, and a comment says so)",
+        "An RAII guard acquires in its constructor and releases in its destructor",
+        "Comment states that a descheduled holder stops every spinner, which is the definition of blocking"
+      ],
+      "solution": "#include <atomic>\n\nclass SpinLock {\npublic:\n    SpinLock() = default;\n    SpinLock(const SpinLock&) = delete;             // a copied lock\n    SpinLock& operator=(const SpinLock&) = delete;  // protects nothing\n\n    void lock() {\n        // acquire: everything in the critical section stays after this.\n        while (held_.test_and_set(std::memory_order_acquire)) {\n        }\n    }\n\n    void unlock() {\n        // release: everything in the critical section stays before this.\n        held_.clear(std::memory_order_release);\n    }\n\nprivate:\n    std::atomic_flag held_ = ATOMIC_FLAG_INIT;\n};\n\nclass SpinGuard {\npublic:\n    explicit SpinGuard(SpinLock& lock) : lock_(lock) { lock_.lock(); }\n    ~SpinGuard() { lock_.unlock(); }\n    SpinGuard(const SpinGuard&) = delete;\n    SpinGuard& operator=(const SpinGuard&) = delete;\n\nprivate:\n    SpinLock& lock_;\n};\n\n// This is BLOCKING, not lock-free. There is still a holder: if the\n// thread inside the critical section is descheduled, page-faults, or\n// suffers priority inversion, every spinner waits for it. Removing\n// std::mutex removed an API, not the ownership.",
+      "notes": "Note also what a spinlock costs when it does block: unlike a mutex it burns CPU rather than yielding, so a preempted holder is worse here than under `std::mutex`. An uncontended mutex commonly takes a short atomic fast path of its own, so \"we replaced the mutex with atomics\" is not by itself a performance argument."
+    },
+    {
+      "id": "c26-w02",
+      "section": "Linearizability and its limits",
+      "minutes": 8,
+      "prompt": "`if (!map.contains(k)) map.insert(k, v);` produces duplicates under concurrency even though both operations are linearizable. Write the corrected client code and, in comments, name the linearization point of the fixed version and explain why a stronger memory order would not have helped.",
+      "checklist": [
+        "The check-then-act pair is replaced by one compound operation (insert_if_absent) or held under a lock",
+        "Comment identifies the linearization point of the compound operation",
+        "Comment states that linearizability composes per operation, not across a client-side sequence",
+        "Comment states that the missing boundary is a new operation, not a stronger memory order"
+      ],
+      "solution": "#include <mutex>\n\nclass ConcurrentMap {\npublic:\n    bool contains(int key) const;\n    void insert(int key, int value);\n    // One operation, one linearization point: the successful CAS (or\n    // the internal lock acquisition) that installs the entry. Either\n    // the key was absent at that instant and this call installed it, or\n    // it was present and this call reports false. No other thread can\n    // observe a state between the check and the act, because there is\n    // no longer a gap to observe.\n    bool insert_if_absent(int key, int value);\n};\n\nbool create_once(ConcurrentMap& map, int key, int value) {\n    return map.insert_if_absent(key, value);\n}\n\n// Why the original was broken, and why memory orders cannot fix it:\n//\n// Linearizability composes at the OBJECT-OPERATION level. Both\n// contains() and insert() may be individually linearizable while the\n// client-side pair is not atomic: another thread linearizes its own\n// insert between the two calls, and both callers proceed.\n//\n// The gap is a missing OPERATION BOUNDARY, not a missing ordering\n// edge - seq_cst on every internal atomic would leave the interleaving\n// exactly as legal. The alternative fix is to hold a lock across the\n// pair, which supplies the same boundary from the outside.\n\nstd::mutex map_mutex;\n\nbool create_once_locked(ConcurrentMap& map, int key, int value) {\n    std::lock_guard lock{map_mutex};\n    if (map.contains(key)) {\n        return false;\n    }\n    map.insert(key, value);\n    return true;\n}",
+      "notes": "The same reasoning condemns `if (queue.size() > 0) queue.pop();` and every other test-then-use pair over a concurrent container. Even a linearizable `size()` is stale the instant it returns — treat aggregate observations as snapshots with an explicit semantic, never as facts that remain true afterwards."
+    },
+    {
+      "id": "c26-w03",
+      "section": "Contention and retry reality",
+      "minutes": 10,
+      "prompt": "Write a contended `increment()` on a `std::atomic<std::uint64_t>` with bounded exponential backoff: spin a capped number of times on each failure, then escalate to a scheduler yield. Comment on why the failed CAS does not need a reload and what backoff does and does not buy.",
+      "checklist": [
+        "The failure count drives a shift that is capped (e.g. min(failures, 8))",
+        "No explicit reload of `expected` inside the loop — the failed CAS refreshes it",
+        "compare_exchange_weak is used, with a comment saying why weak suits a retry loop",
+        "Escalates to std::this_thread::yield() only after the spin budget is exhausted",
+        "Comment states that backoff reduces coherence traffic but does not make the algorithm wait-free or prevent starvation"
+      ],
+      "solution": "#include <algorithm>\n#include <atomic>\n#include <cstdint>\n#include <thread>\n\nstd::atomic<std::uint64_t> counter{0};\n\nvoid backoff(unsigned failures) {\n    unsigned shift = std::min(failures, 8u);   // cap the doubling\n    unsigned spins = 1u << shift;\n    for (unsigned i = 0; i < spins; ++i) {\n        // Keeps the empty spin from being optimised away. This is a\n        // compiler barrier, NOT a processor pause instruction -\n        // production wraps a target-specific pause behind a portability\n        // shim.\n        std::atomic_signal_fence(std::memory_order_seq_cst);\n    }\n    if (failures > 8) {\n        std::this_thread::yield();  // escalate to the scheduler\n    }\n}\n\nvoid increment() {\n    std::uint64_t expected = counter.load(std::memory_order_relaxed);\n    // No reload in the loop body: a failed compare_exchange writes the\n    // observed value back into `expected`, and the next attempt\n    // computes its desired value from that observation.\n    //\n    // weak: this loop retries anyway, so a spurious failure costs one\n    // iteration and avoids the nested retry strong CAS may need on an\n    // LL/SC machine.\n    for (unsigned failures = 0;\n         !counter.compare_exchange_weak(expected, expected + 1,\n                                        std::memory_order_relaxed);\n         ++failures) {\n        backoff(failures);\n    }\n}\n\n// Backoff trades individual latency for less coherence traffic and can\n// improve observed fairness. It does NOT promote this loop to\n// wait-free, and it does not prevent one caller from starving: CAS\n// fairness is not guaranteed. Constants tuned on one processor, core\n// count, or scheduler are not universal.",
+      "notes": "The structural fix usually beats the tuning: shard the counter per thread and sum on read, or replace many producers with SPSC handoffs, and the contention disappears instead of being spread out. Also remember that a single-thread benchmark of this function measures the path with no failed CAS and no line migration — it says almost nothing about the contended case."
+    },
+    {
+      "id": "c26-w04",
+      "section": "Seqlocks",
+      "minutes": 14,
+      "prompt": "Write a single-writer seqlock publishing a two-field quote snapshot to many readers, using relaxed atomic payload fields plus fences. Comment on the two directions of the correctness proof and on the constraints the design imposes.",
+      "checklist": [
+        "Writer increments the counter to odd, then a release fence, then relaxed payload stores, then a release increment to even",
+        "Reader retries when the first counter load is odd",
+        "Reader loads the payload relaxed, then an acquire fence, then re-reads the counter and accepts only on equality",
+        "Payload fields are atomic (relaxed), not plain members",
+        "A comment states that only one thread may call store()",
+        "A comment names the counter-wrap assumption or the small-payload constraint"
+      ],
+      "solution": "#include <atomic>\n#include <cstdint>\n\nstruct Quote {\n    std::int64_t bid_ticks;\n    std::int64_t ask_ticks;\n};\n\nclass QuoteSeqLock {\npublic:\n    // SINGLE WRITER ONLY. Multiple writers need a separate\n    // serialization mechanism; nothing here provides one.\n    void store(const Quote& quote) {\n        sequence_.fetch_add(1, std::memory_order_relaxed);   // -> odd\n        std::atomic_thread_fence(std::memory_order_release);\n        bid_.store(quote.bid_ticks, std::memory_order_relaxed);\n        ask_.store(quote.ask_ticks, std::memory_order_relaxed);\n        sequence_.fetch_add(1, std::memory_order_release);   // -> even\n    }\n\n    Quote load() const {\n        for (;;) {\n            std::uint64_t before = sequence_.load(std::memory_order_acquire);\n            if ((before & 1u) != 0) {\n                continue;  // a write is in progress\n            }\n\n            Quote quote{bid_.load(std::memory_order_relaxed),\n                        ask_.load(std::memory_order_relaxed)};\n\n            std::atomic_thread_fence(std::memory_order_acquire);\n            std::uint64_t after = sequence_.load(std::memory_order_relaxed);\n            if (before == after) {\n                return quote;  // equal EVEN counters bracket the reads\n            }\n        }\n    }\n\nprivate:\n    // Payload fields are ATOMIC. Plain fields would race with the\n    // writer, and discarding a torn snapshot afterwards does not repair\n    // undefined behaviour.\n    std::atomic<std::uint64_t> sequence_{0};\n    std::atomic<std::int64_t> bid_{0};\n    std::atomic<std::int64_t> ask_{0};\n};\n\n// The proof runs in two directions:\n//  (1) If the reader observes a COMPLETED even generation, the writer's\n//      final release increment published the corresponding payload, so\n//      the relaxed loads observe it or something later.\n//  (2) If the reader observes any field from an IN-PROGRESS generation,\n//      the writer's odd increment is sequenced before its release\n//      fence, so the reader's acquire fence forces its final sequence\n//      load to see the odd value or later - and the equality check\n//      fails.\n//\n// Assumptions: the counter must not complete a full wrap between the\n// reader's two loads (a 64-bit counter makes that unreachable, but it\n// is part of the proof, not a gift); and the payload must stay small\n// and trivially copyable, since a large one widens the overlap window\n// and turns write bursts into retry storms.",
+      "notes": "`std::atomic_ref` is the escape hatch when the payload must keep a wire-layout plain-field type: it applies the same relaxed operations to suitably aligned existing fields, but then *every* concurrent access to those fields must go through an atomic_ref. Production should also verify the chosen field types are lock-free on the target. Reading the payload once without rechecking the sequence is not a seqlock."
+    },
+    {
+      "id": "c26-w05",
+      "section": "ABA and tagged pointers",
+      "minutes": 10,
+      "prompt": "Write a `TaggedPointer` helper that packs a node address and a 16-bit generation into one 64-bit word, with pack/unpack/tag accessors. In comments, state the portability assumption it makes and the two things it does NOT fix.",
+      "checklist": [
+        "A 48-bit address mask computed from a shift, not a hard-coded literal",
+        "pack() masks the address and shifts the tag into the high bits",
+        "pointer() and tag() are inverses of pack() for a valid input",
+        "Comment names the deployment-specific 48-bit address assumption and at least one thing that invalidates it",
+        "Comment states that the 16-bit generation can wrap and the proof must bound mutations",
+        "Comment states that tagging does not make dereferencing an unlinked node safe"
+      ],
+      "solution": "#include <cstdint>\n\nstruct Node {\n    int value;\n    Node* next;\n};\n\nstruct TaggedPointer {\n    static constexpr std::uint64_t address_mask =\n        (std::uint64_t{1} << 48) - 1;\n\n    static std::uint64_t pack(Node* pointer, std::uint16_t tag) {\n        auto address = reinterpret_cast<std::uintptr_t>(pointer);\n        return (std::uint64_t{tag} << 48) | (address & address_mask);\n    }\n\n    static Node* pointer(std::uint64_t packed) {\n        auto address = static_cast<std::uintptr_t>(packed & address_mask);\n        return reinterpret_cast<Node*>(address);\n    }\n\n    static std::uint16_t tag(std::uint64_t packed) {\n        return static_cast<std::uint16_t>(packed >> 48);\n    }\n};\n\n// PORTABILITY ASSUMPTION: usable pointers fit in the low 48 bits and\n// round-trip after masking. That is a deployment-specific x86-64\n// lower-address convention, not a property of C++. Five-level paging,\n// hardware pointer tags, capability pointers, and different virtual\n// address layouts all invalidate it.\n//\n// WHAT THIS DOES NOT FIX:\n//  (1) Wraparound. A 16-bit generation repeats after 65,536 mutations\n//      and can recreate an old packed value. The proof must BOUND the\n//      mutations that can occur during the lifetime of any outstanding\n//      observation - \"unlikely\" is not a proof.\n//  (2) Lifetime. Tagging fixes IDENTITY COMPARISON only. A popping\n//      thread still dereferences observed->next before its CAS, so it\n//      still needs a reclamation protocol to keep that node alive.\n//      Tagged pointers and safe reclamation solve different halves of\n//      the stack problem.",
+      "notes": "A 128-bit `{pointer, generation}` pair avoids stealing address bits, but lock-free double-width CAS is implementation- and target-dependent — check `is_lock_free()`, because an `std::atomic` of that type may exist and still call a library lock. The cleanest escape is to stop using addresses as identity: a preallocated pool indexed by slot with a per-slot generation removes ABA and reclamation together."
+    },
+    {
+      "id": "c26-w06",
+      "section": "Safe memory reclamation",
+      "minutes": 12,
+      "prompt": "Write the hazard-pointer-protected read of a lock-free stack head: publish, validate, dereference, clear. Comment on why publish must precede validation and what a reclaimer must do before freeing a retired node.",
+      "checklist": [
+        "The candidate is published to the hazard slot before the shared pointer is re-read",
+        "A mismatch on the re-read restarts the loop rather than proceeding",
+        "The hazard slot is cleared on every exit path, including the null/empty path",
+        "The dereference happens only between a successful validation and the clear",
+        "Comment explains that validating first leaves a window in which the node can be freed before the hazard is visible",
+        "Comment states that a reclaimer scans every slot and frees only nodes no slot names"
+      ],
+      "solution": "#include <atomic>\n#include <optional>\n\nstruct Node {\n    int value;\n    Node* next;\n};\n\nextern std::atomic<Node*> head;\n\nclass HazardSlot {\npublic:\n    void publish(Node* node) {\n        protected_.store(node, std::memory_order_seq_cst);\n    }\n    void clear() {\n        protected_.store(nullptr, std::memory_order_seq_cst);\n    }\n    Node* get() const {\n        return protected_.load(std::memory_order_seq_cst);\n    }\n\nprivate:\n    std::atomic<Node*> protected_{nullptr};\n};\n\nstd::optional<int> read_head(HazardSlot& hazard) {\n    for (;;) {\n        Node* node = head.load(std::memory_order_acquire);\n\n        // PUBLISH FIRST. Validating first would leave a window in which\n        // the node is unlinked and freed before this hazard becomes\n        // visible to a scanning reclaimer - exactly the\n        // reuse-before-read race the protocol exists to close.\n        hazard.publish(node);\n\n        // VALIDATE. If head still names the node, the publication was\n        // already established at a point where the node was still\n        // linked, so any later scan must observe it.\n        if (node != head.load(std::memory_order_acquire)) {\n            continue;  // republish the new candidate\n        }\n\n        if (node == nullptr) {\n            hazard.clear();          // clear on the empty path too\n            return std::nullopt;\n        }\n\n        int value = node->value;     // protected dereference\n        hazard.clear();\n        return value;\n    }\n}\n\n// The reclaimer side: unlinked nodes go onto a per-thread RETIRED list;\n// periodically the owner scans EVERY hazard slot and frees only those\n// retired nodes that no slot names. Nodes still named are kept for the\n// next scan. That is why clearing this thread's own slot after it is\n// finished is safe: another thread's slot may still protect the node,\n// and the scan honours it.",
+      "notes": "The seq_cst ordering on the slot is not decoration: the publish-then-validate proof needs the reclaimer's scan and the reader's publication to agree on one order, which is exactly what acquire/release alone does not give (see the store-buffering litmus test in Chapter 25). Note too that a real retired list can allocate during `try_pop` — a bounded low-latency implementation preallocates a fixed-capacity per-thread batch. Registration, slot reuse after thread exit, and shutdown draining all need an owning domain in production."
+    },
+    {
+      "id": "c26-w07",
+      "section": "Bounded SPSC ring buffer",
+      "minutes": 15,
+      "prompt": "Write the `push` and `pop` of a bounded SPSC ring with power-of-two capacity, cached peer indices, and cache-line separation. Comment on the ownership rule that justifies each memory order.",
+      "checklist": [
+        "static_assert enforces a power-of-two capacity",
+        "Each thread loads its OWN index relaxed and publishes it with a release store",
+        "The peer's index is loaded with acquire, and only when the cached copy says full/empty",
+        "Slot access is `position & (N - 1)`; the element is destroyed before head_ is published",
+        "head_, tail_ and the storage are separated with alignas(64) (or hardware_destructive_interference_size)",
+        "Comments state the single-writer ownership rule for each index"
+      ],
+      "solution": "#include <array>\n#include <atomic>\n#include <cstddef>\n#include <cstdint>\n#include <optional>\n#include <type_traits>\n\ntemplate<class T, std::size_t N>\nrequires (std::is_nothrow_move_constructible_v<T> &&\n          std::is_nothrow_move_assignable_v<T> &&\n          std::is_nothrow_destructible_v<T>)\nclass SpscRing {\n    // position & (N - 1) == position % N only for a power of two.\n    static_assert(N > 0 && (N & (N - 1)) == 0);\n    static_assert(std::atomic<std::uint64_t>::is_always_lock_free);\n\npublic:\n    bool push(T&& value) noexcept {\n        // tail_ is PRODUCER-OWNED: nobody else writes it, so relaxed.\n        std::uint64_t tail = tail_.load(std::memory_order_relaxed);\n\n        if (tail - cached_head_ == N) {\n            // Only now pay for the peer's index. Acquire: head_ carries\n            // the consumer's release publication that a slot was\n            // drained and destroyed, and we are about to reuse it.\n            cached_head_ = head_.load(std::memory_order_acquire);\n            if (tail - cached_head_ == N) {\n                return false;  // genuinely full\n            }\n        }\n\n        slots_[tail & (N - 1)].emplace(std::move(value));\n        // Release: publishes the constructed element to the consumer's\n        // acquire load of tail_.\n        tail_.store(tail + 1, std::memory_order_release);\n        return true;\n    }\n\n    bool pop(T& value) noexcept {\n        // head_ is CONSUMER-OWNED: relaxed for the same reason.\n        std::uint64_t head = head_.load(std::memory_order_relaxed);\n\n        if (cached_tail_ == head) {\n            cached_tail_ = tail_.load(std::memory_order_acquire);\n            if (cached_tail_ == head) {\n                return false;  // genuinely empty\n            }\n        }\n\n        auto& slot = slots_[head & (N - 1)];\n        value = std::move(*slot);\n        slot.reset();  // destroy BEFORE publishing the slot as free\n        head_.store(head + 1, std::memory_order_release);\n        return true;\n    }\n\nprivate:\n    // Separate the producer-written state, the consumer-written state,\n    // and the storage so unrelated writes do not share a line.\n    alignas(64) std::atomic<std::uint64_t> head_{0};\n    std::uint64_t cached_tail_{0};\n\n    alignas(64) std::atomic<std::uint64_t> tail_{0};\n    std::uint64_t cached_head_{0};\n\n    alignas(64) std::array<std::optional<T>, N> slots_{};\n};",
+      "notes": "A stale cached peer index is always conservative: the peer only ever advances, so a stale value understates the available space or items and costs at most one extra acquire load — it can never permit an overrun. There is no wasted slot and no separate full flag, because `tail - head` is exact under unsigned wraparound. Note the algorithm contains no retry loop at all: each call does a fixed amount of work and returns `false`, which is what makes it wait-free on a target where the 64-bit atomics and T's move and destruction are bounded."
+    },
+    {
+      "id": "c26-w08",
+      "section": "Putting the pieces together: decode and hand off",
+      "minutes": 12,
+      "prompt": "Write an `on_packet(std::span<const char>)` ingress handler that decodes a borrowed packet into a closed variant via `std::expected`, then hands it to a bounded SPSC ring. In comments, account for the owner at every handoff and state the overload policy.",
+      "checklist": [
+        "The packet is a non-owning std::span and no view escapes the call",
+        "Decode failure returns std::expected/std::unexpected with a typed error enum, not an exception or a sentinel",
+        "The decoded message is a closed std::variant consumed with std::visit",
+        "The message is moved into the queue, and a failed push is recorded rather than ignored or retried indefinitely",
+        "Comments name the owner at each stage: caller owns the bytes, expected owns the message-or-error, the ring slot owns the pushed value"
+      ],
+      "solution": "#include <expected>\n#include <span>\n#include <utility>\n#include <variant>\n\nstruct Trade { int price; int quantity; };\nstruct Quote { int price; int quantity; };\nusing Message = std::variant<Trade, Quote>;\n\nenum class DecodeError {\n    short_message, unknown_kind, missing_separator, invalid_number\n};\n\nstd::expected<Message, DecodeError> decode(std::span<const char> packet);\n\nvoid record_trade();\nvoid record_quote();\nvoid record_decode_error(DecodeError);\nvoid record_queue_full();\n\ntemplate<class... Functions>\nstruct Overloaded : Functions... {\n    using Functions::operator()...;\n};\n\ntemplate<class Ring>\nclass Ingress {\npublic:\n    explicit Ingress(Ring& output) : output_(output) {}\n\n    void on_packet(std::span<const char> packet) {\n        // OWNER: the caller owns the bytes and outlives this call. The\n        // span borrows them; no view derived from it escapes.\n        auto decoded = decode(packet);\n        if (!decoded) {\n            // Typed failure, not an exception and not a sentinel value.\n            record_decode_error(decoded.error());\n            return;\n        }\n\n        // OWNER: `decoded` owns either the variant or the error; moving\n        // out of it transfers the fields into a local value.\n        Message message = std::move(*decoded);\n\n        // Closed set - std::visit is exhaustive at compile time, with\n        // no virtual dispatch and no default case to rot.\n        std::visit(Overloaded{\n            [](const Trade&) { record_trade(); },\n            [](const Quote&) { record_quote(); }\n        }, message);\n\n        // OWNER: a successful push moves ownership into one preallocated\n        // ring slot. OVERLOAD POLICY: return failure and record it. The\n        // producer neither blocks nor grows storage; a full queue is a\n        // visible, measurable event that the caller can escalate.\n        if (!output_.push(std::move(message))) {\n            record_queue_full();\n        }\n    }\n\nprivate:\n    Ring& output_;\n};",
+      "notes": "The structural property matters more than any single line: no failure path silently grows storage, blocks a thread, or discards an order-like event. Note that `record_queue_full` must itself be allocation-free on a hot path, and that returning failure is the right policy here only because the caller is expected to escalate — for an order stream a silent drop would be a compliance incident, while for conflatable quotes a purpose-built conflation slot would be the better design."
+    }
+  ]
+}

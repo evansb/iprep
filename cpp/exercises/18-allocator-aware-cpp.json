@@ -1,0 +1,558 @@
+{
+  "chapter": 18,
+  "mcq": [
+    {
+      "id": "c18-m01",
+      "section": "Allocation strategy as a container parameter",
+      "difficulty": "easy",
+      "prompt": "Which of these standard containers takes no allocator?",
+      "choices": [
+        "std::string",
+        "std::map",
+        "std::vector",
+        "std::array"
+      ],
+      "answer": 3,
+      "explain": "std::array stores its elements inline as a member, so there is no dynamic storage to obtain and no allocator parameter. Vector, string, map and the other dynamic containers are all allocator-aware — including string, which is easy to forget because its small-buffer optimisation hides the allocator on short values."
+    },
+    {
+      "id": "c18-m02",
+      "section": "Allocation strategy as a container parameter",
+      "difficulty": "medium",
+      "prompt": "What is the difference between what `reserve` and what `emplace_back` ask of an allocator-aware vector's allocator?",
+      "choices": [
+        "emplace_back never allocates, because reserve is the only allocating operation",
+        "reserve obtains raw storage and constructs no elements; emplace_back constructs an element and only allocates if capacity is exhausted",
+        "Both obtain storage and construct elements; reserve just does it in bulk",
+        "reserve constructs value-initialised elements up to the requested capacity"
+      ],
+      "answer": 1,
+      "explain": "reserve performs step one of the container's protocol — ask the allocator for suitably sized and aligned raw storage — without starting any element lifetimes. emplace_back performs step two, constructing in storage that already exists, and only reaches the allocator when capacity runs out. Thinking reserve creates elements confuses it with resize, which does construct them."
+    },
+    {
+      "id": "c18-m03",
+      "section": "Allocation strategy as a container parameter",
+      "difficulty": "medium",
+      "prompt": "`std::vector<int, ArenaAllocator<int>>` and `std::vector<int>` — what is their relationship?",
+      "choices": [
+        "The same type whenever both allocators compare equal",
+        "The same type; the allocator is erased at run time",
+        "Distinct types, so the arena-backed one cannot be passed to a function taking std::vector<int>&",
+        "Distinct types, but they assign to each other through a converting constructor"
+      ],
+      "answer": 2,
+      "explain": "The allocator is a template parameter, so it is part of the container's type and part of its state. That type fragmentation means an arena-backed vector will not bind to a std::vector<int>& parameter and cannot be assigned from a differently allocated vector. Type erasure of the strategy is exactly what std::pmr provides instead, by keeping the allocator type fixed and moving the choice into a resource pointer."
+    },
+    {
+      "id": "c18-m04",
+      "section": "The classic allocator interface",
+      "difficulty": "easy",
+      "prompt": "What does a minimal C++17 allocator have to provide?",
+      "choices": [
+        "value_type, allocate(n), deallocate(p, n), and equality",
+        "construct, destroy, max_size, rebind and pointer typedefs",
+        "A public default constructor and nothing else",
+        "Only allocate and deallocate members"
+      ],
+      "answer": 0,
+      "explain": "Since C++17 the minimum is a value_type, the allocate/deallocate pair, and equality comparison; std::allocator_traits supplies the rest — pointer types, construct, destroy, size limits and propagation traits — from defaults. Requiring the full pre-C++17 surface with rebind and construct/destroy is the outdated answer; omitting value_type is the fatal one, because it stops allocator_traits adapting the class at all."
+    },
+    {
+      "id": "c18-m05",
+      "section": "The classic allocator interface",
+      "difficulty": "medium",
+      "prompt": "A container calls `allocator.allocate(4)` for a vector of Order. What is the 4?",
+      "choices": [
+        "A size class index",
+        "The container's current size()",
+        "A number of bytes",
+        "A number of elements, so the allocator multiplies by sizeof(Order) itself"
+      ],
+      "answer": 3,
+      "explain": "Allocators receive element counts, not byte counts — which is why the chapter's allocate begins by checking count against SIZE_MAX / sizeof(T) before performing the multiplication. Treating the argument as bytes gives an allocation sizeof(T) times too small. The count passed later to deallocate is the size of the block being returned, not the container's current size()."
+    },
+    {
+      "id": "c18-m06",
+      "section": "The classic allocator interface",
+      "difficulty": "medium",
+      "prompt": "Why does an allocator need a converting constructor template from A<U>?",
+      "choices": [
+        "Because a node-based container rebinds the allocator to its internal node type and must carry the allocator's state across",
+        "To satisfy std::allocator_traits::max_size",
+        "To allow implicit conversion to std::allocator<T>",
+        "To let two allocators compare equal across element types"
+      ],
+      "answer": 0,
+      "explain": "A std::map does not allocate Ts; it allocates nodes. The container rebinds A<T> to A<Node>, and the converting constructor is how the original allocator's state — an arena pointer, a counter pointer — survives that rebind. Without it the rebound allocator would be default-constructed and would quietly use a different storage domain."
+    },
+    {
+      "id": "c18-m07",
+      "section": "The classic allocator interface",
+      "difficulty": "hard",
+      "prompt": "An arena allocator's operator== is written to return true unconditionally, even for instances referring to different arenas. What is the consequence?",
+      "choices": [
+        "Nothing; equality is only used for diagnostics",
+        "Containers may conclude that one allocator can release storage obtained from the other, eventually returning bytes to the wrong owner",
+        "Copies of the container will share one arena, which is the intended optimisation",
+        "It becomes a compile error the first time the container rebinds the allocator"
+      ],
+      "answer": 1,
+      "explain": "Equality carries a promise: either instance may deallocate storage the other obtained. Containers act on it — a move assignment steals the buffer when the allocators compare equal, and swap requires equality when the traits do not propagate. Lying makes a vector hand left-arena bytes to a right-arena owner. Equality means interchangeable, not merely 'the same kind of allocator'."
+    },
+    {
+      "id": "c18-m08",
+      "section": "Propagation and equality — survey level",
+      "difficulty": "medium",
+      "prompt": "Two vectors use unequal arena allocators, and propagate_on_container_move_assignment is false. What does `destination = std::move(source);` do?",
+      "choices": [
+        "Copies the source allocator into the destination and then steals the buffer",
+        "Steals the source buffer, in constant time",
+        "Allocates from the destination's allocator and moves the elements one by one, in O(n)",
+        "Is undefined behaviour"
+      ],
+      "answer": 2,
+      "explain": "The destination may not adopt a buffer owned by the source's arena, and the trait forbids adopting the source's allocator, so the only correct fallback is element-wise: allocate from the destination, move each element, destroy the source's. The familiar 'a vector move is constant time' claim is therefore conditional on propagation or equality — for move construction it holds unconditionally, for move assignment it does not."
+    },
+    {
+      "id": "c18-m09",
+      "section": "Propagation and equality — survey level",
+      "difficulty": "medium",
+      "prompt": "`first.swap(second);` where the two containers hold unequal, non-propagating allocators. What is the verdict?",
+      "choices": [
+        "Undefined behaviour",
+        "Ill-formed; the compiler rejects the call",
+        "Well-defined; swap exchanges the allocators too",
+        "Well-defined but O(n), because the elements are exchanged individually"
+      ],
+      "answer": 0,
+      "explain": "With propagate_on_container_swap false, swap is only valid when the allocators compare equal; unequal is undefined behaviour, not a slower path. Nothing detects it — the call compiles and usually appears to work until each container tries to release the other's storage. Move assignment has a defined element-wise fallback; swap deliberately does not."
+    },
+    {
+      "id": "c18-m10",
+      "section": "Propagation and equality — survey level",
+      "difficulty": "medium",
+      "prompt": "An allocator declares none of POCCA, POCMA or POCS. What do the containers assume?",
+      "choices": [
+        "The traits are required, so the program is ill-formed",
+        "The behaviour is implementation-defined",
+        "All three are std::true_type, so the allocator always travels",
+        "All three are std::false_type, supplied as defaults by std::allocator_traits"
+      ],
+      "answer": 3,
+      "explain": "std::allocator_traits fills in std::false_type for each propagation trait an allocator does not declare, so the conservative behaviour is the default: keep the destination's allocator, fall back to element-wise work, and require equality for swap. Silence is a decision, and it is the safe one — an allocator that genuinely should travel with its container has to say so."
+    },
+    {
+      "id": "c18-m11",
+      "section": "Propagation and equality — survey level",
+      "difficulty": "medium",
+      "prompt": "What problem does std::scoped_allocator_adaptor solve?",
+      "choices": [
+        "It makes allocator propagation traits default to true",
+        "It makes two different allocator types compare equal",
+        "It passes an outer container's inner allocator into allocator-aware elements, such as the strings inside a vector",
+        "It converts a classic allocator into a std::pmr::memory_resource"
+      ],
+      "answer": 2,
+      "explain": "Without the adaptor, giving a vector an arena allocator says nothing about where its element strings get their character buffers — the inner containers default-construct their own allocators. The adaptor performs that handoff at element construction. PMR containers do this by default, propagating the resource through allocator-aware construction, which removes most reasons to write the adaptor's type machinery by hand."
+    },
+    {
+      "id": "c18-m12",
+      "section": "PMR: the practical path",
+      "difficulty": "easy",
+      "prompt": "What is std::pmr::vector<int> an alias for?",
+      "choices": [
+        "std::vector<int>",
+        "std::vector<int, std::pmr::polymorphic_allocator<int>>",
+        "std::vector<int, std::pmr::memory_resource*>",
+        "A distinct container type with a virtual interface"
+      ],
+      "answer": 1,
+      "explain": "std::pmr::vector<int> is nothing more than std::vector with polymorphic_allocator<int> substituted for the default allocator — same container, same code, one allocator type. That single allocator type is the point: the container's type stays stable whether the storage comes from a bump arena, a pool, or the global heap."
+    },
+    {
+      "id": "c18-m13",
+      "section": "PMR: the practical path",
+      "difficulty": "medium",
+      "prompt": "Where does the runtime cost of std::pmr::polymorphic_allocator come from?",
+      "choices": [
+        "A resource pointer stored in every container node",
+        "Reference counting on the memory_resource",
+        "A dynamic_cast on every element access",
+        "A virtual call to the memory_resource per allocation and deallocation"
+      ],
+      "answer": 3,
+      "explain": "polymorphic_allocator holds a memory_resource* and dispatches allocation and deallocation through virtual functions on it; element access is untouched. One virtual call is usually noise beside malloc, but it is visible beside an inlined pointer bump. Node containers do not need to store a resource pointer in every node — the container's own allocator supplies it."
+    },
+    {
+      "id": "c18-m14",
+      "section": "PMR: the practical path",
+      "difficulty": "medium",
+      "prompt": "What does std::pmr::monotonic_buffer_resource do when a container deallocates?",
+      "choices": [
+        "Nothing; storage is reclaimed only when the resource is destroyed or released",
+        "Returns the block to its upstream resource immediately",
+        "Rewinds its cursor if the block was the most recent allocation",
+        "Returns the block to a size-class free list"
+      ],
+      "answer": 0,
+      "explain": "A monotonic resource is the standard bump arena: it serves aligned allocations in increasing address order and ignores individual deallocations entirely, releasing all owned upstream blocks together at destruction or release(). Reusing freed blocks by size class is what a pool_resource does. Destroying a container still destroys its elements — only the storage reclamation is deferred."
+    },
+    {
+      "id": "c18-m15",
+      "section": "PMR: the practical path",
+      "difficulty": "medium",
+      "prompt": "A monotonic_buffer_resource is constructed over a stack buffer with std::pmr::null_memory_resource() as its upstream. What happens when a container outgrows the buffer?",
+      "choices": [
+        "The buffer is grown in place",
+        "The resource falls back to the global heap",
+        "std::bad_alloc is thrown, because the null resource satisfies nothing",
+        "The allocation silently returns nullptr"
+      ],
+      "answer": 2,
+      "explain": "null_memory_resource terminates the upstream chain by always throwing std::bad_alloc, which turns a capacity assumption into something a test can assert. The default upstream is new_delete_resource, and that is precisely the silent heap fallback the null resource is chosen to prevent."
+    },
+    {
+      "id": "c18-m16",
+      "section": "PMR: the practical path",
+      "difficulty": "medium",
+      "prompt": "`std::pmr::string source{\"EURUSD\", &arena}; std::pmr::string copy = source;` — which resource does `copy` use?",
+      "choices": [
+        "The arena, because the allocator is copied with the value",
+        "The current default resource, normally new_delete_resource",
+        "No resource until its first allocation",
+        "It is undefined which resource is selected"
+      ],
+      "answer": 1,
+      "explain": "Ordinary copy construction of a PMR container does not copy the source's resource: the destination context chooses the allocator, and with none supplied that is std::pmr::get_default_resource(). Write `std::pmr::string copy{source, source.get_allocator()}` when the arena was the intention. Adding pmr:: to a type name selects a stable allocator type, not an arena."
+    },
+    {
+      "id": "c18-m17",
+      "section": "Resource lifetime and ownership",
+      "difficulty": "medium",
+      "prompt": "A class holds a std::pmr::unsynchronized_pool_resource and a std::pmr::vector<Order> that uses it. In what order must the members be declared?",
+      "choices": [
+        "The resource first, so the vector is destroyed before the resource",
+        "Either order; the compiler orders construction by dependency",
+        "Either order, provided the constructor initialises them in the right sequence",
+        "The vector first, so it is constructed before the resource"
+      ],
+      "answer": 0,
+      "explain": "Members are destroyed in reverse declaration order, and the vector's destructor calls deallocate through its resource pointer. Declaring the resource first means the vector dies first and the resource is still alive to serve that final call. Member initialiser order follows declaration order, not the order written in the constructor's list, so no initialiser sequencing can rescue a bad declaration order."
+    },
+    {
+      "id": "c18-m18",
+      "section": "Resource lifetime and ownership",
+      "difficulty": "medium",
+      "prompt": "What does std::pmr::polymorphic_allocator do about the lifetime of the resource it points at?",
+      "choices": [
+        "It copies the resource into the container",
+        "It shares ownership through a reference count",
+        "It extends the resource's lifetime for as long as any container uses it",
+        "Nothing; it stores a raw memory_resource* and the resource must outlive every user"
+      ],
+      "answer": 3,
+      "explain": "The allocator stores a raw pointer and owns nothing. The resource has to outlive every container that uses it, including that container's final deallocation call during destruction. Allocator-aware construction propagates an address, not ownership — which is why resource lifetime has to dominate container lifetime by construction, usually by putting both in one owner."
+    },
+    {
+      "id": "c18-m19",
+      "section": "Resource lifetime and ownership",
+      "difficulty": "medium",
+      "prompt": "A function creates a local monotonic_buffer_resource over a local byte array, fills a std::pmr::vector<int> from it, and returns the vector by value. What is wrong?",
+      "choices": [
+        "Nothing; returning by value copies the elements into the caller's storage",
+        "The elements point into a dead stack buffer and the allocator points at a destroyed resource",
+        "Only the resource dangles; the elements were copied out during the move",
+        "It fails to compile, because a PMR container cannot be returned by value"
+      ],
+      "answer": 1,
+      "explain": "Moving the vector out moves its pointer and its allocator — both of which name storage that dies with the frame. The returned object therefore has two dangling dependencies at once: the buffer its elements live in, and the resource its destructor will later call. AddressSanitizer usually catches the element access; the destructor's call through the dead resource pointer is the quieter half."
+    },
+    {
+      "id": "c18-m20",
+      "section": "The allocation-free hot path",
+      "difficulty": "medium",
+      "prompt": "What is the purpose of the warm-up phase in an allocation-free process structure?",
+      "choices": [
+        "To let the operating system decide the process's memory policy",
+        "To measure steady-state latency before the session begins",
+        "To force pool refills, lazy initialisation and first-touch page faults to happen before live traffic",
+        "To verify that the hot path never throws"
+      ],
+      "answer": 2,
+      "explain": "Reserving capacity is not enough: fresh pages still fault on first touch, pools still have to obtain their first chunks, and library facilities still initialise lazily. Warm-up pays those one-time costs against synthetic flow. It has to exercise the real path — merely constructing the engine leaves the expensive first message exactly where it was. Measurement is a separate exercise on the uninstrumented build."
+    },
+    {
+      "id": "c18-m21",
+      "section": "The allocation-free hot path",
+      "difficulty": "medium",
+      "prompt": "An arena 'winks out' its objects by calling release() without destroying them individually. When is that valid?",
+      "choices": [
+        "Only when the arena is the default resource",
+        "Always, because release() runs the destructors itself",
+        "Whenever the objects are no longer reachable",
+        "Only when the element type is trivially destructible, so destruction has no side effects to preserve"
+      ],
+      "answer": 3,
+      "explain": "Releasing the storage ends the objects' lifetimes, and for a trivially destructible type there is nothing a destructor would have done. For anything that owns a resource — a string's buffer, a file handle — skipping destruction leaks it. release() runs no destructors of its own; it is a storage operation, and the discipline of calling std::destroy_at for every live non-trivial object first is entirely on the caller."
+    },
+    {
+      "id": "c18-m22",
+      "section": "The allocation-free hot path",
+      "difficulty": "hard",
+      "prompt": "A live std::pmr::vector<Fill> still holds allocations from an arena when the arena's release() is called. Fill is trivially destructible. Is that safe?",
+      "choices": [
+        "No: the container retains dangling internal pointers and must still run its own destruction protocol",
+        "No, but only because clear() would have to run destructors",
+        "Yes, because Fill is trivially destructible",
+        "Yes, provided the vector is cleared first"
+      ],
+      "answer": 0,
+      "explain": "Winking out works when nothing will touch the storage again. A live container will: its data pointer now dangles, and its destructor will call deallocate through the resource for a block that no longer exists. Trivial element destruction removes one obligation, not the container's own. clear() sets the size to zero but keeps the capacity block, so it changes nothing here."
+    },
+    {
+      "id": "c18-m23",
+      "section": "Auditing hidden library allocation",
+      "difficulty": "medium",
+      "prompt": "A CountingResource wrapping new_delete_resource reports zero allocations for an operation you know allocated. What is the most likely explanation?",
+      "choices": [
+        "The allocations were served from the resource's inline buffer",
+        "The resource only counts deallocations",
+        "The allocating object was not given that resource — an ordinary std::string member, a third-party type, or a std::function target",
+        "Counting resources cannot observe node containers"
+      ],
+      "answer": 2,
+      "explain": "A PMR audit sees exactly the objects that were handed that resource and nothing else. A nested non-PMR std::string, a library that allocates internally, or a std::function target that outgrows its small-buffer optimisation all reach the global allocator and never touch your resource. Catching those needs global operator new replacement or malloc interposition."
+    },
+    {
+      "id": "c18-m24",
+      "section": "Auditing hidden library allocation",
+      "difficulty": "medium",
+      "prompt": "Which operation is expected to reach the allocator once per inserted element?",
+      "choices": [
+        "std::pmr::vector::push_back after an adequate reserve",
+        "std::pmr::list::emplace",
+        "std::pmr::vector::reserve",
+        "std::flat_map::insert into spare capacity"
+      ],
+      "answer": 1,
+      "explain": "A list is a node container: every inserted element needs its own linked node, so every insertion allocates. A vector allocates only when capacity is exceeded, which is what reserving before the steady state removes, and a flat_map inserting into spare capacity moves a suffix rather than allocating. The control for per-node allocation is to pool the fixed-size nodes."
+    },
+    {
+      "id": "c18-m25",
+      "section": "Latency Lens",
+      "difficulty": "medium",
+      "prompt": "When is the virtual dispatch of a polymorphic_allocator most likely to be visible in a profile?",
+      "choices": [
+        "On every element access through the container",
+        "Only in multi-threaded code, because the vtable load contends",
+        "Beside a general-purpose malloc, which it roughly doubles",
+        "Beside an inlined pointer bump, where the call is a large fraction of the work"
+      ],
+      "answer": 3,
+      "explain": "The virtual call is a fixed, small cost. Next to malloc's size-class lookup, locking and possible page work it is noise; next to a monotonic resource's few-instruction bump it is a large relative share. Element access does not dispatch at all. The practical mitigation is the same either way: reserve capacity so the steady state stops allocating."
+    }
+  ],
+  "reading": [
+    {
+      "id": "c18-r01",
+      "section": "The classic allocator interface",
+      "prompt": "What does this print?",
+      "code": "#include <cstddef>\n#include <iostream>\n#include <memory>\n#include <new>\n#include <vector>\n\nstruct Counts {\n    std::size_t allocations{};\n    std::size_t deallocations{};\n};\n\ntemplate<class T>\nclass CountingAllocator {\n    template<class> friend class CountingAllocator;\n\npublic:\n    using value_type = T;\n\n    explicit CountingAllocator(Counts& counts) noexcept : counts_(&counts) {}\n\n    template<class U>\n    CountingAllocator(const CountingAllocator<U>& other) noexcept\n        : counts_(other.counts_) {}\n\n    T* allocate(std::size_t count) {\n        void* storage = ::operator new(count * sizeof(T));\n        ++counts_->allocations;\n        return static_cast<T*>(storage);\n    }\n\n    void deallocate(T* pointer, std::size_t) noexcept {\n        ++counts_->deallocations;\n        ::operator delete(pointer);\n    }\n\n    template<class U>\n    bool operator==(const CountingAllocator<U>& other) const noexcept {\n        return counts_ == other.counts_;\n    }\n\nprivate:\n    Counts* counts_;\n};\n\nint main() {\n    Counts counts;\n    {\n        std::vector<int, CountingAllocator<int>> values{\n            CountingAllocator<int>{counts}};\n        values.reserve(4);\n        values.push_back(42);\n        values.push_back(43);\n    }\n\n    std::cout << counts.allocations << ' ' << counts.deallocations << '\\n';\n}\n",
+      "kind": "value",
+      "accept": [
+        "1 1"
+      ],
+      "explain": "reserve(4) is the only request that reaches the allocator: it obtains one raw block for four ints and constructs nothing. Both push_backs construct into storage that already exists, so they never call allocate. The vector's destructor destroys the two elements and returns the single block, giving one deallocation. Counting three allocations — one per operation — is the misconception this item is aimed at."
+    },
+    {
+      "id": "c18-r02",
+      "section": "The classic allocator interface",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <memory>\n#include <vector>\n\nint main() {\n    std::vector<int, std::allocator<long>> values;\n    values.push_back(1);\n}\n",
+      "kind": "no-compile",
+      "explain": "A container's allocator must allocate the container's own element type: the standard requires Allocator::value_type to be the container's value_type, and libc++ enforces it with a static_assert. The tempting reading is that long is 'wide enough' so the storage would be fine — but the allocator's element type also drives the count-to-bytes multiplication and the rebind machinery, so a mismatch is a type error rather than a sizing detail."
+    },
+    {
+      "id": "c18-r03",
+      "section": "PMR: the practical path",
+      "prompt": "What does this print?",
+      "code": "#include <cstddef>\n#include <cstdint>\n#include <iostream>\n#include <memory_resource>\n#include <vector>\n\nint main() {\n    alignas(std::max_align_t) std::byte buffer[1024];\n    std::pmr::monotonic_buffer_resource arena{\n        buffer, sizeof(buffer), std::pmr::null_memory_resource()};\n\n    std::pmr::vector<int> values{&arena};\n    values.reserve(8);\n    values.push_back(1);\n    values.push_back(2);\n\n    auto data = reinterpret_cast<std::uintptr_t>(values.data());\n    auto begin = reinterpret_cast<std::uintptr_t>(buffer);\n\n    std::cout << std::boolalpha\n              << (data >= begin && data < begin + sizeof(buffer)) << ' '\n              << values.size() << '\\n';\n}\n",
+      "kind": "value",
+      "accept": [
+        "true 2"
+      ],
+      "explain": "The vector's element storage comes from the monotonic resource, which serves it out of the caller's stack buffer, so data() lies inside that array. The container is unchanged: it still decides when elements are constructed and destroyed, and size() is 2. The arena only decides where the capacity bytes live — and, because deallocation is a no-op there, when they come back."
+    },
+    {
+      "id": "c18-r04",
+      "section": "PMR: the practical path",
+      "prompt": "What does this print?",
+      "code": "#include <cstddef>\n#include <iostream>\n#include <memory_resource>\n#include <string>\n\nint main() {\n    alignas(std::max_align_t) std::byte buffer[1024];\n    std::pmr::monotonic_buffer_resource arena{buffer, sizeof(buffer)};\n\n    std::pmr::string source{\"EURUSD\", &arena};\n    std::pmr::string accidental = source;\n    std::pmr::string intended{source, source.get_allocator()};\n\n    std::cout << std::boolalpha\n              << (accidental.get_allocator().resource()\n                  == std::pmr::get_default_resource())\n              << ' '\n              << (intended.get_allocator().resource() == &arena) << '\\n';\n}\n",
+      "kind": "value",
+      "accept": [
+        "true true"
+      ],
+      "explain": "Ordinary copy construction of a PMR container does not copy the source's resource; the destination context supplies the allocator, and with none given that is the current default resource. Passing source.get_allocator() explicitly is what keeps the copy on the arena. Assuming the allocator travels with the value is the trap — it is how an 'arena-backed' subsystem quietly starts using the heap."
+    },
+    {
+      "id": "c18-r05",
+      "section": "Resource lifetime and ownership",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <iostream>\n#include <memory_resource>\n#include <vector>\n\nint main() {\n    std::pmr::monotonic_buffer_resource arena;  // upstream: new_delete_resource\n\n    std::pmr::vector<int> values{&arena};\n    values.reserve(64);\n    values.push_back(7);\n\n    arena.release();\n\n    std::cout << values[0] << '\\n';\n}\n",
+      "kind": "ub",
+      "explain": "release() returns every block the resource obtained from its upstream — here new_delete_resource — while the vector still owns one of them. The vector's data pointer immediately dangles, so reading values[0] is undefined behaviour and AddressSanitizer reports heap-use-after-free. Winking out is only safe when nothing will touch the storage again; a live container will, both here and later when its destructor calls deallocate for a block that no longer exists."
+    },
+    {
+      "id": "c18-r06",
+      "section": "The allocation-free hot path",
+      "prompt": "What does this print?",
+      "code": "#include <cstddef>\n#include <iostream>\n#include <memory_resource>\n#include <new>\n#include <vector>\n\nint main() {\n    alignas(std::max_align_t) std::byte buffer[256];\n    std::pmr::monotonic_buffer_resource arena{\n        buffer, sizeof(buffer), std::pmr::null_memory_resource()};\n\n    std::pmr::vector<int> values{&arena};\n\n    try {\n        values.reserve(10'000);\n        std::cout << \"reserved\\n\";\n    } catch (const std::bad_alloc&) {\n        std::cout << \"bad_alloc\\n\";\n    }\n}\n",
+      "kind": "value",
+      "accept": [
+        "bad_alloc"
+      ],
+      "explain": "40'000 bytes will not fit in a 256-byte buffer, so the monotonic resource asks its upstream — and null_memory_resource satisfies nothing, throwing std::bad_alloc. That is the whole point of choosing it: with the default new_delete upstream this would have quietly reserved from the heap and printed 'reserved', turning a broken capacity assumption into an invisible one."
+    },
+    {
+      "id": "c18-r07",
+      "section": "Auditing hidden library allocation",
+      "prompt": "What does this print?",
+      "code": "#include <cstddef>\n#include <cstdio>\n#include <memory_resource>\n#include <vector>\n\nclass CountingResource final : public std::pmr::memory_resource {\npublic:\n    explicit CountingResource(std::pmr::memory_resource* upstream)\n        : upstream_(upstream) {}\n\n    std::size_t allocations() const noexcept { return allocations_; }\n\nprivate:\n    void* do_allocate(std::size_t bytes, std::size_t alignment) override {\n        ++allocations_;\n        return upstream_->allocate(bytes, alignment);\n    }\n\n    void do_deallocate(void* p, std::size_t bytes, std::size_t align) override {\n        upstream_->deallocate(p, bytes, align);\n    }\n\n    bool do_is_equal(\n        const std::pmr::memory_resource& other) const noexcept override {\n        return this == &other;\n    }\n\n    std::pmr::memory_resource* upstream_;\n    std::size_t allocations_ = 0;\n};\n\nint main() {\n    CountingResource counter{std::pmr::new_delete_resource()};\n\n    std::pmr::vector<int> prices{&counter};\n    prices.reserve(1'000);\n    for (int i = 0; i < 1'000; ++i) {\n        prices.push_back(i);\n    }\n\n    std::printf(\"%zu %zu\\n\", counter.allocations(), prices.size());\n}\n",
+      "kind": "value",
+      "accept": [
+        "1 1000"
+      ],
+      "explain": "One reserve of the final capacity is one contiguous block, and the thousand push_backs that follow fit inside it, so the audit records a single allocation. Without the reserve the same loop would have produced a run of geometric growth steps, each one a new block plus a relocation of everything already stored. Use this as a test, not a benchmark: counting changes the allocation path and says nothing about elapsed latency."
+    },
+    {
+      "id": "c18-r08",
+      "section": "Allocation strategy as a container parameter",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <memory_resource>\n#include <vector>\n\nint main() {\n    std::pmr::monotonic_buffer_resource arena;\n\n    std::pmr::vector<int> pooled{&arena};\n    pooled.push_back(1);\n\n    std::vector<int> plain = pooled;\n}\n",
+      "kind": "no-compile",
+      "explain": "std::pmr::vector<int> is std::vector<int, polymorphic_allocator<int>>, a different type from std::vector<int, std::allocator<int>>, and there is no converting constructor between them. The allocator is a template parameter, so it is part of the container's identity — which also means an arena-backed vector will not bind to a std::vector<int>& parameter. Copying element by element, or building the destination from pooled.begin() and pooled.end(), is the way across."
+    }
+  ],
+  "writing": [
+    {
+      "id": "c18-w01",
+      "section": "The classic allocator interface",
+      "minutes": 13,
+      "prompt": "Write a complete minimal allocator template CountingAllocator<T> that forwards to the global allocation functions while counting calls into a caller-supplied counter object. It must work as the allocator of a std::vector and survive a rebind to a node type.",
+      "checklist": [
+        "Declares value_type and provides allocate(count) / deallocate(pointer, count)",
+        "allocate checks count against SIZE_MAX / sizeof(T) before multiplying",
+        "A converting constructor template from CountingAllocator<U> carries the counter pointer across a rebind",
+        "operator== compares the counter identity, so two instances are equal only when interchangeable",
+        "The counter is incremented only after the allocation succeeds"
+      ],
+      "solution": "#include <cstddef>\n#include <limits>\n#include <new>\n\nstruct AllocationCounts {\n    std::size_t allocations{};\n    std::size_t deallocations{};\n};\n\ntemplate<class T>\nclass CountingAllocator {\n    template<class> friend class CountingAllocator;\n\npublic:\n    using value_type = T;\n\n    explicit CountingAllocator(AllocationCounts& counts) noexcept\n        : counts_(&counts) {}\n\n    // Rebind: a node container asks for CountingAllocator<Node>, and this\n    // constructor is how the counter survives that conversion.\n    template<class U>\n    CountingAllocator(const CountingAllocator<U>& other) noexcept\n        : counts_(other.counts_) {}\n\n    T* allocate(std::size_t count) {\n        // The argument is a element count, not a byte count.\n        if (count > std::numeric_limits<std::size_t>::max() / sizeof(T)) {\n            throw std::bad_array_new_length{};\n        }\n        void* storage = ::operator new(count * sizeof(T));\n        ++counts_->allocations;  // only after success\n        return static_cast<T*>(storage);\n    }\n\n    void deallocate(T* pointer, std::size_t) noexcept {\n        ++counts_->deallocations;\n        ::operator delete(pointer);\n    }\n\n    template<class U>\n    bool operator==(const CountingAllocator<U>& other) const noexcept {\n        return counts_ == other.counts_;  // equal means interchangeable\n    }\n\n    template<class U>\n    bool operator!=(const CountingAllocator<U>& other) const noexcept {\n        return !(*this == other);\n    }\n\nprivate:\n    AllocationCounts* counts_;\n};\n",
+      "notes": "Everything else — pointer typedefs, construct, destroy, max_size, the propagation traits — comes from std::allocator_traits defaults. Omitting value_type is the one mistake that stops the traits adapting the class at all; a dishonest operator== is the one that corrupts memory."
+    },
+    {
+      "id": "c18-w02",
+      "section": "Allocation strategy as a container parameter",
+      "minutes": 12,
+      "prompt": "Write an ArenaAllocator<T> adapter over a bump arena that exposes `void* allocate(std::size_t bytes, std::size_t alignment)`, and show a std::vector using it so its buffer lands inside caller-owned bytes. Individual deallocation must be a no-op.",
+      "checklist": [
+        "allocate converts the element count to bytes and passes alignof(T) to the arena",
+        "deallocate is a no-op and is noexcept",
+        "A converting constructor template carries the arena pointer across a rebind",
+        "operator== is true only for allocators referring to the same arena",
+        "The demo reserves capacity so the buffer is obtained in one request"
+      ],
+      "solution": "#include <cstddef>\n#include <limits>\n#include <memory>\n#include <new>\n#include <vector>\n\nclass Arena {\npublic:\n    Arena(std::byte* data, std::size_t capacity) noexcept\n        : begin_(data), capacity_(capacity) {}\n\n    void* allocate(std::size_t bytes, std::size_t alignment) {\n        void* candidate = begin_ + used_;\n        std::size_t space = capacity_ - used_;\n        void* aligned = std::align(alignment, bytes, candidate, space);\n        if (aligned == nullptr) {\n            throw std::bad_alloc{};\n        }\n        used_ = static_cast<std::byte*>(aligned) - begin_ + bytes;\n        return aligned;\n    }\n\n    void reset() noexcept { used_ = 0; }\n\nprivate:\n    std::byte* begin_;\n    std::size_t capacity_;\n    std::size_t used_{};\n};\n\ntemplate<class T>\nclass ArenaAllocator {\n    template<class> friend class ArenaAllocator;\n\npublic:\n    using value_type = T;\n\n    explicit ArenaAllocator(Arena& arena) noexcept : arena_(&arena) {}\n\n    template<class U>\n    ArenaAllocator(const ArenaAllocator<U>& other) noexcept\n        : arena_(other.arena_) {}\n\n    T* allocate(std::size_t count) {\n        if (count > std::numeric_limits<std::size_t>::max() / sizeof(T)) {\n            throw std::bad_array_new_length{};\n        }\n        return static_cast<T*>(arena_->allocate(count * sizeof(T), alignof(T)));\n    }\n\n    void deallocate(T*, std::size_t) noexcept {}  // reclaimed all at once\n\n    template<class U>\n    bool operator==(const ArenaAllocator<U>& other) const noexcept {\n        return arena_ == other.arena_;  // same arena, or not interchangeable\n    }\n\n    template<class U>\n    bool operator!=(const ArenaAllocator<U>& other) const noexcept {\n        return !(*this == other);\n    }\n\nprivate:\n    Arena* arena_;\n};\n\nvoid arena_vector_demo() {\n    alignas(std::max_align_t) std::byte storage[4096];\n    Arena arena{storage, sizeof(storage)};\n\n    std::vector<int, ArenaAllocator<int>> values{ArenaAllocator<int>{arena}};\n    values.reserve(16);   // one arena request for the whole buffer\n    values.push_back(1);  // constructs into storage that already exists\n}\n",
+      "notes": "The arena must not reset while any container still holds its storage, and the arena itself must outlive every such container. Note also what this costs at the type level: std::vector<int, ArenaAllocator<int>> will not bind to a std::vector<int>& parameter — that fragmentation is what std::pmr trades a virtual call to avoid."
+    },
+    {
+      "id": "c18-w03",
+      "section": "Propagation and equality — survey level",
+      "minutes": 9,
+      "prompt": "Two std::pmr::vector<Order> objects are backed by different arenas. Write `transfer(source, destination)` that moves the contents across correctly, and add comments explaining what the operation actually costs and why swapping them instead would be undefined behaviour.",
+      "checklist": [
+        "Uses move assignment (or an element-wise move) rather than swap",
+        "Comment states that the resources are unequal and the traits do not propagate, so the move is O(n) with a destination allocation",
+        "Comment states that swap on unequal, non-propagating allocators is undefined behaviour, not merely slow",
+        "Leaves the source in a valid state and does not assume it is empty",
+        "Does not assume either vector's buffer can be adopted by the other"
+      ],
+      "solution": "#include <memory_resource>\n#include <utility>\n#include <vector>\n\nstruct Order {\n    int id{};\n    double price{};\n};\n\nvoid transfer(std::pmr::vector<Order>& source,\n              std::pmr::vector<Order>& destination) {\n    // The two vectors have the same type but unequal resources, and\n    // polymorphic_allocator does not propagate on move assignment. So this\n    // is O(n): the destination allocates from its own resource, each element\n    // is moved across, and the source's elements are destroyed. There is no\n    // pointer steal — the destination may not own the source arena's bytes.\n    destination = std::move(source);\n\n    // The source is valid but unspecified; make it explicitly empty.\n    source.clear();\n\n    // What must NOT be written here:\n    //   destination.swap(source);\n    // With unequal, non-propagating allocators swap is undefined behaviour,\n    // not a slower path. Nothing diagnoses it: each container would end up\n    // holding storage it can never correctly release.\n}\n",
+      "notes": "This is the qualifier behind 'a vector move is constant time'. Move *construction* takes the source's allocator with it and is unconditionally constant time; move *assignment* is constant time only when the allocators propagate or already compare equal."
+    },
+    {
+      "id": "c18-w04",
+      "section": "PMR: the practical path",
+      "minutes": 11,
+      "prompt": "Write a message handler that decodes a std::span<const std::byte> into a std::pmr::vector<Fill> using only a stack buffer, and fails loudly rather than reaching the heap if the buffer is too small. Return the number of decoded fills.",
+      "checklist": [
+        "Uses a stack byte array with alignas(std::max_align_t) and a monotonic_buffer_resource over it",
+        "Passes std::pmr::null_memory_resource() as the upstream so exhaustion throws std::bad_alloc",
+        "Reserves the element count before the decode loop",
+        "Copies each Fill out of the byte span with std::memcpy rather than casting the pointer",
+        "The resource and buffer are destroyed at scope exit with no individual deallocation"
+      ],
+      "solution": "#include <cstddef>\n#include <cstdint>\n#include <cstring>\n#include <memory_resource>\n#include <span>\n#include <vector>\n\nstruct Fill {\n    std::uint64_t order_id;\n    std::int64_t price_ticks;\n};\n\nstd::size_t count_fills(std::span<const std::byte> message) {\n    alignas(std::max_align_t) std::byte buffer[4096];\n\n    // null upstream: outgrowing the stack buffer throws std::bad_alloc\n    // instead of quietly reaching the global heap.\n    std::pmr::monotonic_buffer_resource arena{\n        buffer, sizeof(buffer), std::pmr::null_memory_resource()};\n\n    std::pmr::vector<Fill> fills{&arena};\n    fills.reserve(message.size() / sizeof(Fill));\n\n    for (std::size_t offset = 0;\n         offset + sizeof(Fill) <= message.size();\n         offset += sizeof(Fill)) {\n        Fill fill;\n        std::memcpy(&fill, message.data() + offset, sizeof(fill));\n        fills.push_back(fill);\n    }\n\n    return fills.size();\n}  // no individual frees: the arena and its buffer simply leave scope\n",
+      "notes": "The capacity assumption is now executable — a CI test that feeds an oversized message gets a std::bad_alloc rather than a silent heap allocation. Destroying the vector still destroys its elements; its deallocate calls reach the monotonic resource and do nothing."
+    },
+    {
+      "id": "c18-w05",
+      "section": "PMR: the practical path",
+      "minutes": 12,
+      "prompt": "Write a custom std::pmr::memory_resource that serves allocations from a fixed byte buffer as a bump arena and refuses anything that does not fit. Override the three virtual functions, and say in a comment what do_is_equal is promising.",
+      "checklist": [
+        "Derives from std::pmr::memory_resource and overrides do_allocate, do_deallocate and do_is_equal",
+        "do_allocate honours the requested alignment (std::align or explicit rounding)",
+        "do_allocate throws std::bad_alloc when the buffer cannot satisfy the request",
+        "do_deallocate is a no-op, consistent with a bump arena",
+        "do_is_equal compares identity, with a comment that equality promises either resource may free the other's storage"
+      ],
+      "solution": "#include <cstddef>\n#include <memory>\n#include <memory_resource>\n#include <new>\n\nclass BufferResource final : public std::pmr::memory_resource {\npublic:\n    BufferResource(std::byte* data, std::size_t capacity) noexcept\n        : begin_(data), capacity_(capacity) {}\n\n    void reset() noexcept { used_ = 0; }\n\nprivate:\n    void* do_allocate(std::size_t bytes, std::size_t alignment) override {\n        void* candidate = begin_ + used_;\n        std::size_t space = capacity_ - used_;\n\n        void* aligned = std::align(alignment, bytes, candidate, space);\n        if (aligned == nullptr) {\n            throw std::bad_alloc{};  // no upstream: exhaustion is an error\n        }\n\n        used_ = static_cast<std::byte*>(aligned) - begin_ + bytes;\n        return aligned;\n    }\n\n    void do_deallocate(void*, std::size_t, std::size_t) override {}\n\n    // Equality promises that either resource may deallocate storage obtained\n    // from the other. Only identity satisfies that for a bump arena, since\n    // two BufferResources own disjoint buffers.\n    bool do_is_equal(\n        const std::pmr::memory_resource& other) const noexcept override {\n        return this == &other;\n    }\n\n    std::byte* begin_;\n    std::size_t capacity_;\n    std::size_t used_{};\n};\n",
+      "notes": "Note how little machinery this needs compared with a classic allocator: no value_type, no rebind, no converting constructor. The raw strategies from Chapter 17 drop straight into these three virtual functions, and every std::pmr container can then use them without changing its type."
+    },
+    {
+      "id": "c18-w06",
+      "section": "Resource lifetime and ownership",
+      "minutes": 8,
+      "prompt": "Write a SessionBook class that owns a std::pmr::unsynchronized_pool_resource and a std::pmr::vector<Order> served by it, reserving capacity in the constructor. Get the member declaration order right and comment why it matters.",
+      "checklist": [
+        "The resource is declared before the vector",
+        "The vector is initialised with &resource_ in the member initialiser list",
+        "reserve is called in the constructor body, not left to first insertion",
+        "A comment states that members are destroyed in reverse declaration order, so the vector dies first",
+        "The class does not return or expose a container that would outlive the resource"
+      ],
+      "solution": "#include <cstddef>\n#include <memory_resource>\n#include <utility>\n#include <vector>\n\nstruct Order {\n    int id{};\n    double price{};\n};\n\nclass SessionBook {\npublic:\n    explicit SessionBook(std::size_t capacity) : orders_(&resource_) {\n        orders_.reserve(capacity);\n    }\n\n    void add(Order order) { orders_.push_back(std::move(order)); }\n\n    std::size_t size() const noexcept { return orders_.size(); }\n\nprivate:\n    // Declaration order is the contract. Members are destroyed in reverse\n    // declaration order, so orders_ is destroyed first and its final\n    // deallocate call still reaches a live resource_. Swapping these two\n    // lines would leave the vector's destructor with a dangling allocator.\n    std::pmr::unsynchronized_pool_resource resource_;\n    std::pmr::vector<Order> orders_;\n};\n",
+      "notes": "polymorphic_allocator stores a raw memory_resource* and owns nothing, so resource lifetime has to dominate container lifetime by construction. Putting both in one owner is the reliable way to arrange that; returning orders_ by value to a caller with no resource of its own would recreate exactly the dangling case."
+    },
+    {
+      "id": "c18-w07",
+      "section": "The allocation-free hot path",
+      "minutes": 13,
+      "prompt": "Write an Engine class whose steady-state on_message path performs no allocation: a stack-sized backing array, a monotonic resource with a null upstream, a pool over it, and a reserved std::pmr::vector<Fill>. Warm the vector during construction and reject oversized input rather than growing.",
+      "checklist": [
+        "Members are declared storage, arena, pool, vector — in that order",
+        "The monotonic resource uses std::pmr::null_memory_resource() as upstream",
+        "The constructor reserves max_fills and touches every element (resize then clear) as warm-up",
+        "on_message rejects an input larger than max_fills before doing any work",
+        "on_message reuses the existing capacity: clear plus insert, with no reserve or resize that could grow"
+      ],
+      "solution": "#include <cstddef>\n#include <cstdint>\n#include <cstdlib>\n#include <memory_resource>\n#include <span>\n#include <vector>\n\nstruct Fill {\n    std::uint64_t order_id;\n    std::int64_t price_ticks;\n};\n\nclass Engine {\npublic:\n    static constexpr std::size_t max_fills = 256;\n\n    Engine()\n        : arena_(storage_, sizeof(storage_), std::pmr::null_memory_resource()),\n          pool_(make_pool_options(), &arena_),\n          fills_(&pool_) {\n        fills_.reserve(max_fills);\n        fills_.resize(max_fills);  // warm-up: write every element once\n        fills_.clear();            // keeps the capacity, drops the size\n    }\n\n    void on_message(std::span<const Fill> incoming) {\n        if (incoming.size() > max_fills) {\n            std::abort();  // capacity bound is part of correctness\n        }\n\n        fills_.clear();\n        fills_.insert(fills_.end(), incoming.begin(), incoming.end());\n    }\n\nprivate:\n    static std::pmr::pool_options make_pool_options() {\n        std::pmr::pool_options options;\n        options.max_blocks_per_chunk = 4;\n        options.largest_required_pool_block = max_fills * sizeof(Fill);\n        return options;\n    }\n\n    // Declaration order gives storage_, arena_ and pool_ lifetimes that\n    // outlast fills_, which is destroyed first.\n    alignas(std::max_align_t) std::byte storage_[64 * 1024];\n    std::pmr::monotonic_buffer_resource arena_;\n    std::pmr::unsynchronized_pool_resource pool_;\n    std::pmr::vector<Fill> fills_;\n};\n",
+      "notes": "The null upstream makes an underestimated backing store fail during construction rather than on the first busy message. Pair this with the chapter's HotPathGuard and a global operator new that aborts while the guard is active: a CI test sending maximum-sized messages then proves the steady state reaches no allocation at all."
+    },
+    {
+      "id": "c18-w08",
+      "section": "Auditing hidden library allocation",
+      "minutes": 10,
+      "prompt": "Write a CountingResource that wraps an upstream std::pmr::memory_resource and records the number of allocations and the total bytes requested, then a small audit function that uses it to check that a reserved std::pmr::vector performs exactly one allocation.",
+      "checklist": [
+        "Derives from std::pmr::memory_resource and stores an upstream pointer",
+        "do_allocate counts calls and accumulates bytes before forwarding upstream",
+        "do_deallocate forwards the pointer, size and alignment it was given",
+        "do_is_equal compares identity",
+        "The audit reserves first and then inserts, so the expected count is one"
+      ],
+      "solution": "#include <cstddef>\n#include <cstdio>\n#include <memory_resource>\n#include <vector>\n\nclass CountingResource final : public std::pmr::memory_resource {\npublic:\n    explicit CountingResource(std::pmr::memory_resource* upstream)\n        : upstream_(upstream) {}\n\n    std::size_t allocations() const noexcept { return allocations_; }\n    std::size_t bytes() const noexcept { return bytes_; }\n\nprivate:\n    void* do_allocate(std::size_t bytes, std::size_t alignment) override {\n        ++allocations_;\n        bytes_ += bytes;\n        return upstream_->allocate(bytes, alignment);\n    }\n\n    void do_deallocate(\n        void* pointer, std::size_t bytes, std::size_t alignment) override {\n        upstream_->deallocate(pointer, bytes, alignment);\n    }\n\n    bool do_is_equal(\n        const std::pmr::memory_resource& other) const noexcept override {\n        return this == &other;\n    }\n\n    std::pmr::memory_resource* upstream_;\n    std::size_t allocations_ = 0;\n    std::size_t bytes_ = 0;\n};\n\nbool audit_reserved_vector() {\n    CountingResource counter{std::pmr::new_delete_resource()};\n\n    std::pmr::vector<int> prices{&counter};\n    prices.reserve(1'000);\n    for (int i = 0; i < 1'000; ++i) {\n        prices.push_back(i);\n    }\n\n    std::printf(\"%zu allocations, %zu bytes\\n\",\n                counter.allocations(), counter.bytes());\n    return counter.allocations() == 1;\n}\n",
+      "notes": "This is a test, not a benchmark: counting changes the allocation path and reveals nothing about cache misses or elapsed time. It also sees only the objects actually given the resource — a nested ordinary std::string or a std::function target that overflows its inline storage still reaches the global allocator unobserved."
+    }
+  ]
+}

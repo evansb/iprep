@@ -1,0 +1,441 @@
+{
+  "chapter": 6,
+  "mcq": [
+    {
+      "id": "c06-m01",
+      "section": "What counts as an error",
+      "difficulty": "easy",
+      "prompt": "A function has a narrow contract. What does that mean?",
+      "choices": [
+        "It has preconditions, and violating them can trigger an assertion or undefined behavior",
+        "It accepts a small number of argument types",
+        "It defines behavior for every possible input",
+        "It reports failure through a return value rather than an exception"
+      ],
+      "answer": 0,
+      "explain": "A wide contract defines behavior for every input; a narrow contract carries preconditions that the caller must satisfy, and violating them is a bug rather than a reportable failure. The reporting *mechanism* is a separate axis entirely — a wide-contract function can still return std::expected, and a narrow-contract one can still throw for the failures it does define."
+    },
+    {
+      "id": "c06-m02",
+      "section": "What counts as an error",
+      "difficulty": "medium",
+      "prompt": "A configuration file is missing at startup and the caller several frames up can fall back to defaults. Which class of failure is this, and what follows?",
+      "choices": [
+        "A programming bug — assert and let the process stop",
+        "An unrecoverable environment failure — terminate",
+        "A recoverable runtime failure — report it to the caller that can choose another action",
+        "Not an error at all — return a default-constructed value silently"
+      ],
+      "answer": 2,
+      "explain": "A missing file is the textbook recoverable runtime failure: report it to the nearest party that can retry, substitute, reject, or inform an operator. Treating it as a bug and aborting confuses 'the environment is not what we hoped' with 'our invariant is broken'. Silently substituting a default is worse still — it removes the caller's ability to decide, which is the whole reason the failure is being reported."
+    },
+    {
+      "id": "c06-m03",
+      "section": "Exceptions: throw, catch, unwind",
+      "difficulty": "easy",
+      "prompt": "Why catch exceptions by `const` reference rather than by value?",
+      "choices": [
+        "Catching by value is ill-formed for types derived from std::exception",
+        "Catching by value copies the object and can slice a derived exception to its base",
+        "Catching by value prevents the handler from calling what()",
+        "Catching by value leaks the exception object"
+      ],
+      "answer": 1,
+      "explain": "A by-value handler copies into a parameter of the declared type, so a derived exception caught as `std::exception` loses its derived part — the same slicing that afflicts any by-value polymorphic operation. It compiles, it does not leak, and what() still works; it just calls the base's what(), which is exactly the information you wanted."
+    },
+    {
+      "id": "c06-m04",
+      "section": "Exceptions: throw, catch, unwind",
+      "difficulty": "medium",
+      "prompt": "Handlers are written in this order: `catch (const std::exception&)`, then `catch (const std::runtime_error&)`, then `catch (const OrderRejected&)`. An OrderRejected is thrown. Which handler runs?",
+      "choices": [
+        "OrderRejected, because the most derived match wins",
+        "None; the ambiguity makes the program ill-formed",
+        "std::runtime_error, because it is the nearest base with a matching what()",
+        "std::exception, because handlers are tested top to bottom and the first type match wins"
+      ],
+      "answer": 3,
+      "explain": "Handler selection is not overload resolution: clauses are tested in source order and the first one whose type matches wins, so a base-class handler placed first shadows every derived handler after it. Put derived types before their bases. Compilers usually warn about the unreachable handlers, but the code is well-formed and will run."
+    },
+    {
+      "id": "c06-m05",
+      "section": "Exceptions: throw, catch, unwind",
+      "difficulty": "medium",
+      "prompt": "What does stack unwinding do between the `throw` expression and the handler?",
+      "choices": [
+        "Frees all heap allocations made since the try block was entered",
+        "Nothing — destructors run only after the handler completes",
+        "Destroys automatic objects in declaration order, then releases their storage",
+        "Destroys every fully constructed automatic object, in reverse construction order"
+      ],
+      "answer": 3,
+      "explain": "Unwinding runs destructors for every fully constructed automatic object between the throw and the handler, in reverse construction order, before control enters the handler. It has no idea what is on the heap: a raw `new` with no owner leaks straight through an unwind. That is why RAII, not a `finally` block, is C++'s cleanup mechanism."
+    },
+    {
+      "id": "c06-m06",
+      "section": "What exceptions cost",
+      "difficulty": "medium",
+      "prompt": "What does \"zero-cost\" mean in the table-driven exception model?",
+      "choices": [
+        "The normal path pays nothing: entering a try block usually adds no branch or register bookkeeping",
+        "Throwing an exception costs no more than returning a value",
+        "Unwind tables occupy no space in the binary",
+        "Exception objects are allocated on the stack, so no allocation occurs"
+      ],
+      "answer": 0,
+      "explain": "\"Zero-cost\" describes only the non-throwing path — an untaken try block normally adds no executed instructions, with the recovery information living out of line in sections such as .eh_frame. Throwing is deliberately expensive: object creation, a frame-by-frame unwind-table walk, destructor calls, and RTTI-based handler matching. The tables and landing pads also enlarge the binary whether or not anything ever throws."
+    },
+    {
+      "id": "c06-m07",
+      "section": "What exceptions cost",
+      "difficulty": "medium",
+      "prompt": "What design conclusion does the cost model actually support for a low-latency system?",
+      "choices": [
+        "Compile everything with -fno-exceptions, since try blocks slow down the hot path",
+        "Avoid *throwing* on the tick-to-trade path, while exceptions remain reasonable for startup, configuration and reconnection",
+        "Use exceptions everywhere, since the model is zero-cost",
+        "Replace exceptions with error codes on every path, since unwind tables dominate cache behavior"
+      ],
+      "answer": 1,
+      "explain": "The asymmetry is the point: an untaken try block is free, so the thing to keep off the hot path is the throw, not the mechanism. Startup, configuration and reconnection are exactly where failures are rare and recovery happens several calls away — the conditions exceptions are good at. \"Exceptions are slow\" is too imprecise to design from."
+    },
+    {
+      "id": "c06-m08",
+      "section": "Exception-safety guarantees",
+      "difficulty": "easy",
+      "prompt": "An operation promises that if it throws, the program state is exactly as it was before the call. Which guarantee is that?",
+      "choices": [
+        "Nothrow",
+        "None",
+        "Basic",
+        "Strong"
+      ],
+      "answer": 3,
+      "explain": "The strong guarantee is 'unchanged state on failure', typically achieved by preparing separately and committing with non-throwing operations. The basic guarantee is weaker but still substantial: invariants hold and nothing leaks, though observable state may have moved on. Nothrow is stronger in a different direction — it promises the operation cannot throw at all, so the question of post-throw state never arises."
+    },
+    {
+      "id": "c06-m09",
+      "section": "Exception-safety guarantees",
+      "difficulty": "medium",
+      "prompt": "`apply_fill_unsafe` does `order.filled_quantity += fill.quantity;` and only then validates and throws on overfill. Which guarantee does it provide?",
+      "choices": [
+        "Basic — the object is destructible and leaks nothing",
+        "Strong — the notional was never updated",
+        "None — the stated invariant filled_quantity <= requested_quantity is broken",
+        "Nothrow — the mutation itself cannot throw"
+      ],
+      "answer": 2,
+      "explain": "The object is indeed destructible and leaks nothing, which is what makes 'basic' tempting — but the basic guarantee also requires invariants to hold, and this one has left filled_quantity above requested_quantity. A caller that catches the exception and keeps using the order is now working with a state its own type says is impossible. That is the 'none' row."
+    },
+    {
+      "id": "c06-m10",
+      "section": "Exception-safety guarantees",
+      "difficulty": "medium",
+      "prompt": "What is the general shape of a strong-guarantee operation?",
+      "choices": [
+        "Wrap the mutation in a try block and undo it in the handler",
+        "Mark the operation noexcept so it cannot fail",
+        "Compute the prospective state in local values, validate, then commit with non-throwing assignments",
+        "Take a full copy of the object at entry and restore it on any throw"
+      ],
+      "answer": 2,
+      "explain": "Do the potentially throwing work on the side, then make the state transition out of operations that cannot throw — that is exactly what copy-and-swap does in the general case. Compensating inside a catch block is fragile because the undo itself can fail or be incomplete, and marking the function noexcept does not make anything inside it non-throwing; it just converts a throw into std::terminate."
+    },
+    {
+      "id": "c06-m11",
+      "section": "noexcept and scope guards",
+      "difficulty": "easy",
+      "prompt": "What does `noexcept` on a function mean?",
+      "choices": [
+        "The compiler has proved no exception can be thrown from it",
+        "An escaping exception is converted into a return of a default value",
+        "Throwing inside it is ill-formed and rejected at compile time",
+        "If an exception escapes, the implementation calls std::terminate"
+      ],
+      "answer": 3,
+      "explain": "noexcept is a promise enforced by termination, not by proof: the body may contain throws and calls to throwing functions, and the compiler will happily compile it. If one escapes, std::terminate runs — and you may not rely on intermediate frames having been unwound first. Reading it as 'the compiler checked' is the misconception the chapter calls out by name."
+    },
+    {
+      "id": "c06-m12",
+      "section": "noexcept and scope guards",
+      "difficulty": "medium",
+      "prompt": "In the chapter's `update_book`, what is the purpose of calling `rollback.dismiss()` after `commit_book_update()`?",
+      "choices": [
+        "To stop the guard's destructor from rolling back a change that has already been committed",
+        "To release the guard's memory before the function returns",
+        "To make the guard's destructor noexcept",
+        "To run the rollback action immediately rather than at scope exit"
+      ],
+      "answer": 0,
+      "explain": "The guard exists so that *every* exit — early return or exception — undoes the partial update; dismiss() marks the one path where the work succeeded and must not be undone. Without it the successful path would commit and then immediately roll back. Nothing about dismiss() runs the action or changes the destructor's exception specification."
+    },
+    {
+      "id": "c06-m13",
+      "section": "Living without exceptions",
+      "difficulty": "medium",
+      "prompt": "A codebase builds with `-fno-exceptions`. Which statement is accurate?",
+      "choices": [
+        "It is a standard C++ mode with defined semantics for every library operation",
+        "It is an implementation option; throwing library operations such as std::vector::at and std::stoi become unusable or terminate",
+        "It makes std::vector::at return a default-constructed element instead of throwing",
+        "It only affects the translation units that opt in, so mixing is safe"
+      ],
+      "answer": 1,
+      "explain": "-fno-exceptions is a GCC/Clang option, not part of the standard, and the library operations that report failure by throwing lose their reporting channel — depending on the library and build they either fail to compile or terminate. Nothing rewrites at() into a non-throwing accessor. And it is emphatically not a per-file preference: an exception entering a translation unit built without exception support commonly kills the process, so it is a boundary-wide build contract."
+    },
+    {
+      "id": "c06-m14",
+      "section": "Living without exceptions",
+      "difficulty": "medium",
+      "prompt": "Without exceptions, how does a type report that its setup failed?",
+      "choices": [
+        "The constructor returns a bool",
+        "The constructor leaves the object in a 'zombie' state that every member function must check",
+        "A factory function returns std::optional<T> or std::expected<T, E>, keeping the constructor infallible",
+        "The constructor calls std::abort"
+      ],
+      "answer": 2,
+      "explain": "A constructor has no return channel, so fallible setup moves into a factory (or two-phase initialization) whose return type carries the failure. Marking it [[nodiscard]] makes ignoring the result diagnosable. A constructor cannot return a bool at all, and the zombie-object pattern is the thing the factory exists to avoid: it pushes a validity check into every single member function and every caller."
+    },
+    {
+      "id": "c06-m15",
+      "section": "Error codes, optional, expected",
+      "difficulty": "medium",
+      "prompt": "What is the rule for reading `errno` after a C library call?",
+      "choices": [
+        "Inspect it only after the operation has indicated failure, and copy it before any other library call",
+        "Clear it before the call, then test it afterwards; a successful call always sets it to 0",
+        "It is a global shared across threads, so it must be read under a lock",
+        "A non-zero errno reliably indicates that the preceding call failed"
+      ],
+      "answer": 0,
+      "explain": "A successful operation is not required to clear errno, so a non-zero value proves nothing on its own — the operation's own return value is what tells you it failed. Once it has, errno is a thread-local integer that the next library call may overwrite, so copy it immediately. Being thread-local, it needs no lock; the hazard is a read-after-call dependency, not a data race."
+    },
+    {
+      "id": "c06-m16",
+      "section": "Error codes, optional, expected",
+      "difficulty": "medium",
+      "prompt": "You need to report *why* a parse failed, on a path that must not throw. Which return type fits?",
+      "choices": [
+        "std::optional<T>, with the reason logged before returning std::nullopt",
+        "std::expected<T, E>, with E naming the reason",
+        "bool, with the value written through a T& out-parameter",
+        "T, with a sentinel value reserved for failure"
+      ],
+      "answer": 1,
+      "explain": "std::expected<T, E> keeps the reason in the return value, which is exactly the requirement. std::optional says only 'no value' — its right use is when absence has a single meaning; pushing the reason into a log instead makes it unavailable to the caller who has to decide what to do. An out-parameter works but leaves the T constructed-then-maybe-garbage, and a sentinel steals a value from the domain."
+    },
+    {
+      "id": "c06-m17",
+      "section": "Error codes, optional, expected",
+      "difficulty": "hard",
+      "prompt": "What is the difference between `*result` and `result.value()` on an empty std::optional or an unexpected std::expected?",
+      "choices": [
+        "* is undefined behavior; .value() checks and throws (std::bad_optional_access or std::bad_expected_access<E>)",
+        "Both are undefined behavior; .value() merely asserts in debug builds",
+        "* throws; .value() is undefined behavior",
+        "Both check and throw; .value() additionally reports the error type"
+      ],
+      "answer": 0,
+      "explain": "`*` is the unchecked accessor with the precondition that a value is present — using it without one is undefined behavior, not a diagnostic. `.value()` performs the check and throws. Which one to reach for follows from the surrounding error policy: on a path built to avoid throws, test the tag yourself and use `*`; where a throw is acceptable, `.value()` turns a bug into a catchable failure."
+    },
+    {
+      "id": "c06-m18",
+      "section": "Termination: when crashing is correct",
+      "difficulty": "medium",
+      "prompt": "Why can `assert` not be used to enforce a production trust boundary?",
+      "choices": [
+        "It only reports to stderr, which may be redirected",
+        "It is evaluated before the function's preconditions are established",
+        "It calls std::terminate rather than std::abort, so cleanup is skipped",
+        "Defining NDEBUG removes the expression completely"
+      ],
+      "answer": 3,
+      "explain": "Under NDEBUG the whole expression vanishes, so a check that guards untrusted input disappears in exactly the build that ships. That is also why side effects must never live inside an assert — `assert(initialize())` stops initializing anything in a release build. Keep cheap always-on checks at trust boundaries and reserve assert for internal invariants during development."
+    },
+    {
+      "id": "c06-m19",
+      "section": "Termination: when crashing is correct",
+      "difficulty": "medium",
+      "prompt": "What does std::abort do that makes it the shortest fail-stop path?",
+      "choices": [
+        "It unwinds the stack and then exits with a non-zero status",
+        "It runs destructors for static objects and flushes buffered output before exiting",
+        "It does not unwind, does not run destructors, and does not guarantee buffered output is flushed",
+        "It terminates only the calling thread, leaving supervision to the others"
+      ],
+      "answer": 2,
+      "explain": "abort ends the process abnormally — commonly raising SIGABRT so the environment can produce a core dump — and skips unwinding, destructors and stream flushing entirely. That is the trade: the fastest stop with the most faithful core image, at the cost of dropping external resources hard. Recovery therefore belongs to process supervision, not to damaged in-process state."
+    },
+    {
+      "id": "c06-m20",
+      "section": "Latency Lens",
+      "difficulty": "medium",
+      "prompt": "How does propagating a std::expected error through several call layers compare with propagating an exception?",
+      "choices": [
+        "Both walk unwind tables; expected just avoids the allocation",
+        "Expected costs explicit tests and branches at each layer; an exception costs an unwind walk on the failure path only",
+        "Expected is slower on the success path because every layer allocates an error object",
+        "They generate the same code after inlining"
+      ],
+      "answer": 1,
+      "explain": "std::expected turns error propagation into ordinary value state, so each layer pays a tag test and a branch — on the success path too — and never touches unwind machinery. An exception costs essentially nothing on the success path and a great deal on the failure path: object creation, a table walk, destructor calls, and RTTI matching. The choice is about which path you are willing to make expensive."
+    }
+  ],
+  "reading": [
+    {
+      "id": "c06-r01",
+      "section": "Exceptions: throw, catch, unwind",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n#include <stdexcept>\n#include <string_view>\n\nclass Trace {\npublic:\n    explicit Trace(std::string_view name) : name_(name) {\n        std::cout << \"enter \" << name_ << ' ';\n    }\n\n    ~Trace() { std::cout << \"leave \" << name_ << ' '; }\n\nprivate:\n    std::string_view name_;\n};\n\nvoid check_risk() {\n    Trace trace{\"risk\"};\n    throw std::runtime_error{\"limit\"};\n}\n\nvoid match_order() {\n    Trace trace{\"match\"};\n    check_risk();\n}\n\nint main() {\n    try {\n        match_order();\n    } catch (const std::exception& error) {\n        std::cout << \"caught \" << error.what() << '\\n';\n    }\n}",
+      "kind": "value",
+      "accept": [
+        "enter match enter risk leave risk leave match caught limit"
+      ],
+      "explain": "Stack unwinding destroys every fully constructed automatic object between the throw and the handler, in reverse construction order, and it does so *before* control enters the handler — which is why both \"leave\" lines precede \"caught\". C++ needs no finally block because that cleanup lives in destructors rather than after the code that might throw."
+    },
+    {
+      "id": "c06-r02",
+      "section": "Exceptions: throw, catch, unwind",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n#include <stdexcept>\n\nclass OrderRejected : public std::runtime_error {\npublic:\n    using std::runtime_error::runtime_error;\n};\n\nvoid report(int which) {\n    try {\n        if (which == 0) {\n            throw OrderRejected{\"rejected\"};\n        }\n        throw std::runtime_error{\"runtime\"};\n    } catch (const std::runtime_error& error) {\n        std::cout << \"runtime handler: \" << error.what() << '\\n';\n    } catch (const OrderRejected& error) {\n        std::cout << \"reject handler: \" << error.what() << '\\n';\n    }\n}\n\nint main() {\n    report(0);\n    report(1);\n}",
+      "kind": "value",
+      "accept": [
+        "runtime handler: rejected runtime handler: runtime"
+      ],
+      "explain": "Handlers are tested in source order and the first type match wins, so the base-class handler swallows the derived exception too and the OrderRejected clause is unreachable. This is not overload resolution — there is no 'best match'. Reordering the clauses so derived types come first is the fix; the compiler will usually warn about the dead handler."
+    },
+    {
+      "id": "c06-r03",
+      "section": "Exception-safety guarantees",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n#include <stdexcept>\n\nstruct Order {\n    int requested_quantity;\n    int filled_quantity;\n};\n\nvoid apply_fill_unsafe(Order& order, int quantity) {\n    order.filled_quantity += quantity;\n    if (order.filled_quantity > order.requested_quantity) {\n        throw std::runtime_error{\"overfill\"};\n    }\n}\n\nvoid apply_fill(Order& order, int quantity) {\n    const int next = order.filled_quantity + quantity;\n    if (next > order.requested_quantity) {\n        throw std::runtime_error{\"overfill\"};\n    }\n    order.filled_quantity = next;\n}\n\nint main() {\n    Order a{100, 0};\n    Order b{100, 0};\n\n    try { apply_fill_unsafe(a, 150); } catch (const std::exception&) {}\n    try { apply_fill(b, 150); } catch (const std::exception&) {}\n\n    std::cout << a.filled_quantity << ' ' << b.filled_quantity << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "150 0"
+      ],
+      "explain": "The unsafe version mutates before validating, so after the throw the order records 150 filled against 100 requested — its invariant is broken and it provides no guarantee at all, even though nothing leaked. The safe version computes the prospective value in a local, validates it, and commits only with a non-throwing assignment, so a failed call leaves the order exactly as it was: the strong guarantee."
+    },
+    {
+      "id": "c06-r04",
+      "section": "Error codes, optional, expected",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <expected>\n#include <iostream>\n#include <string>\n\nstd::expected<int, std::string> parse(bool ok) {\n    if (!ok) {\n        return std::string{\"bad input\"};\n    }\n    return 42;\n}\n\nint main() {\n    std::cout << parse(false).error() << '\\n';\n}",
+      "kind": "no-compile",
+      "explain": "An error must be returned as std::unexpected(e), not as a bare E. std::expected's converting constructor from a plain value targets the *success* type, so this asks to build an int from a std::string and finds no viable conversion. Returning the error value directly would be ambiguous by design whenever T and E are the same type — std::unexpected is the tag that says which side you meant."
+    },
+    {
+      "id": "c06-r05",
+      "section": "noexcept and scope guards",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <iostream>\n#include <string>\n\nstruct AppendGuard {\n    std::string* target = nullptr;\n\n    ~AppendGuard() {\n        if (target != nullptr) {\n            *target += \" rolled-back\";\n        }\n    }\n};\n\nint main() {\n    AppendGuard guard;\n    std::string state = \"book update in progress on the primary venue\";\n    guard.target = &state;\n    std::cout << \"done\\n\";\n}",
+      "kind": "ub",
+      "explain": "A stateful scope guard holds a pointer to the state it cleans up, so that state must outlive the guard. Here the guard is declared first, and locals are destroyed in reverse declaration order, so `state` is gone by the time ~AppendGuard runs and the cleanup writes through a dangling pointer. ASan reports a heap-use-after-free. Declaring the guard *after* the state it protects is what makes the ordering correct."
+    },
+    {
+      "id": "c06-r06",
+      "section": "Error codes, optional, expected",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n#include <optional>\n#include <string_view>\n\nstd::optional<int> best_bid(std::string_view symbol) {\n    if (symbol == \"EURUSD\") {\n        return 18750;\n    }\n    return std::nullopt;\n}\n\nint main() {\n    for (std::string_view symbol : {\"EURUSD\", \"XXXYYY\"}) {\n        if (std::optional<int> bid = best_bid(symbol); bid.has_value()) {\n            std::cout << *bid << ' ';\n        } else {\n            std::cout << \"none \";\n        }\n    }\n\n    std::cout << best_bid(\"XXXYYY\").value_or(0) << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "18750 none 0"
+      ],
+      "explain": "The if-with-initializer scopes the optional to the branch that tests it, and `*bid` is reached only after has_value() has confirmed a value — dereferencing an empty optional would be undefined behavior, not a diagnostic. value_or supplies a substitute without any check, which is right precisely when absence has one meaning and a display default is acceptable."
+    }
+  ],
+  "writing": [
+    {
+      "id": "c06-w01",
+      "section": "Exception-safety guarantees",
+      "minutes": 8,
+      "prompt": "An `Order` maintains the invariant `0 <= filled_quantity <= requested_quantity`, and also tracks `filled_notional`. Write `apply_fill(Order&, Fill)` that updates both fields and throws on an overfill, providing the strong guarantee. Comment the line at which the operation becomes committed.",
+      "starter": "#include <stdexcept>\n\nstruct Order {\n    int requested_quantity;\n    int filled_quantity;\n    double filled_notional;\n};\n\nstruct Fill {\n    int quantity;\n    double price;\n};\n\nvoid apply_fill(Order& order, Fill fill) {\n    // TODO: strong guarantee\n}",
+      "checklist": [
+        "Both prospective values are computed into local variables before anything is written to order",
+        "Validation happens after the computation and before any mutation",
+        "The commit consists only of assignments that cannot throw",
+        "A comment identifies the first assignment as the commit point",
+        "After a throw, no member of order has been modified"
+      ],
+      "solution": "#include <stdexcept>\n\nstruct Order {\n    int requested_quantity;\n    int filled_quantity;\n    double filled_notional;\n};\n\nstruct Fill {\n    int quantity;\n    double price;\n};\n\nvoid apply_fill(Order& order, Fill fill) {\n    // Prepare: all potentially throwing work happens on the side, in locals.\n    const int next_quantity = order.filled_quantity + fill.quantity;\n    const double next_notional =\n        order.filled_notional + fill.quantity * fill.price;\n\n    // Validate: the only exit that throws is reached before any mutation.\n    if (next_quantity > order.requested_quantity) {\n        throw std::runtime_error{\"overfill\"};\n    }\n\n    // Commit: from here on nothing can throw, so the transition is atomic\n    // with respect to exceptions.\n    order.filled_quantity = next_quantity;\n    order.filled_notional = next_notional;\n}",
+      "notes": "Prepare / validate / commit is the general shape of a strong-guarantee operation; copy-and-swap is the same pattern with the preparation being a whole object. Note the surviving narrow precondition: the quantities must be non-negative and their sum representable as int, since signed overflow would be undefined behavior before any check could run. A guarantee about exceptions says nothing about undefined behavior."
+    },
+    {
+      "id": "c06-w02",
+      "section": "noexcept and scope guards",
+      "minutes": 10,
+      "prompt": "Write a `ScopeExit` guard that runs a non-throwing action when control leaves its scope and can be dismissed. Then use it in `bool update_book()` that begins an update, applies a change, returns false if the result is invalid, and otherwise commits.",
+      "checklist": [
+        "The guard's destructor is noexcept and runs the action only while the guard is active",
+        "A dismiss() member disables the action and is itself noexcept",
+        "The guard is declared after the state it protects and after the operation that must be undone has begun",
+        "The early-return path leaves the guard active so rollback runs",
+        "dismiss() is called on the success path, after the commit",
+        "The rollback and commit operations are themselves declared noexcept"
+      ],
+      "solution": "struct ScopeExit {\n    void (*action)() noexcept;\n    bool active = true;\n\n    ~ScopeExit() noexcept {\n        if (active) {\n            action();\n        }\n    }\n\n    void dismiss() noexcept {\n        active = false;\n    }\n};\n\nvoid begin_book_update();\nvoid apply_book_change();\nbool book_is_valid();\nvoid commit_book_update() noexcept;\nvoid rollback_book_update() noexcept;\n\nbool update_book() {\n    begin_book_update();\n    ScopeExit rollback{rollback_book_update};\n\n    apply_book_change();\n    if (!book_is_valid()) {\n        return false;  // guard still active: rollback runs\n    }\n\n    commit_book_update();\n    rollback.dismiss();  // success: do not undo what we just committed\n    return true;\n}",
+      "notes": "The guard covers the exceptional exit for free — if apply_book_change throws, unwinding destroys the guard and the rollback happens with no handler anywhere in this function. The destructor must be non-throwing because a destructor that lets an exception escape during unwinding calls std::terminate. C++23 standardizes std::scope_exit in <scope>, though library availability lags; a hand-rolled guard like this one is portable today."
+    },
+    {
+      "id": "c06-w03",
+      "section": "Error codes, optional, expected",
+      "minutes": 12,
+      "prompt": "Write `parse_price(std::string_view) -> std::expected<Price, ParseError>` where Price wraps an std::int64_t tick count and ParseError distinguishes an empty string, a non-digit character, and overflow. Detect overflow *before* it happens. Mark the function [[nodiscard]].",
+      "checklist": [
+        "ParseError is a scoped enumeration with the three distinct reasons",
+        "The function is marked [[nodiscard]]",
+        "Errors are returned with std::unexpected, successes as the value type",
+        "Overflow is detected by comparing against a computed limit before multiplying, never by observing a wrapped result",
+        "Every character is validated before it contributes to the accumulator"
+      ],
+      "solution": "#include <cstdint>\n#include <expected>\n#include <limits>\n#include <string_view>\n\nstruct Price {\n    std::int64_t ticks;\n};\n\nenum class ParseError {\n    empty,\n    invalid_character,\n    overflow\n};\n\n[[nodiscard]] std::expected<Price, ParseError>\nparse_price(std::string_view text) {\n    if (text.empty()) {\n        return std::unexpected(ParseError::empty);\n    }\n\n    std::int64_t value = 0;\n    for (char character : text) {\n        if (character < '0' || character > '9') {\n            return std::unexpected(ParseError::invalid_character);\n        }\n\n        const std::int64_t digit = character - '0';\n        const std::int64_t limit = std::numeric_limits<std::int64_t>::max();\n\n        // Check before the multiply: signed overflow is undefined behavior,\n        // so there is no wrapped result to inspect afterwards.\n        if (value > (limit - digit) / 10) {\n            return std::unexpected(ParseError::overflow);\n        }\n\n        value = value * 10 + digit;\n    }\n\n    return Price{value};\n}",
+      "notes": "Two things are doing work here. std::unexpected is the tag that says which side of the expected you are constructing — a bare `return ParseError::overflow;` targets the success type and will not compile. And the overflow check has to precede the arithmetic: signed overflow is undefined behavior, so the familiar 'multiply and see if it went negative' idiom has already lost. [[nodiscard]] makes a caller who ignores the result diagnosable."
+    },
+    {
+      "id": "c06-w04",
+      "section": "Exceptions: throw, catch, unwind",
+      "minutes": 9,
+      "prompt": "Define an application exception `OrderRejected` deriving from the standard hierarchy, and write a boundary function that handles it specifically, handles other standard exceptions generically, and rethrows anything unrecognised without changing its type.",
+      "checklist": [
+        "OrderRejected derives from std::runtime_error (or another std::exception descendant) and inherits its constructors",
+        "Handlers are ordered derived-before-base",
+        "Every handler catches by const reference",
+        "A catch (...) clause rethrows with a bare `throw;`",
+        "A comment explains why an empty catch (...) {} would be wrong"
+      ],
+      "solution": "#include <exception>\n#include <iostream>\n#include <stdexcept>\n\nclass OrderRejected : public std::runtime_error {\npublic:\n    using std::runtime_error::runtime_error;\n};\n\nvoid route_order();\n\nvoid handle_order() {\n    try {\n        route_order();\n    } catch (const OrderRejected& error) {\n        // Derived first: handlers are tested in source order and the first\n        // type match wins, so a base handler above this one would shadow it.\n        std::cout << \"reject: \" << error.what() << '\\n';\n    } catch (const std::runtime_error& error) {\n        std::cout << \"runtime failure: \" << error.what() << '\\n';\n    } catch (const std::exception& error) {\n        std::cout << \"standard exception: \" << error.what() << '\\n';\n    } catch (...) {\n        // An empty catch (...) {} would turn a known failure into unknown\n        // state: the program continues with no idea what went wrong. A bare\n        // `throw;` rethrows the original exception without changing its type\n        // or slicing it.\n        throw;\n    }\n}",
+      "notes": "Catching by const reference matters for the same reason it does anywhere polymorphic: a by-value handler copies into the declared type and slices away the derived part, so `catch (std::exception e)` gets the base's what(). `catch (...)` earns its place at a boundary that can add context, translate the failure into the local error vocabulary, or terminate — not as a way to keep going."
+    },
+    {
+      "id": "c06-w05",
+      "section": "Living without exceptions",
+      "minutes": 7,
+      "prompt": "A `Session` currently throws from its constructor when the endpoint is invalid, which is unusable under -fno-exceptions. Restructure it so the constructor is infallible and failure is reported through the return type of a factory.",
+      "checklist": [
+        "The constructor no longer validates or throws; it assumes a valid Config",
+        "A free (or static) factory function performs the validation",
+        "The factory returns std::optional<Session> (or std::expected<Session, E>)",
+        "The factory is marked [[nodiscard]]",
+        "The failure path returns std::nullopt (or an unexpected value) rather than a partially built Session"
+      ],
+      "solution": "#include <optional>\n\nstruct Config {\n    bool endpoint_is_valid;\n};\n\nclass Session {\npublic:\n    // Infallible: by the time this runs, the Config has already been checked.\n    explicit Session(const Config&) {}\n};\n\n// A constructor has no return channel, so fallible setup moves out here.\n[[nodiscard]] std::optional<Session> open_session(const Config& config) {\n    if (!config.endpoint_is_valid) {\n        return std::nullopt;\n    }\n    return Session{config};\n}",
+      "notes": "The alternative to a factory is two-phase initialization — construct, then call an init() that can fail — which reintroduces the zombie state a constructor exists to prevent: every member function and every caller must now ask whether the object is usable. std::expected<Session, E> is the upgrade when the caller needs to distinguish reasons; std::optional is right when 'could not open' has one meaning."
+    },
+    {
+      "id": "c06-w06",
+      "section": "Termination: when crashing is correct",
+      "minutes": 6,
+      "prompt": "Write `send_order(int quantity, bool gateway_is_trusted)` that uses an assertion for an internal invariant and an always-on check plus std::abort for a trust-boundary condition. Comment why the two checks use different mechanisms.",
+      "checklist": [
+        "An assert covers the internal precondition",
+        "An unconditional if-check covers the trust-boundary condition",
+        "The trust-boundary failure records something to stderr before aborting",
+        "A comment states that NDEBUG removes the assert expression entirely",
+        "No required side effect appears inside the assert"
+      ],
+      "solution": "#include <cassert>\n#include <cstdlib>\n#include <iostream>\n\nvoid send_order(int quantity, bool gateway_is_trusted) {\n    // Internal invariant: callers inside this system are expected to have\n    // validated the quantity already. Under NDEBUG this expression is removed\n    // completely, which is fine for a development-time check -- and is exactly\n    // why nothing with a required side effect may go inside an assert.\n    assert(quantity > 0);\n\n    // Trust boundary: this one must hold in the shipped build too, so it is an\n    // ordinary always-on branch. Continuing on an untrusted gateway could send\n    // real orders from corrupted state, which is worse than stopping.\n    if (!gateway_is_trusted) {\n        std::cerr << \"untrusted gateway state\\n\";\n        std::abort();\n    }\n\n    std::cout << \"sent \" << quantity << '\\n';\n}",
+      "notes": "Writing to std::cerr before abort is a best effort, not a guarantee: abort does not flush buffered output, so anything worth keeping should be written unbuffered or already be in a log the supervisor can read. abort also skips destructors, so external resources are dropped hard — that is the deliberate trade for the shortest fail-stop path and the most faithful core dump. Recovery belongs to process supervision, not to in-process state you already know is damaged."
+    }
+  ]
+}

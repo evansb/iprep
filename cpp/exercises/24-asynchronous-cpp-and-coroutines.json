@@ -1,0 +1,551 @@
+{
+  "chapter": 24,
+  "mcq": [
+    {
+      "id": "c24-m01",
+      "section": "From synchronous calls to tasks",
+      "difficulty": "easy",
+      "prompt": "Which three parts does every asynchronous mechanism in this chapter have?",
+      "choices": [
+        "A thread, a mutex, and a condition variable",
+        "A callback, an event loop, and a work queue",
+        "A task, shared state that records completion and holds the outcome, and a result channel to the consumer",
+        "A coroutine frame, a promise type, and an awaiter"
+      ],
+      "answer": 2,
+      "explain": "Task, shared state, result channel — the triple survives every packaging in the chapter, from promise/future to coroutines to senders. The thread/mutex/condition-variable answer names one possible implementation of the shared state rather than the structure, and the coroutine answer names the parts of exactly one mechanism. Recognising the triple is what lets you compare mechanisms on ownership, error channel, cancellation, and cost."
+    },
+    {
+      "id": "c24-m02",
+      "section": "Callbacks and their problems",
+      "difficulty": "medium",
+      "prompt": "Which of these is NOT one of the three costs the chapter attributes to callback-based sequencing?",
+      "choices": [
+        "Callbacks are inherently slower than futures, because each invocation allocates",
+        "Inversion of control — the event loop, not the visible function body, decides when each continuation runs",
+        "Error plumbing — an exception cannot cross an event-loop turn, so every callback needs an explicit failure path",
+        "Callback nesting — each dependent operation introduces another lambda and another lifetime boundary"
+      ],
+      "answer": 0,
+      "explain": "The three costs are all about structure, not speed. Callbacks are in fact the cheapest option on the allocation axis: with fixed storage a callback pipeline can be allocation-free, whereas a future mandates a separately allocated shared state. That is exactly why the chapter's verdict table calls callbacks 'viable if tightly controlled' — you give up composability and error propagation, not performance."
+    },
+    {
+      "id": "c24-m03",
+      "section": "Callbacks and their problems",
+      "difficulty": "medium",
+      "prompt": "A registered completion callback captures a local variable by reference. What is the rule?",
+      "choices": [
+        "It is safe, because the event loop copies the captured state when it stores the callback",
+        "It is safe as long as the callback is eventually invoked on the thread that registered it",
+        "It is safe if the local is const, since nothing can modify it after the function returns",
+        "It is a dangling capture — a callback often outlives the function that registered it, so capture owned state by value or place it in an object whose lifetime covers the operation"
+      ],
+      "answer": 3,
+      "explain": "Registering a callback is the moment the operation's lifetime stops matching the registering function's scope; the loop invokes it on some later turn, after that stack frame is gone. Nothing copies the referred-to object — the closure stores a reference, and const changes access, not lifetime. Running on the same thread does not help either, because the problem is *when* it runs, not *where*."
+    },
+    {
+      "id": "c24-m04",
+      "section": "Promises and futures",
+      "difficulty": "easy",
+      "prompt": "`result.get()` is called a second time on a `std::future<double>` whose first get() already returned. What happens?",
+      "choices": [
+        "It returns the same value again, since the shared state still holds it",
+        "It throws std::future_error, because the first get() moved the result out and left the future with no associated state",
+        "It blocks forever waiting for a second value",
+        "The behaviour is undefined"
+      ],
+      "answer": 1,
+      "explain": "get() is a one-shot transfer: it waits, moves the result out, and invalidates the future, after which valid() is false and any further operation throws std::future_error. Waiting does not consume the state — only get() does. If several consumers must observe the same result, that is what std::shared_future is for; its get() leaves the state readable."
+    },
+    {
+      "id": "c24-m05",
+      "section": "Promises and futures",
+      "difficulty": "medium",
+      "prompt": "What does `std::shared_future<T>` change relative to `std::future<T>`?",
+      "choices": [
+        "It allows set_value() to be called more than once on the associated promise",
+        "It removes the separately allocated shared state",
+        "Its get() does not consume the state, so several consumers may wait on and read the same result",
+        "It makes the producer end copyable so several threads can fulfil it"
+      ],
+      "answer": 2,
+      "explain": "shared_future changes only the consumer end: many observers, non-consuming get(). The producer side is unchanged — a shared state still has exactly one producer slot, so a second set_value() throws either way. It also does not save an allocation; if anything it extends the shared state's lifetime, since the state must survive until the last shared_future is gone."
+    },
+    {
+      "id": "c24-m06",
+      "section": "Promises and futures",
+      "difficulty": "medium",
+      "prompt": "A worker running behind a promise throws. How does the exception reach the consumer?",
+      "choices": [
+        "The worker catches it and stores it with set_exception(); get() rethrows it in the consumer, preserving the exception type",
+        "The runtime propagates it across the thread boundary automatically when the thread exits",
+        "It calls std::terminate — exceptions cannot cross a thread boundary at all",
+        "get() returns a value-initialized result and sets an error flag the consumer must check"
+      ],
+      "answer": 0,
+      "explain": "Exceptions do not propagate between threads on their own — an exception escaping a thread's top-level function calls std::terminate. The future's result channel is what makes propagation possible: the worker captures the active exception with std::current_exception() and stores it, and get() rethrows the stored std::exception_ptr in the consumer, so the consumer's catch clauses match the original type. The terminate answer is right about raw threads and wrong about this mechanism."
+    },
+    {
+      "id": "c24-m07",
+      "section": "Promises and futures",
+      "difficulty": "medium",
+      "prompt": "A `std::promise<int>` is destroyed without ever calling set_value() or set_exception(). What does a waiting consumer's get() do?",
+      "choices": [
+        "Blocks forever, since the shared state never becomes ready",
+        "Returns a value-initialized int",
+        "Calls std::terminate",
+        "Throws std::future_error carrying the broken_promise condition"
+      ],
+      "answer": 3,
+      "explain": "The promise's destructor makes the shared state ready with a broken_promise error rather than leaving a consumer parked forever — a deliberate 'the producer disappeared' signal. What it cannot tell you is *why* it disappeared, which is why a worker should still catch its own failures and store the original exception; broken_promise should be reserved for genuinely abandoned work."
+    },
+    {
+      "id": "c24-m08",
+      "section": "`packaged_task` and `std::async`",
+      "difficulty": "medium",
+      "prompt": "A `std::packaged_task` that has already run to completion is invoked a second time. What happens?",
+      "choices": [
+        "It runs again and overwrites the stored result",
+        "It throws std::future_error, because its shared state already has a result and a shared state has one producer slot",
+        "It silently does nothing and the future keeps the first result",
+        "It creates a second shared state, which the original future does not see"
+      ],
+      "answer": 1,
+      "explain": "A packaged_task is one-shot with respect to its current shared state: invoking it again attempts to publish a second result and throws, exactly as calling set_value() twice on a promise would. (Invoking a default-constructed or moved-from task throws too, reporting no state.) This is why a task queue must treat each wrapper as one consumable work item rather than a reusable function object."
+    },
+    {
+      "id": "c24-m09",
+      "section": "`packaged_task` and `std::async`",
+      "difficulty": "medium",
+      "prompt": "In the chapter's `submit()`, why is the `std::packaged_task` wrapped in a `std::shared_ptr` before being enqueued?",
+      "choices": [
+        "So that several workers can run the same task concurrently",
+        "Because std::packaged_task is not safe to invoke from a pool worker",
+        "Because the pool's std::function<void()> queue accepts only copyable callables, and a packaged_task is move-only",
+        "To keep the future's shared state alive after the task completes"
+      ],
+      "answer": 2,
+      "explain": "std::function requires a copy-constructible target, and packaged_task is move-only — so the shared_ptr exists purely to make a move-only object reachable through a copyable handle. The extra owner and its control-block allocation are an adaptation to the old queue type, not something intrinsic to packaged_task: switching the queue to std::move_only_function<void()> lets a lambda capture the task directly and removes it. The future's shared state is reference-managed independently and needs no help."
+    },
+    {
+      "id": "c24-m10",
+      "section": "`packaged_task` and `std::async`",
+      "difficulty": "medium",
+      "prompt": "A future returned by `std::async` with the default policy keeps returning `std::future_status::deferred` from wait_for(). What must the caller do to make progress?",
+      "choices": [
+        "Call get(), or perform a non-timed wait — a deferred callable never runs merely because wait_for() is polled",
+        "Keep polling; the implementation will schedule the work once a worker becomes free",
+        "Call wait_until() with a longer deadline, so the runtime has time to start the thread",
+        "Discard the future and reconstruct it with std::launch::async"
+      ],
+      "answer": 0,
+      "explain": "std::launch::deferred is lazy synchronous execution, not background work — there is no thread waiting to be scheduled. The callable runs on the waiting thread, and only a non-timed wait or get() triggers it, so a polling loop written for an async future spins forever on a deferred one. This is the concrete reason to write the launch policy explicitly whenever the behaviour matters: with the default policy either shape is permitted."
+    },
+    {
+      "id": "c24-m11",
+      "section": "`packaged_task` and `std::async`",
+      "difficulty": "hard",
+      "prompt": "Two consecutive statements each call `std::async(std::launch::async, work)` and discard the returned future. What is the observed behaviour?",
+      "choices": [
+        "Both run concurrently on two new threads",
+        "Neither runs — discarding the future cancels the work before it starts",
+        "Both are silently downgraded to deferred and never run at all",
+        "They serialize: each temporary future's destructor waits for its shared state, so the second call does not start until the first has finished"
+      ],
+      "answer": 3,
+      "explain": "A special rule makes a future returned by std::async wait in its destructor when it is the last reference to an unfinished asynchronous shared state — and a discarded return value is a temporary destroyed at the end of its full-expression. So each statement blocks until its own work completes, and code that looks like fan-out is fully sequential. The work is neither cancelled nor skipped; storing the futures in named variables is what actually keeps both operations outstanding."
+    },
+    {
+      "id": "c24-m12",
+      "section": "Latency Lens",
+      "difficulty": "medium",
+      "prompt": "According to the chapter's latency summary, which cost is intrinsic to a promise/future pair?",
+      "choices": [
+        "Every get() creates a thread to perform the wait",
+        "A separately allocated, reference-managed shared state, plus a blocking rendezvous in get()",
+        "One allocation per waiting consumer",
+        "A kernel transition on every set_value()"
+      ],
+      "answer": 1,
+      "explain": "The shared state is where the result and the readiness flag live, so a future cannot express its result channel without one — normally a separate allocation managed much like a shared_ptr control block. Combined with get() being a blocking rendezvous, that is the reason the chapter keeps futures off a tick path. Contrast senders: a pipeline can stay an inert, allocation-free description until it is connected and started."
+    },
+    {
+      "id": "c24-m13",
+      "section": "Cooperative cancellation",
+      "difficulty": "easy",
+      "prompt": "Why does C++ provide no operation that preemptively kills a running thread?",
+      "choices": [
+        "Because no mainstream operating system exposes such an operation",
+        "Because it would be an ABI break for existing implementations",
+        "Because stopping code at an arbitrary point could strand a held mutex, leave an invariant half-updated, or leak an external resource",
+        "Because std::jthread already provides it through its destructor"
+      ],
+      "answer": 2,
+      "explain": "The objection is a correctness one, not a portability one: there is no safe arbitrary point at which to stop a thread, because the victim may be holding a lock or midway through restoring an invariant. So cancellation is cooperative — a component requests a stop and the worker observes it at a point it has chosen. jthread's destructor requests exactly that kind of stop and then joins; it has no power to interrupt a worker that never checks."
+    },
+    {
+      "id": "c24-m14",
+      "section": "Cooperative cancellation",
+      "difficulty": "medium",
+      "prompt": "A `std::stop_callback` is constructed on a token whose stop has already been requested. What happens?",
+      "choices": [
+        "The callback is invoked during registration, closing the race between checking the token and installing the hook",
+        "Registration throws, because the stop state is already final",
+        "The callback is never invoked, since the request it would have observed has passed",
+        "The callback is queued and invoked at the next request_stop()"
+      ],
+      "answer": 0,
+      "explain": "Without that rule, code that tests the token and then registers a wake hook would lose any request landing between the two steps — and there is no way to close that window from the outside. Inline invocation on registration removes it. The consequence is that the callback may run either on the requesting thread or on the registering thread, so it must be short and safe in both contexts. Note also that a stop request is permanent: there is no reset, so a later request_stop() returns false and invokes nothing."
+    },
+    {
+      "id": "c24-m15",
+      "section": "Cooperative cancellation",
+      "difficulty": "hard",
+      "prompt": "An I/O completion, a stop request, and a deadline can all fire at nearly the same moment for one operation. What is the correct structure?",
+      "choices": [
+        "Test a Boolean before registering the callbacks, so that only one of them can ever be armed",
+        "One atomic compare-exchange — or one executor-confined transition — claims the terminal state; the winner publishes the result and resumes the consumer, and the losers only clean up",
+        "Give each event its own flag and let the consumer read all three when it wakes",
+        "Take a mutex in each callback and let whichever acquires it last decide"
+      ],
+      "answer": 1,
+      "explain": "There are three contenders and exactly one terminal result, so the design question is who gets to claim it. A single compare_exchange from `pending` to a terminal value answers that: precisely one caller sees true, publishes, and schedules the continuation once. Testing a Boolean before registering does not work — cancellation can arrive between the test and the registration, which is the very window std::stop_callback's inline invocation exists to close. Letting the last mutex holder decide permits two resumptions of the same consumer."
+    },
+    {
+      "id": "c24-m16",
+      "section": "Coroutines: functions that suspend",
+      "difficulty": "easy",
+      "prompt": "What makes a C++ function a coroutine?",
+      "choices": [
+        "Declaring its return type to be a type that has a nested promise_type",
+        "Annotating it with a `coroutine` specifier",
+        "Its body containing co_await, co_yield, or co_return",
+        "Returning std::future or std::generator"
+      ],
+      "answer": 2,
+      "explain": "It is a property of the body, not the declaration: one of the three keywords anywhere in the body makes the compiler transform the function into a resumable state machine. The return type matters only afterwards — it must select a promise_type, and a body with co_return and a return type of `int` is ill-formed for exactly that reason. Note the consequence for interfaces: whether a function is a coroutine is invisible at its declaration."
+    },
+    {
+      "id": "c24-m17",
+      "section": "Coroutines: functions that suspend",
+      "difficulty": "medium",
+      "prompt": "A `co_await` suspends a coroutine. What does that imply about threads?",
+      "choices": [
+        "The current thread blocks until the awaited operation completes",
+        "A new thread is created to carry the rest of the coroutine",
+        "The coroutine is guaranteed to resume on the thread that suspended it",
+        "Nothing: control returns to the caller or scheduler, and whichever component calls resume() determines the thread the body continues on"
+      ],
+      "answer": 3,
+      "explain": "Suspension is a control-flow operation on a state machine, not a thread operation — the point of it is precisely that the thread is released to do other work instead of blocking. It equally does not create a thread. And it makes no affinity promise: a reactor thread or a pool worker may call resume(), so a coroutine can start on one thread and continue on another. That is why thread-local state and lock ownership must not be assumed to survive a suspension."
+    },
+    {
+      "id": "c24-m18",
+      "section": "Coroutines: functions that suspend",
+      "difficulty": "hard",
+      "prompt": "Which coroutine parameters are owned by the coroutine frame?",
+      "choices": [
+        "All of them — the frame copies every parameter so that it can outlive the caller",
+        "Value parameters become values owned by the frame; reference parameters remain references, so their external lifetime becomes part of the coroutine's contract",
+        "None — parameters stay in the caller's stack frame and are read through it",
+        "Only the parameters that are still live after the first suspension point"
+      ],
+      "answer": 1,
+      "explain": "The frame stores parameters, but storing a reference parameter stores a reference, not a copy of what it names. Since a coroutine can suspend and resume long after its caller's expression has finished, a reference parameter bound to a temporary or a caller local is a dangling read waiting to happen — and it is silent, because the frame's copy of the reference is perfectly valid. Prefer by-value parameters for coroutines, or document the lifetime requirement explicitly."
+    },
+    {
+      "id": "c24-m19",
+      "section": "The promise type, awaiters, and the frame",
+      "difficulty": "medium",
+      "prompt": "The chapter's Task returns `std::suspend_always` from `final_suspend()`. What breaks if it returns `std::suspend_never` instead?",
+      "choices": [
+        "The coroutine body never runs, because the frame is destroyed before initial_suspend",
+        "co_return stops routing through return_value(), so the result is never stored",
+        "The frame destroys itself at completion, leaving the owning Task's handle dangling and its stored result unreadable",
+        "unhandled_exception() is no longer called for an escaping exception"
+      ],
+      "answer": 2,
+      "explain": "final_suspend is the hook that keeps a completed frame alive so its owner can observe the result before calling destroy(). Returning suspend_never lets the frame release itself immediately at completion — after which Task::get() reads the promise through a handle into freed storage, and Task's destructor calls destroy() on it a second time. The result *is* stored via return_value() before final_suspend runs; the bug is purely that nothing is left to read it from. (final_suspend must also be noexcept.)"
+    },
+    {
+      "id": "c24-m20",
+      "section": "The promise type, awaiters, and the frame",
+      "difficulty": "medium",
+      "prompt": "Which awaiter operation supplies the value of the `co_await` expression?",
+      "choices": [
+        "await_resume()",
+        "await_ready()",
+        "await_suspend()",
+        "get_return_object(), on the promise"
+      ],
+      "answer": 0,
+      "explain": "The triple divides the work: await_ready() answers 'can we continue without suspending?', await_suspend() answers 'who stores or resumes this coroutine?', and await_resume() answers 'what is this expression's value?'. await_resume() is called on both paths — after a real suspension and when await_ready() returned true — which is what makes the fast path and the suspended path yield the same expression. get_return_object() belongs to the promise and produces the caller's handle, not the co_await result."
+    },
+    {
+      "id": "c24-m21",
+      "section": "The promise type, awaiters, and the frame",
+      "difficulty": "hard",
+      "prompt": "`await_suspend()` may return void, bool, or a `std::coroutine_handle`. What does returning a handle mean?",
+      "choices": [
+        "The suspension is cancelled and the awaiting coroutine continues immediately",
+        "That handle's frame is destroyed as part of the suspension",
+        "The handle is stored for the caller to resume manually later",
+        "Symmetric transfer — execution resumes that coroutine directly, without growing the ordinary call stack"
+      ],
+      "answer": 3,
+      "explain": "Returning void commits to the suspension; returning false from the bool form is what cancels it. Returning a handle means 'suspend me and continue in this other coroutine', and the transfer is a tail call rather than a nested resume(), so a chain of coroutines resuming each other cannot overflow the stack. Production Task types use it to hop from a completing child straight into its parent's continuation."
+    },
+    {
+      "id": "c24-m22",
+      "section": "`std::generator`",
+      "difficulty": "medium",
+      "prompt": "How many allocations does iterating a `std::generator<Tick>` over N inputs normally require?",
+      "choices": [
+        "One per yielded element, since each suspension stores a new value",
+        "Normally one — for the coroutine frame — unless the compiler applies allocation elision",
+        "None: generator frames are always placed in the caller's stack frame",
+        "One for the frame plus one for the internal vector that buffers the results"
+      ],
+      "answer": 1,
+      "explain": "A generator is one coroutine, so it has one frame, and the range-for machinery just resumes that same frame repeatedly. Nothing is buffered: no std::vector<Tick> is built, which is precisely why breaking out of the loop early decodes only the ticks actually consumed. Elision (HALO) may remove even that one allocation when the compiler can prove the frame's lifetime nests within the caller — but it is an optimization to verify in generated code, not a guarantee."
+    },
+    {
+      "id": "c24-m23",
+      "section": "`std::generator`",
+      "difficulty": "medium",
+      "prompt": "A loop holds on to a reference obtained from a `std::generator` and then advances the iterator. What is the risk?",
+      "choices": [
+        "None — yielded values remain valid for the generator's whole lifetime",
+        "The generator restarts from the beginning, because it is single-pass",
+        "Incrementing resumes the producer, which may overwrite the storage used for the previous yielded value — copy it before advancing if it must survive",
+        "The reference silently acquires const qualification after the increment"
+      ],
+      "answer": 2,
+      "explain": "std::generator is move-only and single-pass, and advancing means resuming the producer coroutine. A value yielded from a loop-local object lives only as long as that object does — often only until the next resume — so a reference kept across an increment can dangle. The fix is to copy before advancing. 'Restarts from the beginning' is a different misconception: single-pass means the sequence cannot be traversed twice at all, not that it rewinds."
+    },
+    {
+      "id": "c24-m24",
+      "section": "Executors, senders, and structured concurrency",
+      "difficulty": "medium",
+      "prompt": "After `auto work = std::execution::then(std::execution::schedule(scheduler), compute);` completes, what has happened?",
+      "choices": [
+        "Nothing has been scheduled — a sender is an inert description of work until it is connected and started",
+        "compute() has already been queued to and run on the scheduler's execution context",
+        "A thread has been created and is blocked waiting for the pipeline to be started",
+        "A shared state has been allocated and marked pending"
+      ],
+      "answer": 0,
+      "explain": "The sender expression builds a description as an ordinary value. Work begins only when connecting a sender to a receiver produces an operation state and something starts it — directly, or through an algorithm such as sync_wait. That laziness is the model's advantage over a future: a future's shared state must exist because the result channel needs somewhere to live, whereas a sender pipeline can stay allocation-free until start."
+    },
+    {
+      "id": "c24-m25",
+      "section": "Async I/O and the verdict",
+      "difficulty": "medium",
+      "prompt": "Where does the chapter place coroutines relative to a hot tick-to-trade loop?",
+      "choices": [
+        "They are the preferred hot-path abstraction, since an awaiter can return true from await_ready()",
+        "They are equivalent to callbacks in cost, so the choice is a matter of style",
+        "They should replace the thread pool entirely, since one parked frame is cheaper than one blocked thread",
+        "Usually the wrong shape: frame allocation must be eliminated or pooled, resume uses an indirect control transfer, and the body splits across resume points in the instruction cache"
+      ],
+      "answer": 3,
+      "explain": "Coroutines earn their place in orchestration — connection logic, startup sequencing, administration — where an outstanding operation waits far more than it computes, and where one parked frame genuinely replaces one blocked thread and stack. On a tick loop the three named costs all land at once. The await_ready() answer is the specific trap the chapter warns about: an awaiter that always reports ready benchmarks the synchronous fast path and measures none of the suspension, registration, and resumption cost you are actually buying."
+    }
+  ],
+  "reading": [
+    {
+      "id": "c24-r01",
+      "section": "Promises and futures",
+      "prompt": "What does this print?",
+      "code": "#include <future>\n#include <iostream>\n#include <thread>\n#include <utility>\n#include <vector>\n\ndouble portfolio_risk(const std::vector<double>& positions) {\n    double sum = 0.0;\n    for (double position : positions) {\n        sum += position * position;\n    }\n    return sum;\n}\n\nint main() {\n    std::promise<double> producer;\n    std::future<double> result = producer.get_future();\n\n    std::jthread worker{\n        [promise = std::move(producer)]() mutable {\n            std::vector<double> positions{2.0, -3.0, 1.0};\n            promise.set_value(portfolio_risk(positions));\n        }\n    };\n\n    std::cout << result.get() << '\\n';\n}",
+      "kind": "value",
+      "accept": ["14"],
+      "explain": "4 + 9 + 1 = 14, and the default ostream formatting prints a whole-valued double as '14'. The result is deterministic despite the thread because get() is a rendezvous: it blocks until the shared state is ready, so no scheduling order can change what is printed. Note the move capture — std::promise is move-only, so the producer end is transferred into the closure while the consumer keeps the future."
+    },
+    {
+      "id": "c24-r02",
+      "section": "Promises and futures",
+      "prompt": "What does this print?",
+      "code": "#include <future>\n#include <iostream>\n\nint main() {\n    std::future<int> result;\n    {\n        std::promise<int> producer;\n        result = producer.get_future();\n    }  // producer dies without set_value or set_exception\n\n    try {\n        std::cout << result.get() << '\\n';\n    } catch (const std::future_error&) {\n        std::cout << \"broken\\n\";\n    }\n}",
+      "kind": "value",
+      "accept": ["broken"],
+      "explain": "It prints 'broken'. The promise's destructor does not simply abandon the shared state: it makes it ready with a broken_promise error, so get() throws std::future_error rather than blocking forever. That is the useful part of the design — a consumer always learns that the producer disappeared. What it does not learn is why, which is why every producer path should still fulfil its promise deliberately and let broken_promise mean genuinely abandoned work."
+    },
+    {
+      "id": "c24-r03",
+      "section": "Promises and futures",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <future>\n#include <thread>\n#include <vector>\n\nint main() {\n    std::promise<int> producer;\n\n    std::vector<std::jthread> workers;\n    for (int i = 0; i < 2; ++i) {\n        workers.emplace_back([promise = producer]() mutable {\n            promise.set_value(1);\n        });\n    }\n}",
+      "kind": "no-compile",
+      "explain": "The capture `[promise = producer]` copy-initialises from a std::promise, and std::promise is move-only — its copy constructor is deleted, so the program is ill-formed. That refusal is the type system enforcing the model: a shared state has exactly one producer slot, so there is no meaningful way for two threads to hold the same producer end. If several threads must be able to complete the operation, the right shape is one owner plus an explicit terminal-state arbitration."
+    },
+    {
+      "id": "c24-r04",
+      "section": "`packaged_task` and `std::async`",
+      "prompt": "What does this print?",
+      "code": "#include <future>\n#include <iostream>\n\nint main() {\n    std::packaged_task<int(int)> task{[](int base) {\n        return base * 2;\n    }};\n    std::future<int> result = task.get_future();\n\n    task(21);\n    std::cout << result.get() << ' ';\n\n    try {\n        task(21);\n        std::cout << \"ran again\\n\";\n    } catch (const std::future_error&) {\n        std::cout << \"future_error\\n\";\n    }\n}",
+      "kind": "value",
+      "accept": ["42 future_error"],
+      "explain": "Invoking the packaged_task runs the callable on the calling thread — nothing here is asynchronous — and routes the return value into the shared state, so get() yields 42. The second invocation tries to publish a second result into a state that already has one and throws std::future_error. A packaged_task is one-shot with respect to its shared state, not a reusable function object, which is why a task queue must treat each wrapper as a single consumable work item."
+    },
+    {
+      "id": "c24-r05",
+      "section": "Cooperative cancellation",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n#include <stop_token>\n\nint main() {\n    std::stop_source source;\n    std::stop_token token = source.get_token();\n\n    std::cout << std::boolalpha;\n    std::cout << token.stop_requested() << ' ';\n\n    source.request_stop();\n    std::cout << token.stop_requested() << ' ';\n\n    std::stop_callback hook{token, [] {\n        std::cout << \"hook \";\n    }};\n\n    std::cout << source.request_stop() << '\\n';\n}",
+      "kind": "value",
+      "accept": ["false true hook false"],
+      "explain": "Three separate rules, all visible in one line of output. The token starts unrequested; request_stop() sets the state permanently. The stop_callback is then registered on an already-requested token, so it is invoked inline *during construction* — that is the rule that closes the race between testing a token and installing a wake hook. Finally, a stop state cannot be requested twice: the second request_stop() changes nothing, invokes nothing, and returns false. This program is single-threaded, so none of it depends on scheduling."
+    },
+    {
+      "id": "c24-r06",
+      "section": "The promise type, awaiters, and the frame",
+      "prompt": "What does this print?",
+      "code": "#include <coroutine>\n#include <iostream>\n\nstruct Task {\n    struct promise_type {\n        int value = 0;\n        Task get_return_object() {\n            return Task{std::coroutine_handle<promise_type>::from_promise(*this)};\n        }\n        std::suspend_never initial_suspend() noexcept { return {}; }\n        std::suspend_always final_suspend() noexcept { return {}; }\n        void return_value(int result) noexcept { value = result; }\n        void unhandled_exception() noexcept {}\n    };\n\n    std::coroutine_handle<promise_type> handle;\n    ~Task() { if (handle) handle.destroy(); }\n    int result() const { return handle.promise().value; }\n};\n\nstruct CachedPrice {\n    int value;\n    bool await_ready() const noexcept { std::cout << \"ready \"; return true; }\n    void await_suspend(std::coroutine_handle<>) const noexcept { std::cout << \"suspend \"; }\n    int await_resume() const noexcept { std::cout << \"resume \"; return value; }\n};\n\nTask priced() {\n    int price = co_await CachedPrice{101};\n    co_return price;\n}\n\nint main() {\n    Task task = priced();\n    std::cout << task.result() << '\\n';\n}",
+      "kind": "value",
+      "accept": ["ready resume 101"],
+      "explain": "await_suspend() is never called. await_ready() returns true, so the co_await takes the synchronous fast path straight to await_resume(), which supplies the expression's value — this is the whole mechanism behind an awaiter that already has its result cached. initial_suspend() returning suspend_never means the body runs eagerly during the call, and final_suspend() returning suspend_always keeps the completed frame alive so result() can read the promise before ~Task destroys it. Note what an always-ready awaiter costs you as a benchmark: it measures none of the suspension, registration, and resumption work that a real I/O awaiter performs."
+    },
+    {
+      "id": "c24-r07",
+      "section": "The promise type, awaiters, and the frame",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <coroutine>\n#include <iostream>\n\nstruct Trivial {\n    struct promise_type {\n        Trivial get_return_object() {\n            return Trivial{std::coroutine_handle<promise_type>::from_promise(*this)};\n        }\n        std::suspend_always initial_suspend() noexcept { return {}; }\n        std::suspend_always final_suspend() noexcept { return {}; }\n        void return_void() noexcept {}\n        void unhandled_exception() noexcept {}\n    };\n\n    std::coroutine_handle<promise_type> handle;\n};\n\nTrivial step() {\n    co_return;\n}\n\nint main() {\n    Trivial task = step();\n    task.handle.destroy();\n    task.handle.resume();\n    std::cout << \"resumed\\n\";\n}",
+      "kind": "ub",
+      "explain": "A coroutine handle is a non-owning access path to a frame, not an owner — destroy() releases the frame's storage but leaves `task.handle` holding the same address, still contextually convertible to true. Resuming it reads the destroyed frame's resume pointer, which is undefined behaviour; AddressSanitizer reports 'heap-use-after-free ... READ of size 8', because the frame came from an allocation function. The rule is unconditional: never resume a completed or destroyed frame. The same hazard is why a cancellation-aware awaiter must detach every I/O, timer, and stop registration that could reach the handle before the frame is destroyed."
+    },
+    {
+      "id": "c24-r08",
+      "section": "Coroutines: functions that suspend",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <coroutine>\n#include <iostream>\n\nint answer() {\n    co_return 42;\n}\n\nint main() {\n    std::cout << answer() << '\\n';\n}",
+      "kind": "no-compile",
+      "explain": "The co_return in the body makes this a coroutine, and the compiler then looks up std::coroutine_traits<int>::promise_type to find the policy object for the frame. There is no such member for `int`, so the program is ill-formed — clang says as much: \"this function cannot be a coroutine: 'std::coroutine_traits<int>' has no member named 'promise_type'\". The lesson is the direction of the dependency: the keyword in the body is what makes it a coroutine, and the return type is then obliged to supply the machinery."
+    }
+  ],
+  "writing": [
+    {
+      "id": "c24-w01",
+      "section": "Callbacks and their problems",
+      "minutes": 8,
+      "prompt": "A function builds a request, registers a completion callback with an event loop, and returns. The callback needs the request's correlation id and its symbol. Write a version whose captured state cannot dangle, and add a comment naming the defect in the by-reference version.",
+      "checklist": [
+        "The callback captures owned state by value (or owns it through a shared state object), never by reference to a local",
+        "A comment states that the callback runs on a later event-loop turn, after the registering frame is gone",
+        "The failure path is handled explicitly inside the callback, not by letting an exception escape",
+        "Nothing captured refers to a parameter passed by reference to the registering function"
+      ],
+      "solution": "#include <functional>\n#include <memory>\n#include <string>\n#include <system_error>\n\nusing Reply = int;\n\nvoid send_request(int id, std::function<void(std::error_code, Reply)> done);\nvoid report_failure(int id, const std::string& symbol, std::error_code error);\nvoid report_reply(int id, const std::string& symbol, Reply reply);\n\n// Defect in the by-reference version: `[&id, &symbol]` stores views of\n// locals that die when submit_request returns. The event loop invokes the\n// callback on a later turn, so both reads are use-after-scope -- and they\n// are silent, because the closure itself is perfectly valid.\nvoid submit_request(int id, std::string symbol) {\n    send_request(id, [id, symbol = std::move(symbol)](std::error_code error,\n                                                      Reply reply) {\n        // No exception can cross the event-loop turn, so failure is an\n        // explicit branch rather than a throw.\n        if (error) {\n            report_failure(id, symbol, error);\n            return;\n        }\n        report_reply(id, symbol, reply);\n    });\n}\n\n// When the state is large or several callbacks must share it, give it one\n// owner whose lifetime covers the whole operation instead of copying it\n// into each closure.\nstruct RequestState {\n    int id;\n    std::string symbol;\n};\n\nvoid submit_request_shared(int id, std::string symbol) {\n    auto state = std::make_shared<RequestState>(id, std::move(symbol));\n    send_request(state->id, [state](std::error_code error, Reply reply) {\n        if (error) {\n            report_failure(state->id, state->symbol, error);\n            return;\n        }\n        report_reply(state->id, state->symbol, reply);\n    });\n}",
+      "notes": "The rule is that registering a callback is the point where the operation's lifetime stops matching the registering function's scope, so every piece of state the callback touches needs an owner that outlives the operation. Note that taking `symbol` by value in the signature is what makes the move capture cheap — the caller decides whether to copy or move, and the closure ends up owning it either way."
+    },
+    {
+      "id": "c24-w02",
+      "section": "Promises and futures",
+      "minutes": 10,
+      "prompt": "Write a worker function that computes a risk number and publishes it through a `std::promise<double>`. It must fulfil the promise on every path, including when the computation throws, and the consumer's catch must see the original exception type. Then show the consumer side.",
+      "checklist": [
+        "The promise is moved into the worker, not copied (std::promise is move-only)",
+        "The success path calls set_value() exactly once",
+        "A catch(...) block stores std::current_exception() with set_exception()",
+        "No path can leave the promise unfulfilled other than genuine abandonment",
+        "The consumer wraps get() in a try/catch that names the original exception type"
+      ],
+      "solution": "#include <exception>\n#include <future>\n#include <iostream>\n#include <stdexcept>\n#include <thread>\n#include <utility>\n#include <vector>\n\ndouble portfolio_risk(const std::vector<double>& positions) {\n    if (positions.empty()) {\n        throw std::runtime_error{\"risk input unavailable\"};\n    }\n\n    double sum = 0.0;\n    for (double position : positions) {\n        sum += position * position;\n    }\n    return sum;\n}\n\nvoid produce_risk(std::promise<double> promise,\n                  std::vector<double> positions) {\n    try {\n        promise.set_value(portfolio_risk(positions));\n    } catch (...) {\n        // Exceptions do not propagate between threads on their own; the\n        // shared state is the channel. current_exception() preserves the\n        // dynamic type so the consumer's catch clauses still match.\n        promise.set_exception(std::current_exception());\n    }\n}\n\nvoid consume_risk(std::vector<double> positions) {\n    std::promise<double> producer;\n    std::future<double> result = producer.get_future();\n\n    std::jthread worker{produce_risk, std::move(producer),\n                        std::move(positions)};\n\n    try {\n        std::cout << result.get() << '\\n';\n    } catch (const std::runtime_error& error) {\n        std::cout << error.what() << '\\n';\n    }\n}",
+      "notes": "Note the shape of the try: only the call that can throw is inside it, and set_value() is invoked with the already-computed result, so a throwing computation cannot leave a half-set state. Letting the promise's destructor produce broken_promise instead is a strictly worse error report — it tells the consumer that the producer disappeared but discards the reason."
+    },
+    {
+      "id": "c24-w03",
+      "section": "`packaged_task` and `std::async`",
+      "minutes": 10,
+      "prompt": "Add a `submit()` to Chapter 23's thread pool that returns a `std::future` for the callable's result, given that the pool's queue holds `std::function<void()>`. Explain in a comment which part of your solution is an adaptation to that queue type rather than intrinsic to packaged_task.",
+      "checklist": [
+        "Wraps the callable in a std::packaged_task whose signature matches the deduced result type",
+        "Obtains the future from the packaged_task before enqueuing it",
+        "Uses std::make_shared so the move-only task is reachable from a copyable std::function",
+        "Uses std::invoke_result_t (or equivalent) rather than a fixed result type",
+        "A comment states that std::move_only_function<void()> removes the shared_ptr",
+        "Returns the future to the caller, not the packaged_task"
+      ],
+      "solution": "#include <functional>\n#include <future>\n#include <memory>\n#include <mutex>\n#include <queue>\n#include <type_traits>\n#include <utility>\n\nclass ThreadPool {\npublic:\n    template<class F>\n    auto submit(F&& function) -> std::future<std::invoke_result_t<F&>> {\n        using Result = std::invoke_result_t<F&>;\n\n        // The shared_ptr is an adaptation to the queue's element type:\n        // std::function requires a copyable target and packaged_task is\n        // move-only. Change the queue and the worker local to\n        // std::move_only_function<void()> (C++23) and the lambda can capture\n        // the packaged_task directly, removing this owner and its\n        // control-block allocation.\n        auto task = std::make_shared<std::packaged_task<Result()>>(\n            std::forward<F>(function));\n\n        std::future<Result> result = task->get_future();\n        enqueue([task] { (*task)(); });\n        return result;\n    }\n\nprivate:\n    void enqueue(std::function<void()> work) {\n        {\n            std::lock_guard lock{mutex_};\n            tasks_.push(std::move(work));\n        }\n        ready_.notify_one();\n    }\n\n    std::mutex mutex_;\n    std::condition_variable ready_;\n    std::queue<std::function<void()>> tasks_;\n};",
+      "notes": "Invoking the packaged_task routes a returned value or a thrown exception into the shared state automatically, so the worker needs no try/catch — that is the feature packaged_task adds over a bare callable. Take care that each queued wrapper is consumed exactly once: a second invocation would try to publish a second result and throw std::future_error."
+    },
+    {
+      "id": "c24-w04",
+      "section": "Cooperative cancellation",
+      "minutes": 10,
+      "prompt": "Write a consumer that waits for a message on a condition variable and returns promptly when a stop is requested. Write it twice: once with a plain `std::condition_variable` plus an explicit `std::stop_callback`, and once with the `std::condition_variable_any` stop-token overload. Comment on what makes the first version race-free.",
+      "checklist": [
+        "The stop_callback version registers the hook before the wait begins",
+        "Its predicate tests both the message state and stop.stop_requested()",
+        "A comment states that registering on an already-requested token invokes the callback inline, closing the check-then-register race",
+        "The condition_variable_any version uses the three-argument wait and checks its bool result",
+        "Both versions read and modify predicate state only while holding the mutex",
+        "A comment notes that plain std::condition_variable has no stop-token overload"
+      ],
+      "solution": "#include <condition_variable>\n#include <mutex>\n#include <stop_token>\n\nstd::mutex queue_mutex;\nstd::condition_variable ready;\nstd::condition_variable_any ready_any;\nbool has_message = false;\n\nvoid consume_message();\n\n// A plain std::condition_variable has no stop-token overload, so the stop\n// request has to be turned into a notification by hand.\nvoid wait_for_message(std::stop_token stop) {\n    // Registered *before* the wait. If the stop was already requested, the\n    // callback runs inline during construction -- which is what closes the\n    // window between testing the token and installing the hook. It may\n    // therefore run on the requesting thread or on this one, so keep it\n    // short.\n    std::stop_callback wake_on_stop{stop, [] { ready.notify_all(); }};\n\n    std::unique_lock lock{queue_mutex};\n    ready.wait(lock, [&] {\n        return has_message || stop.stop_requested();\n    });\n\n    if (stop.stop_requested()) {\n        return;\n    }\n    consume_message();\n}\n\n// condition_variable_any packages the same pattern: the overload returns\n// false when it stopped rather than when the predicate became true.\nvoid wait_for_message_direct(std::stop_token stop) {\n    std::unique_lock lock{queue_mutex};\n    if (!ready_any.wait(lock, stop, [] { return has_message; })) {\n        return;\n    }\n    consume_message();\n}",
+      "notes": "The predicate in the first version has to include stop_requested() even with the callback installed: the notification only wakes the waiter, and a woken waiter that rechecks a predicate mentioning nothing about stopping goes straight back to sleep. Cancellation latency is bounded by how often the worker reaches a check and whether its blocking operations can be woken at all — wiring the wake hook is what turns the request into a prompt return rather than an eventual one."
+    },
+    {
+      "id": "c24-w05",
+      "section": "Cooperative cancellation",
+      "minutes": 12,
+      "prompt": "An asynchronous operation can be completed by its I/O callback, cancelled by a stop request, or abandoned by a deadline. Write the state object that lets exactly one of the three claim the terminal result, and comment on what a losing caller must and must not do.",
+      "checklist": [
+        "A single std::atomic holding an enumerated state, initialised to a pending value",
+        "One compare_exchange from pending to the terminal value, shared by all three entry points",
+        "The claim function returns bool so only the winner publishes and resumes",
+        "compare_exchange_strong is used with an acquire/release success ordering",
+        "A comment states that losers release their own registrations but must not resume the consumer again"
+      ],
+      "solution": "#include <atomic>\n\nenum class AsyncState {\n    pending,\n    completed,\n    cancelled,\n    timed_out\n};\n\nclass CompletionRace {\npublic:\n    bool complete() noexcept { return claim(AsyncState::completed); }\n    bool cancel() noexcept { return claim(AsyncState::cancelled); }\n    bool timeout() noexcept { return claim(AsyncState::timed_out); }\n\nprivate:\n    // Exactly one caller sees `true`. That caller publishes the result and\n    // schedules the continuation once. A losing caller still unregisters its\n    // own I/O, timer, or stop hook and drops its reference -- but it must\n    // never publish a second result or resume the consumer again, because\n    // the winner may already have destroyed the frame it would resume.\n    bool claim(AsyncState terminal) noexcept {\n        AsyncState expected = AsyncState::pending;\n        return state_.compare_exchange_strong(\n            expected, terminal,\n            std::memory_order_acq_rel,\n            std::memory_order_acquire);\n    }\n\n    std::atomic<AsyncState> state_{AsyncState::pending};\n};",
+      "notes": "compare_exchange_strong is right here because there is no retry loop to absorb a spurious failure — a single attempt has to be conclusive. The acquire/release pair orders the terminal-state publication against the result the winner writes. A runtime that confines all three callbacks to one executor can drop the atomic entirely and serialize the decision through the executor instead. And note the residual hazard the state object does not solve: a timeout result does not prove the underlying I/O stopped, so the implementation must still cancel and drain it or keep the callback state alive until a late completion is harmlessly consumed."
+    },
+    {
+      "id": "c24-w06",
+      "section": "Coroutines: functions that suspend",
+      "minutes": 12,
+      "prompt": "Given a gateway whose connect, send and confirm operations each return an awaitable Task, rewrite the three-level nested callback submission as a coroutine. Then state in a comment which of the three callback costs the rewrite removes and which lifetime obligation it introduces.",
+      "checklist": [
+        "The body is straight-line: three co_awaits and a co_return, no nesting",
+        "The connection obtained from the first await is used by the later operations as an ordinary local",
+        "Order parameters are taken by value, not by reference",
+        "A comment names inversion of control, error plumbing, and callback nesting as what the rewrite addresses",
+        "A comment states that a reference parameter would stay a reference in the frame and must outlive every suspension"
+      ],
+      "solution": "#include <coroutine>\n#include <exception>\n#include <optional>\n#include <utility>\n\nusing Connection = int;\nusing Order = int;\nusing Confirmation = int;\n\ntemplate<class T>\nclass Task {\npublic:\n    struct promise_type;\n    using Handle = std::coroutine_handle<promise_type>;\n\n    struct promise_type {\n        std::optional<T> value;\n        std::exception_ptr error;\n\n        Task get_return_object() { return Task{Handle::from_promise(*this)}; }\n        std::suspend_always initial_suspend() noexcept { return {}; }\n        std::suspend_always final_suspend() noexcept { return {}; }\n        void return_value(T result) { value.emplace(std::move(result)); }\n        void unhandled_exception() noexcept { error = std::current_exception(); }\n    };\n\n    explicit Task(Handle handle) noexcept : handle_(handle) {}\n    Task(const Task&) = delete;\n    Task(Task&& other) noexcept : handle_(std::exchange(other.handle_, {})) {}\n    ~Task() { if (handle_) handle_.destroy(); }\n\n    bool await_ready() const noexcept { return false; }\n    void await_suspend(std::coroutine_handle<>) noexcept {}\n    T await_resume() { return std::move(*handle_.promise().value); }\n\nprivate:\n    Handle handle_;\n};\n\nstruct AsyncGateway {\n    Task<Connection> connect();\n    Task<int> send(Connection connection, Order order);\n    Task<Confirmation> confirm(Connection connection);\n};\n\n// Removes all three callback costs: control flow is visible in this body\n// rather than owned by the event loop; a failure can propagate as an\n// exception through the promise instead of an error parameter threaded\n// through every continuation; and the three dependent steps are three\n// statements, not three nested lambdas.\n//\n// The obligation it introduces is lifetime. `order` is a value parameter,\n// so the frame owns it across every suspension. A reference parameter would\n// stay a reference in the frame, and resuming after the caller's argument\n// died would read a dangling object -- silently, because the stored\n// reference is itself perfectly valid.\nTask<Confirmation> submit_order(AsyncGateway& gateway, Order order) {\n    Connection connection = co_await gateway.connect();\n    co_await gateway.send(connection, order);\n    co_return co_await gateway.confirm(connection);\n}",
+      "notes": "`connection` is a local that must survive two suspensions, so it lives in the frame; a local used only between two awaits may stay in a register or vanish under optimization. Note that `gateway` is deliberately a reference here — that is a real contract, not an oversight: the gateway must outlive the whole session, which is precisely the kind of requirement structured concurrency exists to make checkable."
+    },
+    {
+      "id": "c24-w07",
+      "section": "The promise type, awaiters, and the frame",
+      "minutes": 12,
+      "prompt": "Write an Event that a coroutine can co_await: awaiting it continues immediately if the event is already set, and otherwise parks the coroutine until another component calls set(). Implement the awaiter triple explicitly and comment on why await_suspend returns bool here.",
+      "checklist": [
+        "await_ready() returns true when the event is already set, skipping suspension entirely",
+        "await_suspend() stores the coroutine handle and returns bool",
+        "await_suspend() re-checks the set flag and returns false to cancel the suspension if it lost the race",
+        "await_resume() supplies the co_await expression's value",
+        "set() resumes the stored handle, and clears it first so it cannot be resumed twice",
+        "A comment explains that returning false from await_suspend cancels the suspension"
+      ],
+      "solution": "#include <atomic>\n#include <coroutine>\n\nclass Event {\npublic:\n    class Awaiter {\n    public:\n        explicit Awaiter(Event& event) noexcept : event_(event) {}\n\n        // Fast path: no suspension at all if the event already fired.\n        bool await_ready() const noexcept {\n            return event_.set_.load();\n        }\n\n        // Returning bool lets the awaiter cancel the suspension it just\n        // asked for: `false` means \"do not suspend after all, resume this\n        // coroutine immediately\". That is what closes the window between\n        // await_ready() reading false and the handle being stored -- set()\n        // could have run in between, and without the re-check the coroutine\n        // would park with nobody left to wake it.\n        bool await_suspend(std::coroutine_handle<> handle) noexcept {\n            event_.waiter_ = handle;\n            if (event_.set_.load()) {\n                event_.waiter_ = {};\n                return false;\n            }\n            return true;\n        }\n\n        void await_resume() const noexcept {}\n\n    private:\n        Event& event_;\n    };\n\n    Awaiter operator co_await() noexcept { return Awaiter{*this}; }\n\n    void set() {\n        set_.store(true);\n        std::coroutine_handle<> handle = waiter_;\n        if (handle) {\n            waiter_ = {};  // cleared first: never resume the same frame twice\n            handle.resume();\n        }\n    }\n\nprivate:\n    std::atomic<bool> set_{false};\n    std::coroutine_handle<> waiter_{};\n};",
+      "notes": "This is the shape of every real I/O awaiter: await_ready() reports whether the result is already available, await_suspend() registers the handle with whatever will complete the operation, and await_resume() produces the value. The third return form — another std::coroutine_handle — performs symmetric transfer, resuming that coroutine as a tail call so a chain of continuations cannot grow the stack. Note the ownership rule underneath all of it: the handle is a non-owning access path, so set() must not run after the frame has been destroyed."
+    },
+    {
+      "id": "c24-w08",
+      "section": "`std::generator`",
+      "minutes": 15,
+      "prompt": "Your toolchain's standard library does not yet ship <generator>. Write a minimal move-only Generator<T> with the promise_type, iterator and sentinel needed for a range-for loop, and use it to write a lazy sequence with co_yield. Note in a comment how many allocations iterating it performs.",
+      "checklist": [
+        "promise_type provides yield_value() returning std::suspend_always",
+        "initial_suspend() returns std::suspend_always so nothing runs before the first increment",
+        "The type is move-only and destroys the frame in its destructor",
+        "begin() resumes once to produce the first element; end() returns a sentinel compared against done()",
+        "An escaping exception is captured by unhandled_exception() and rethrown to the consumer",
+        "A comment states one frame allocation for the whole sequence, none per element"
+      ],
+      "solution": "#include <coroutine>\n#include <exception>\n#include <iterator>\n#include <utility>\n\n// One coroutine means one frame, so iterating the whole sequence performs a\n// single allocation (or none, if the compiler elides it) and nothing per\n// element -- unlike materialising every result into a container.\ntemplate<class T>\nclass Generator {\npublic:\n    struct promise_type {\n        T current{};\n        std::exception_ptr error;\n\n        Generator get_return_object() {\n            return Generator{\n                std::coroutine_handle<promise_type>::from_promise(*this)};\n        }\n        std::suspend_always initial_suspend() noexcept { return {}; }\n        std::suspend_always final_suspend() noexcept { return {}; }\n\n        std::suspend_always yield_value(T value) {\n            current = std::move(value);   // publish, then suspend\n            return {};\n        }\n\n        void return_void() noexcept {}\n        void unhandled_exception() { error = std::current_exception(); }\n    };\n\n    using Handle = std::coroutine_handle<promise_type>;\n\n    explicit Generator(Handle handle) noexcept : handle_(handle) {}\n    Generator(const Generator&) = delete;\n    Generator& operator=(const Generator&) = delete;\n    Generator(Generator&& other) noexcept\n        : handle_(std::exchange(other.handle_, {})) {}\n    ~Generator() { if (handle_) handle_.destroy(); }\n\n    class Iterator {\n    public:\n        explicit Iterator(Handle handle) noexcept : handle_(handle) {}\n\n        bool operator==(std::default_sentinel_t) const noexcept {\n            return !handle_ || handle_.done();\n        }\n\n        Iterator& operator++() {\n            handle_.resume();\n            rethrow_if_failed();\n            return *this;\n        }\n\n        const T& operator*() const noexcept {\n            return handle_.promise().current;\n        }\n\n    private:\n        void rethrow_if_failed() const {\n            if (handle_.promise().error) {\n                std::rethrow_exception(handle_.promise().error);\n            }\n        }\n\n        Handle handle_;\n    };\n\n    Iterator begin() {\n        if (handle_) {\n            handle_.resume();  // run up to the first co_yield\n            if (handle_.promise().error) {\n                std::rethrow_exception(handle_.promise().error);\n            }\n        }\n        return Iterator{handle_};\n    }\n\n    std::default_sentinel_t end() const noexcept { return {}; }\n\nprivate:\n    Handle handle_;\n};\n\nGenerator<int> counted(int limit) {\n    for (int i = 0; i < limit; ++i) {\n        co_yield i;\n    }\n}",
+      "notes": "yield_value() is what co_yield routes through: it stores the element in the promise and returns an awaiter, and returning suspend_always is what makes the sequence lazy. Note the consequence for the consumer — the yielded value lives in the promise and is overwritten on the next resume, so a reference held across an increment dangles. That is the same single-pass, copy-before-advancing contract std::generator has, and it is why the type is move-only."
+    }
+  ]
+}

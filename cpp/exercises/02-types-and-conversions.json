@@ -1,0 +1,624 @@
+{
+  "chapter": 2,
+  "mcq": [
+    {
+      "id": "c02-m01",
+      "section": "The type system",
+      "difficulty": "easy",
+      "prompt": "Which of these is NOT an object type?",
+      "choices": [
+        "A function type",
+        "An array type",
+        "An enumeration type",
+        "A pointer type"
+      ],
+      "answer": 0,
+      "explain": "An object type describes a region of storage that can hold a value. References, functions and void are not object types — which is why sizeof(f) is ill-formed for a function f. Pointers to functions, on the other hand, are ordinary object types."
+    },
+    {
+      "id": "c02-m02",
+      "section": "The type system",
+      "difficulty": "medium",
+      "prompt": "Two structs are declared with identical members and identical layout, under different names. What does C++'s type system say about them?",
+      "choices": [
+        "They are the same type, because C++ is structurally typed",
+        "They are distinct types, because C++ is nominally typed",
+        "They are the same type only if both are trivially copyable",
+        "They are distinct types only if they have different alignment"
+      ],
+      "answer": 1,
+      "explain": "C++ is nominally typed: separately declared class or enumeration types stay distinct even when their representations match. Structural typing (same shape means same type) is what languages like TypeScript do."
+    },
+    {
+      "id": "c02-m03",
+      "section": "Fundamental types, fixed-width integers, and literals",
+      "difficulty": "easy",
+      "prompt": "You are serialising a field to a wire protocol that specifies a 64-bit signed integer. Which declaration states that requirement?",
+      "choices": [
+        "long value;",
+        "long long value;",
+        "std::int64_t value;",
+        "std::size_t value;"
+      ],
+      "answer": 2,
+      "explain": "std::int64_t states the representation directly. long is 8 bytes on LP64 Linux/macOS but 4 bytes on LLP64 Windows, so it serialises a different amount of data per platform; long long happens to be 64-bit on both but still only promises a minimum range."
+    },
+    {
+      "id": "c02-m04",
+      "section": "Fundamental types, fixed-width integers, and literals",
+      "difficulty": "medium",
+      "prompt": "What is the type of the literal 4.2 in `double rate = 4.2;`?",
+      "choices": [
+        "long double",
+        "It depends on the type being initialised",
+        "float",
+        "double"
+      ],
+      "answer": 3,
+      "explain": "An unsuffixed floating literal is a double; 4.2f would be a float. The spelling of a literal fixes its type before any surrounding conversion — the destination type never reaches back and changes it."
+    },
+    {
+      "id": "c02-m05",
+      "section": "Fundamental types, fixed-width integers, and literals",
+      "difficulty": "medium",
+      "prompt": "What is the type of the string literal \"a\"?",
+      "choices": [
+        "const char[2]",
+        "std::string",
+        "char",
+        "const char*"
+      ],
+      "answer": 0,
+      "explain": "A string literal is an array of const char including the terminating '\\0', so \"a\" is const char[2]. It decays to const char* in most expressions, which is why the pointer answer is tempting — but decay is a conversion applied to the array, not the literal's own type."
+    },
+    {
+      "id": "c02-m06",
+      "section": "Const and volatile",
+      "difficulty": "medium",
+      "prompt": "Given `int* const fixed = &bid;`, which statement is legal?",
+      "choices": [
+        "fixed = &ask;",
+        "*fixed = 99;",
+        "Both are legal",
+        "Neither is legal"
+      ],
+      "answer": 1,
+      "explain": "Read the declaration from the identifier outward: fixed is a const pointer to a (non-const) int. The pointee is writable, the pointer is not. `const int* observed` is the other way round."
+    },
+    {
+      "id": "c02-m07",
+      "section": "Const and volatile",
+      "difficulty": "hard",
+      "prompt": "`const_cast` is used to remove const from a pointer to an object that was itself declared const, and the result is written through. What happens?",
+      "choices": [
+        "The write silently has no effect",
+        "The write is fine — const is only a compile-time check",
+        "The write is undefined behaviour",
+        "The program is ill-formed and will not compile"
+      ],
+      "answer": 2,
+      "explain": "const_cast makes the write compile, but writing to an object that was created const is undefined behaviour — the implementation may have placed it in read-only storage or propagated its value. Casting away const is only safe when the underlying object was not const to begin with."
+    },
+    {
+      "id": "c02-m08",
+      "section": "Const and volatile",
+      "difficulty": "medium",
+      "prompt": "What does `volatile` guarantee?",
+      "choices": [
+        "That the value is re-read from main memory rather than cache",
+        "That accesses are atomic",
+        "That accesses are ordered with respect to other threads",
+        "That each access through the volatile path is an observable side effect the compiler may not elide"
+      ],
+      "answer": 3,
+      "explain": "volatile only stops the compiler eliding or coalescing accesses; its real use is memory-mapped device registers. It supplies neither atomicity nor inter-thread ordering — those come from the memory model and std::atomic."
+    },
+    {
+      "id": "c02-m09",
+      "section": "References",
+      "difficulty": "easy",
+      "prompt": "`int& price = bid;` followed by `price = ask;` does what?",
+      "choices": [
+        "Assigns ask's value into bid",
+        "Fails to compile because references cannot be assigned",
+        "Creates a copy of ask named price",
+        "Rebinds price to refer to ask"
+      ],
+      "answer": 0,
+      "explain": "A reference is bound once and never reseated. Assignment through a reference assigns to the referred-to object, so bid receives ask's value. Nothing in the language can make price alias a different object afterwards."
+    },
+    {
+      "id": "c02-m10",
+      "section": "References",
+      "difficulty": "medium",
+      "prompt": "A function returns `const std::string&` referring to a std::string local variable. What is the defect?",
+      "choices": [
+        "It copies the string unnecessarily",
+        "The returned reference dangles as soon as the function returns",
+        "It fails to compile because a const reference cannot bind to a local",
+        "The local's lifetime is extended to match the reference"
+      ],
+      "answer": 1,
+      "explain": "A returned reference does not carry the referred object's lifetime with it. Lifetime extension applies to binding a temporary to a local const reference, not to returning a reference to a local that is about to be destroyed."
+    },
+    {
+      "id": "c02-m11",
+      "section": "Pointers, arrays, and decay",
+      "difficulty": "medium",
+      "prompt": "Inside `void inspect(int values[10])`, what does `sizeof(values)` evaluate to?",
+      "choices": [
+        "It is ill-formed — you cannot take sizeof an array parameter",
+        "10 * sizeof(int)",
+        "sizeof(int*)",
+        "sizeof(int)"
+      ],
+      "answer": 2,
+      "explain": "The parameter int values[10] is adjusted to int* values; the 10 documents an intention and enforces nothing. The function will happily accept an array of five elements or a nullptr."
+    },
+    {
+      "id": "c02-m12",
+      "section": "Pointers, arrays, and decay",
+      "difficulty": "easy",
+      "prompt": "What does indexing a built-in array out of bounds do?",
+      "choices": [
+        "Is implementation-defined but always safe under AddressSanitizer",
+        "Throws std::out_of_range",
+        "Returns a default-constructed element",
+        "Is undefined behaviour, with no check performed"
+      ],
+      "answer": 3,
+      "explain": "Built-in indexing performs no bounds check and throws nothing. AddressSanitizer catches many such accesses in test builds, but detecting undefined behaviour is not the same as making it defined."
+    },
+    {
+      "id": "c02-m13",
+      "section": "Enumerations",
+      "difficulty": "easy",
+      "prompt": "Which is true of `enum class Side : std::uint8_t { Buy = 1, Sell = 2 };` but NOT of the equivalent unscoped enum?",
+      "choices": [
+        "Its enumerator names do not leak into the surrounding scope",
+        "It can have a fixed underlying type",
+        "Its values can be compared with ==",
+        "Its enumerators can be given explicit values"
+      ],
+      "answer": 0,
+      "explain": "Scoping the names and refusing implicit conversion to integer are the two things enum class adds. An unscoped enum may also be given an explicit underlying type and explicit enumerator values."
+    },
+    {
+      "id": "c02-m14",
+      "section": "Enumerations",
+      "difficulty": "hard",
+      "prompt": "A uint8_t read off the wire holds 7. It is static_cast to `enum class Side : std::uint8_t { Buy = 1, Sell = 2 }`. What is the result?",
+      "choices": [
+        "Undefined behaviour, because no enumerator has the value 7",
+        "A valid Side object holding 7; domain validation is still your job",
+        "The cast fails to compile",
+        "The value is clamped to the nearest enumerator"
+      ],
+      "answer": 1,
+      "explain": "Because the underlying type is fixed, every value representable in uint8_t is a valid value of the enumeration, so the cast is well-defined. Undefined behaviour would arise for an enumeration *without* a fixed underlying type. A fixed underlying type solves the representation problem, not the validation problem."
+    },
+    {
+      "id": "c02-m15",
+      "section": "Character types and encodings",
+      "difficulty": "medium",
+      "prompt": "Is plain `char` signed or unsigned?",
+      "choices": [
+        "Always signed",
+        "Always unsigned",
+        "Implementation-defined, and it is a third type distinct from both signed char and unsigned char",
+        "Signed, but only when it stores a value above 127"
+      ],
+      "answer": 2,
+      "explain": "Plain char is a distinct type from both signed char and unsigned char, and its signedness in integer conversions is implementation-defined — commonly signed on x86 and unsigned on many Arm targets. Use std::int8_t or std::uint8_t when the sign matters."
+    },
+    {
+      "id": "c02-m16",
+      "section": "Character types and encodings",
+      "difficulty": "easy",
+      "prompt": "Why prefer std::byte over unsigned char for raw wire storage?",
+      "choices": [
+        "It is guaranteed to be aligned to 8 bytes",
+        "It is smaller than unsigned char",
+        "It supports arithmetic operators that unsigned char does not",
+        "It offers bitwise operations without the accidental arithmetic and signedness of character types"
+      ],
+      "answer": 3,
+      "explain": "std::byte models raw memory: bitwise operators work, but `flags + std::byte{1}` does not compile. That removes a class of bugs where a byte silently promotes and takes part in arithmetic."
+    },
+    {
+      "id": "c02-m17",
+      "section": "Implicit conversions",
+      "difficulty": "medium",
+      "prompt": "`std::int32_t ticks = 103.875;` — what is stored in ticks?",
+      "choices": [
+        "103, truncated toward zero",
+        "103 or 104, implementation-defined",
+        "The initialisation is ill-formed",
+        "104, rounded to nearest"
+      ],
+      "answer": 0,
+      "explain": "Floating-to-integer conversion discards the fractional part, truncating toward zero — it never rounds. This is exactly how a price just below the next tick becomes an off-by-one-tick order."
+    },
+    {
+      "id": "c02-m18",
+      "section": "Implicit conversions",
+      "difficulty": "medium",
+      "prompt": "Given overloads `void route(int)` and `void route(int*)`, what do route(0) and route(nullptr) select?",
+      "choices": [
+        "Both call route(int)",
+        "route(0) calls route(int); route(nullptr) calls route(int*)",
+        "route(0) is ambiguous",
+        "Both call route(int*)"
+      ],
+      "answer": 1,
+      "explain": "The literal 0 is an int (and a legacy null pointer constant), so the int overload is the exact match. nullptr has its own type, std::nullptr_t, which converts to a pointer but not to int — which is precisely why nullptr exists."
+    },
+    {
+      "id": "c02-m19",
+      "section": "Promotions and the usual arithmetic conversions",
+      "difficulty": "medium",
+      "prompt": "On a typical LP64 system, what is the type of `bid + ask` where both are std::uint8_t?",
+      "choices": [
+        "std::uint8_t",
+        "unsigned int",
+        "int",
+        "std::uint16_t"
+      ],
+      "answer": 2,
+      "explain": "Integer promotion converts operands narrower than int to int when int can hold every value of the source type — which it can for uint8_t. Narrow types save storage and cache footprint; they do not make the ALU do narrow arithmetic."
+    },
+    {
+      "id": "c02-m20",
+      "section": "Promotions and the usual arithmetic conversions",
+      "difficulty": "hard",
+      "prompt": "Why does `-1 > 0u` evaluate to true?",
+      "choices": [
+        "Because 0u is promoted to int, and -1 > 0 is folded to true",
+        "Because the compiler evaluates the comparison in long",
+        "Because comparison of a negative number with an unsigned is undefined behaviour",
+        "Because both operands have the rank of int, so the signed operand converts to unsigned and -1 becomes UINT_MAX"
+      ],
+      "answer": 3,
+      "explain": "The usual arithmetic conversions reach the rule where the unsigned type has rank at least as high as the signed type, so the signed operand converts to unsigned int. -1 becomes UINT_MAX, which is greater than 0. Nothing here is undefined — it is well-defined and wrong."
+    },
+    {
+      "id": "c02-m21",
+      "section": "Signed, unsigned, and overflow",
+      "difficulty": "medium",
+      "prompt": "Which is true about integer overflow?",
+      "choices": [
+        "Signed overflow is undefined behaviour; unsigned overflow wraps modulo 2^N",
+        "Both are undefined behaviour",
+        "Signed overflow wraps; unsigned overflow is undefined behaviour",
+        "Both signed and unsigned overflow wrap modulo 2^N"
+      ],
+      "answer": 0,
+      "explain": "Unsigned arithmetic is defined modulo 2^N. Signed overflow is undefined behaviour — which is what lets the optimiser assume signed induction variables never wrap and thereby prove trip counts and vectorise."
+    },
+    {
+      "id": "c02-m22",
+      "section": "Signed, unsigned, and overflow",
+      "difficulty": "hard",
+      "prompt": "`for (unsigned i = values.size() - 1; i >= 0; --i)` over a std::vector. What is wrong with it?",
+      "choices": [
+        "Only the loop condition: i >= 0 is always true for an unsigned i",
+        "Both: the condition can never be false, and an empty vector wraps the initial value",
+        "Nothing — it is correct but triggers a -Wsign-compare warning",
+        "Only the empty-vector case: size() - 1 wraps to a huge value"
+      ],
+      "answer": 1,
+      "explain": "Two independent defects. An unsigned i is never negative, so i >= 0 is always true and decrementing zero wraps to the maximum. Separately, on an empty vector size() - 1 is already SIZE_MAX before the loop starts. Write `for (auto i = values.size(); i-- > 0;)` or use std::ssize."
+    },
+    {
+      "id": "c02-m23",
+      "section": "IEEE 754 floating point",
+      "difficulty": "easy",
+      "prompt": "What does `nan == nan` evaluate to, and what does `nan != nan` evaluate to?",
+      "choices": [
+        "It is undefined behaviour",
+        "true and false",
+        "false and true",
+        "false and false"
+      ],
+      "answer": 2,
+      "explain": "Every ordered comparison with NaN (<, >, <=, >=, ==) is false; != is true. That makes x != x a NaN test, though std::isnan(x) states the intent. It also means a limit check written only as `if (price > maximum) return false;` lets a NaN price straight through."
+    },
+    {
+      "id": "c02-m24",
+      "section": "Subnormals and fast math",
+      "difficulty": "hard",
+      "prompt": "An optimised build compiles `bool valid(double x) { return !std::isnan(x); }` down to an unconditional `return true`. What is the most likely cause?",
+      "choices": [
+        "FTZ/DAZ being enabled in MXCSR",
+        "The function being inlined into a caller that already checked",
+        "A compiler bug in the standard library header",
+        "-ffinite-math-only, which promises NaN never occurs"
+      ],
+      "answer": 3,
+      "explain": "-ffinite-math-only (usually pulled in by -ffast-math) licenses the compiler to assume inputs and results are finite, so the NaN test is provably false and gets deleted. FTZ/DAZ changes subnormals to zero, which is a different hazard and does not touch NaN checks. Never apply fast-math to code that validates prices, limits, or risk."
+    },
+    {
+      "id": "c02-m25",
+      "section": "`auto` and `decltype`",
+      "difficulty": "medium",
+      "prompt": "Given `const std::string& view = symbol;`, what type does `auto copy = view;` deduce?",
+      "choices": [
+        "std::string",
+        "const std::string",
+        "const std::string&",
+        "std::string&"
+      ],
+      "answer": 0,
+      "explain": "Plain auto drops top-level const and reference qualifiers, so this silently makes a copy. Write `const auto&` when you meant to alias — that is the deduction form that preserves both."
+    },
+    {
+      "id": "c02-m26",
+      "section": "`auto` and `decltype`",
+      "difficulty": "hard",
+      "prompt": "For `const int quantity = 10;`, what are decltype(quantity) and decltype((quantity))?",
+      "choices": [
+        "int and const int&",
+        "const int and const int&",
+        "const int and int",
+        "const int and const int"
+      ],
+      "answer": 1,
+      "explain": "For an unparenthesised name, decltype reports the declared type: const int. Parenthesising makes it an lvalue *expression*, and decltype of an lvalue expression of type T is T&, so const int&. This is the trap that makes `decltype(auto) f() { return (local); }` return a dangling reference."
+    },
+    {
+      "id": "c02-m27",
+      "section": "Explicit C++ casts",
+      "difficulty": "medium",
+      "prompt": "Which cast should convert a std::uint8_t read off the wire into a scoped enumeration with that underlying type?",
+      "choices": [
+        "const_cast",
+        "dynamic_cast",
+        "static_cast",
+        "reinterpret_cast"
+      ],
+      "answer": 2,
+      "explain": "static_cast performs conversions the type system already permits, including enumeration conversions. reinterpret_cast is for representation reinterpretation at ABI or wire boundaries; dynamic_cast requires a polymorphic source class."
+    },
+    {
+      "id": "c02-m28",
+      "section": "Explicit C++ casts",
+      "difficulty": "medium",
+      "prompt": "Why prefer a named cast over a C-style cast `(T)x`?",
+      "choices": [
+        "A C-style cast is ill-formed in C++23",
+        "Only named casts can convert between numeric types",
+        "The named casts are faster at runtime",
+        "A named cast narrows the permission requested and is greppable in review"
+      ],
+      "answer": 3,
+      "explain": "A C-style cast tries combinations of static_cast, const_cast and reinterpret_cast and silently uses whichever works, so it may cast away const when the author only meant a numeric conversion. Named casts carry no extra runtime cost — they cost the conversion requested and nothing more."
+    },
+    {
+      "id": "c02-m29",
+      "section": "IEEE 754 floating point",
+      "difficulty": "medium",
+      "prompt": "How many bits of significand precision does a normal binary64 double have?",
+      "choices": [
+        "53",
+        "64",
+        "24",
+        "52"
+      ],
+      "answer": 0,
+      "explain": "52 bits of fraction are stored, plus the implicit leading 1 that normal values carry, giving 53 bits of precision. Binary32 float stores 23 and so has 24. Subnormals give this up: they use a leading zero instead, trading precision for gradual underflow."
+    },
+    {
+      "id": "c02-m30",
+      "section": "Signed, unsigned, and overflow",
+      "difficulty": "medium",
+      "prompt": "For application counts and differences whose valid domain is nonnegative, which type should you reach for by default?",
+      "choices": [
+        "std::size_t, to match container APIs",
+        "A signed type such as std::int64_t",
+        "auto, deduced from whatever the container returns",
+        "unsigned, because the domain is nonnegative"
+      ],
+      "answer": 1,
+      "explain": "Subtraction is the decisive trap: with unsigned types, `received - expected` becomes a huge positive value when received < expected, silently and without a branch. Reserve unsigned for bit manipulation, modulo arithmetic, and wire fields, and convert at a checked boundary or use std::ssize."
+    }
+  ],
+  "reading": [
+    {
+      "id": "c02-r01",
+      "section": "Promotions and the usual arithmetic conversions",
+      "prompt": "What does this print?",
+      "code": "#include <cstdint>\n#include <iostream>\n\nint main() {\n    std::uint8_t bid = 200;\n    std::uint8_t ask = 100;\n    std::uint8_t stored = bid + ask;\n    std::cout << static_cast<int>(stored) << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "44"
+      ],
+      "explain": "Both operands promote to int, so the sum 300 is computed correctly in int. Storing it back into a uint8_t converts modulo 256: 300 - 256 = 44. The narrow type saved storage, not arithmetic width."
+    },
+    {
+      "id": "c02-r02",
+      "section": "Promotions and the usual arithmetic conversions",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n\nint main() {\n    std::cout << std::boolalpha << (-1 > 0u) << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "true"
+      ],
+      "explain": "Both operands have the rank of int and one is unsigned, so the signed operand converts to unsigned int. -1 becomes UINT_MAX, which is greater than 0. Well-defined, and almost never what the author meant."
+    },
+    {
+      "id": "c02-r03",
+      "section": "IEEE 754 floating point",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n\nint main() {\n    double large = 1e16;\n    double small = 1.0;\n    double recovered = (large + small) - large;\n    std::cout << recovered << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "0"
+      ],
+      "explain": "At magnitude 1e16 the gap between adjacent doubles exceeds 1, so large + small rounds back to large and the subtraction yields exactly zero. This is catastrophic cancellation: the small contribution was destroyed by rounding before the subtraction ever ran."
+    },
+    {
+      "id": "c02-r04",
+      "section": "Enumerations",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <cstdint>\n#include <iostream>\n\nenum class Side : std::uint8_t {\n    Buy = 1,\n    Sell = 2\n};\n\nint main() {\n    int next = Side::Buy + 1;\n    std::cout << next << '\\n';\n}",
+      "kind": "no-compile",
+      "explain": "A scoped enumeration does not implicitly convert to an integer, and there is no operator+ for Side and int. That refusal is the point of enum class. Write std::to_underlying(Side::Buy) + 1 if the arithmetic is genuinely intended."
+    },
+    {
+      "id": "c02-r05",
+      "section": "Signed, unsigned, and overflow",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <climits>\n#include <iostream>\n\nint main() {\n    int value = INT_MAX;\n    std::cout << value + 1 << '\\n';\n}",
+      "kind": "ub",
+      "explain": "Signed integer overflow is undefined behaviour. It usually appears to print INT_MIN, but the compiler is entitled to assume it never happens — UBSan reports 'signed integer overflow: 2147483647 + 1 cannot be represented in type int'."
+    },
+    {
+      "id": "c02-r06",
+      "section": "Implicit conversions",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <cstdint>\n#include <iostream>\n\nint main() {\n    std::int64_t wide = 5'000'000'000;\n    std::int32_t narrow{wide};\n    std::cout << narrow << '\\n';\n}",
+      "kind": "no-compile",
+      "explain": "Brace initialisation rejects narrowing conversions. With `std::int32_t narrow = wide;` this would compile and quietly print 705032704. Use braces exactly where a narrowing conversion would be a bug."
+    },
+    {
+      "id": "c02-r07",
+      "section": "References",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n\nint main() {\n    int bid = 100;\n    int ask = 105;\n    int& price = bid;\n\n    price = 101;\n    price = ask;\n\n    std::cout << bid << ' ' << ask << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "105 105"
+      ],
+      "explain": "price aliases bid permanently. `price = ask;` assigns ask's value into bid; it does not reseat the reference. Both names now read 105, and ask was never touched."
+    },
+    {
+      "id": "c02-r08",
+      "section": "`auto` and `decltype`",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n#include <string>\n\nint main() {\n    std::string symbol = \"EURUSD\";\n    const std::string& view = symbol;\n\n    auto copy = view;\n    copy[0] = 'X';\n\n    std::cout << symbol << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "EURUSD"
+      ],
+      "explain": "Plain auto strips the reference and the const, so copy is an independent std::string. Mutating it leaves symbol untouched. Had this been `auto& copy = view;` the deduced type would be const std::string& and the assignment would not compile."
+    }
+  ],
+  "writing": [
+    {
+      "id": "c02-w01",
+      "section": "Const and volatile",
+      "minutes": 6,
+      "prompt": "Declare three pointers to an existing `int bid`: one through which the int cannot be modified, one that cannot be repointed, and one with both restrictions. Add a one-line comment to each naming what it is.",
+      "checklist": [
+        "const int* — pointer to const int (pointee read-only, pointer reseatable)",
+        "int* const — const pointer to int (pointee writable, pointer fixed)",
+        "const int* const — both",
+        "Each declaration is initialised at the point of declaration"
+      ],
+      "solution": "int bid = 100;\n\nconst int* observed = &bid;      // pointer to const int\nint* const fixed = &bid;         // const pointer to int\nconst int* const stable = &bid;  // const pointer to const int",
+      "notes": "Read the declaration from the identifier outward. `int const* observed` is the same type as `const int* observed`; the const-on-the-right spelling makes the outward reading rule uniform."
+    },
+    {
+      "id": "c02-w02",
+      "section": "Enumerations",
+      "minutes": 10,
+      "prompt": "Define a wire-facing scoped enumeration Side with a fixed 8-bit underlying type and values Buy = 1, Sell = 2. Write `to_wire` converting a Side to its underlying type, and `from_wire` returning std::optional<Side> that rejects any value which is not an enumerator.",
+      "checklist": [
+        "enum class with an explicit underlying type (std::uint8_t)",
+        "to_wire uses std::to_underlying (or a static_cast to the underlying type)",
+        "from_wire validates the incoming value before casting",
+        "from_wire returns std::nullopt for an unrecognised value",
+        "static_cast, not reinterpret_cast, for the inbound conversion"
+      ],
+      "solution": "#include <cstdint>\n#include <optional>\n#include <utility>\n\nenum class Side : std::uint8_t {\n    Buy = 1,\n    Sell = 2\n};\n\nstd::uint8_t to_wire(Side side) {\n    return std::to_underlying(side);\n}\n\nstd::optional<Side> from_wire(std::uint8_t value) {\n    switch (value) {\n        case 1: return Side::Buy;\n        case 2: return Side::Sell;\n        default: return std::nullopt;\n    }\n}",
+      "notes": "Because the underlying type is fixed, static_cast<Side>(7) is well-defined and gives you a Side holding 7 — which is exactly why from_wire has to validate. A fixed underlying type fixes layout, not domain."
+    },
+    {
+      "id": "c02-w03",
+      "section": "Signed, unsigned, and overflow",
+      "minutes": 6,
+      "prompt": "Write a function that prints the elements of a `const std::vector<int>&` in reverse order. It must be correct for an empty vector and must not rely on an unsigned value becoming negative. Write both idioms from the chapter.",
+      "checklist": [
+        "Uses std::ssize (signed size) or the `i-- > 0` idiom",
+        "Correct for an empty vector — no wraparound to SIZE_MAX",
+        "Termination does not depend on an unsigned comparing < 0",
+        "Any signed index is cast to std::size_t before subscripting"
+      ],
+      "solution": "#include <iostream>\n#include <iterator>\n#include <vector>\n\nvoid print_reverse(const std::vector<int>& values) {\n    // Signed index: std::ssize gives -1 for an empty vector, so the loop\n    // simply never runs.\n    for (auto i = std::ssize(values) - 1; i >= 0; --i) {\n        std::cout << values[static_cast<std::size_t>(i)] << '\\n';\n    }\n\n    // Unsigned, post-decrement: tests the old value, then uses the new one.\n    for (auto i = values.size(); i-- > 0;) {\n        std::cout << values[i] << '\\n';\n    }\n}",
+      "notes": "The second idiom is worth memorising: `i-- > 0` compares the pre-decrement value against 0 and leaves the decremented value for the body, so it stops cleanly at index 0 without ever going negative."
+    },
+    {
+      "id": "c02-w04",
+      "section": "IEEE 754 floating point",
+      "minutes": 8,
+      "prompt": "Write `almost_equal(double lhs, double rhs, double relative_tolerance, double absolute_tolerance)` that combines a relative tolerance for ordinary magnitudes with an absolute tolerance near zero.",
+      "checklist": [
+        "Computes the absolute difference with std::abs",
+        "Scales the relative tolerance by the larger of the two magnitudes",
+        "Takes the max of the absolute and scaled relative tolerance",
+        "Uses <= so that an exact match passes",
+        "Includes <cmath> and <algorithm>"
+      ],
+      "solution": "#include <algorithm>\n#include <cmath>\n\nbool almost_equal(double lhs, double rhs,\n                  double relative_tolerance,\n                  double absolute_tolerance) {\n    double difference = std::abs(lhs - rhs);\n    double scale = std::max(std::abs(lhs), std::abs(rhs));\n    return difference <=\n           std::max(absolute_tolerance, relative_tolerance * scale);\n}",
+      "notes": "The tolerances come from the domain's acceptable error. Machine epsilon is not a universal tolerance — it is the gap between 1.0 and the next double, and the gap grows with magnitude."
+    },
+    {
+      "id": "c02-w05",
+      "section": "IEEE 754 floating point",
+      "minutes": 7,
+      "prompt": "Write `accept_price(double price, double maximum)` that returns true only for a price that is finite and not above maximum. Explain in a comment why an ordered comparison alone is not enough.",
+      "checklist": [
+        "Checks std::isfinite(price) before the range comparison",
+        "Rejects NaN and both infinities",
+        "Range check is only reached for a finite price",
+        "Comment names the NaN-comparison-is-false rule"
+      ],
+      "solution": "#include <cmath>\n\nbool accept_price(double price, double maximum) {\n    // Every ordered comparison with NaN is false, so `price > maximum`\n    // is false for a NaN price and an inverted check would accept it.\n    if (!std::isfinite(price)) {\n        return false;\n    }\n    return price <= maximum;\n}",
+      "notes": "Validate finiteness at ingress rather than at each comparison site. NaN also breaks the strict-weak-ordering requirement of ordered containers, so a NaN that reaches a std::map key is a second, quieter bug."
+    },
+    {
+      "id": "c02-w06",
+      "section": "Pointers, arrays, and decay",
+      "minutes": 6,
+      "prompt": "Write two overloads of `sum`: one taking a `const std::vector<int>&`, and one taking a raw pointer and an element count — with a comment explaining why `int values[10]` as a parameter would not do the job.",
+      "checklist": [
+        "Pointer overload takes an explicit length parameter",
+        "Comment states that int values[10] is adjusted to int* and the bound enforces nothing",
+        "Vector overload iterates without indices going out of range",
+        "Length parameter is a size type, not int"
+      ],
+      "solution": "#include <cstddef>\n#include <vector>\n\nlong sum(const std::vector<int>& values) {\n    long total = 0;\n    for (int v : values) {\n        total += v;\n    }\n    return total;\n}\n\n// A parameter written `int values[10]` is adjusted to `int*`: the bound is\n// documentation the compiler discards, so the length has to be passed.\nlong sum(const int* values, std::size_t count) {\n    long total = 0;\n    for (std::size_t i = 0; i < count; ++i) {\n        total += values[i];\n    }\n    return total;\n}",
+      "notes": "std::span (Chapter 12) exists precisely to bundle the pointer and the count into one parameter, which is what you should reach for once it is available to you."
+    },
+    {
+      "id": "c02-w07",
+      "section": "Explicit C++ casts",
+      "minutes": 8,
+      "prompt": "Write `price_to_ticks(double price, double tick_size)` returning std::optional<std::int64_t>. Reject non-finite input, round to the nearest tick rather than truncating, and reject a result that will not fit in an int64.",
+      "checklist": [
+        "Rejects non-finite input up front",
+        "Uses std::llround or std::round rather than relying on the cast to truncate",
+        "Range-checks against std::numeric_limits<std::int64_t> before converting",
+        "Uses static_cast, and a comment notes the cast adds no range checking",
+        "Returns std::nullopt on every rejection path"
+      ],
+      "solution": "#include <cmath>\n#include <cstdint>\n#include <limits>\n#include <optional>\n\nstd::optional<std::int64_t> price_to_ticks(double price, double tick_size) {\n    if (!std::isfinite(price) || !std::isfinite(tick_size) || tick_size <= 0.0) {\n        return std::nullopt;\n    }\n\n    double ticks = std::round(price / tick_size);\n\n    // static_cast documents intent but adds no range check: converting an\n    // out-of-range double to an integer type is undefined behaviour.\n    constexpr double limit = static_cast<double>(std::numeric_limits<std::int64_t>::max());\n    if (ticks < -limit || ticks > limit) {\n        return std::nullopt;\n    }\n\n    return static_cast<std::int64_t>(ticks);\n}",
+      "notes": "The chapter's rule is that executable prices should not be doubles at all. When a double must be converted at an ingress boundary, this is the shape of the conversion: validate, round deliberately, range-check, then cast."
+    },
+    {
+      "id": "c02-w08",
+      "section": "`auto` and `decltype`",
+      "minutes": 5,
+      "prompt": "Given `std::string symbol; const std::string& view = symbol;`, write five declarations using auto that deduce, respectively: a copy, a read-only alias (two ways), a forwarding reference, and a pointer. Comment each with the deduced type.",
+      "checklist": [
+        "auto value = view;  deduces std::string (a copy)",
+        "auto& and const auto& both deduce const std::string&",
+        "auto&& deduces const std::string& when bound to this lvalue",
+        "auto* requires a pointer initialiser and deduces const std::string*",
+        "Comments state the deduced type, not just the intent"
+      ],
+      "solution": "#include <string>\n\nvoid deduction_forms(const std::string& view) {\n    auto value = view;         // std::string — copies\n    auto& alias = view;        // const std::string& — aliases, read-only\n    const auto& ref = view;    // const std::string& — aliases, read-only\n    auto&& fwd = view;         // const std::string& — binds to this lvalue\n    auto* ptr = &view;         // const std::string* — needs a pointer initialiser\n\n    (void)value; (void)alias; (void)ref; (void)fwd; (void)ptr;\n}",
+      "notes": "auto&& in a deduction context is a forwarding reference: it binds to lvalues and temporaries alike, collapsing to an lvalue reference here. Chapter 20 develops why that matters."
+    }
+  ]
+}

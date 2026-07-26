@@ -1,0 +1,626 @@
+{
+  "chapter": 3,
+  "mcq": [
+    {
+      "id": "c03-m01",
+      "section": "Expressions and operators",
+      "difficulty": "medium",
+      "prompt": "How does `flags & snapshot == 0` actually group?",
+      "choices": [
+        "flags & (snapshot == 0)",
+        "(flags & snapshot) == (0)",
+        "It is ill-formed without parentheses",
+        "(flags & snapshot) == 0"
+      ],
+      "answer": 0,
+      "explain": "Equality binds more tightly than bitwise AND. The comparison yields false, which converts to 0, and `flags & 0` is always 0 — so the test is a constant false regardless of the flags. Always parenthesise the mask: (flags & snapshot) == 0."
+    },
+    {
+      "id": "c03-m02",
+      "section": "Expressions and operators",
+      "difficulty": "medium",
+      "prompt": "How does `1 << level + 1` group?",
+      "choices": [
+        "(1 << level) + 1",
+        "1 << (level + 1)",
+        "1 << level, then + 1 is discarded",
+        "It is ambiguous"
+      ],
+      "answer": 1,
+      "explain": "Addition binds more tightly than shift, so this is 1 << (level + 1) — twice what a reader skimming for `1 << level` expects. The rule to take away is not the precedence table but the habit: parenthesise whenever the grouping required thought."
+    },
+    {
+      "id": "c03-m03",
+      "section": "Expressions and operators",
+      "difficulty": "medium",
+      "prompt": "What is the type of `use_model ? ticks : model_price` where ticks is int and model_price is double?",
+      "choices": [
+        "The expression is ill-formed — the operands differ in type",
+        "int",
+        "double",
+        "It depends on the runtime value of use_model"
+      ],
+      "answer": 2,
+      "explain": "The conditional operator produces one result type determined at compile time from both alternatives, using the usual arithmetic conversions. ticks converts to double, so the type is double whichever branch is taken."
+    },
+    {
+      "id": "c03-m04",
+      "section": "Expressions and operators",
+      "difficulty": "easy",
+      "prompt": "How does `quantity += fill` differ from `quantity = quantity + fill`?",
+      "choices": [
+        "It suppresses integer promotion of the operands",
+        "There is no difference at all",
+        "It is faster because it compiles to a single instruction",
+        "The left operand is evaluated only once"
+      ],
+      "answer": 3,
+      "explain": "Compound assignment evaluates its left operand once. That is invisible for a plain variable but matters when the left side is `buckets[index()]` or contains any other call — the naive expansion would run it twice."
+    },
+    {
+      "id": "c03-m05",
+      "section": "Value categories",
+      "difficulty": "medium",
+      "prompt": "Which pair of properties defines an xvalue?",
+      "choices": [
+        "Has identity, expiring",
+        "No identity, not expiring",
+        "Has identity, not expiring",
+        "No identity, expiring"
+      ],
+      "answer": 0,
+      "explain": "An xvalue has identity and is marked as expiring — std::move(x) is the canonical example. An lvalue has identity and is not expiring; a prvalue has no identity and is treated as expiring. glvalue and rvalue are the two umbrella categories over these three."
+    },
+    {
+      "id": "c03-m06",
+      "section": "Value categories",
+      "difficulty": "medium",
+      "prompt": "A variable is declared `int&& r = 7;`. What is the value category of the expression `r`?",
+      "choices": [
+        "xvalue",
+        "lvalue",
+        "It depends on how r is used",
+        "prvalue"
+      ],
+      "answer": 1,
+      "explain": "A named variable is an lvalue even when its type is an rvalue reference. Classify the *expression*, not the declared type — this is exactly why std::move exists, to turn the lvalue expression r back into an xvalue."
+    },
+    {
+      "id": "c03-m07",
+      "section": "Value categories",
+      "difficulty": "easy",
+      "prompt": "Why does `int& bad = quantity + 1;` fail to compile?",
+      "choices": [
+        "References must be initialised with a named variable",
+        "The addition might overflow",
+        "quantity + 1 is a prvalue, and a non-const lvalue reference cannot bind to it",
+        "quantity + 1 has the wrong type"
+      ],
+      "answer": 2,
+      "explain": "Only const T& (or T&&) may bind to a prvalue. `const int& read_only = quantity + 1;` compiles and extends the temporary's lifetime. The same rule explains why an assignment target must be a modifiable lvalue: (quantity + 1) = 7 is ill-formed."
+    },
+    {
+      "id": "c03-m08",
+      "section": "Sequencing and evaluation order",
+      "difficulty": "hard",
+      "prompt": "In C++17 and later, what is the status of `consume(i++, i++)`?",
+      "choices": [
+        "Well-defined — arguments always evaluate left to right",
+        "Ill-formed — the compiler must reject it",
+        "Undefined behaviour — two unsequenced modifications of i",
+        "Unspecified — the two increments are indeterminately sequenced, so the result depends on which runs first"
+      ],
+      "answer": 3,
+      "explain": "C++17 made function arguments indeterminately sequenced: each argument completes before the next begins, but the order is the implementation's choice. Before C++17 they were unsequenced and this was undefined behaviour. Unspecified is better than undefined, but it still must not carry program logic."
+    },
+    {
+      "id": "c03-m09",
+      "section": "Sequencing and evaluation order",
+      "difficulty": "hard",
+      "prompt": "Which of these is undefined behaviour in C++17?",
+      "choices": [
+        "i = i++ + i++;",
+        "consume(first(), second());",
+        "a[i] = i++;",
+        "i = i++ + 1;"
+      ],
+      "answer": 0,
+      "explain": "`i = i++ + i++` contains two unsequenced modifications of the same scalar — still undefined. `i = i++ + 1` became well-defined in C++17 because the whole right operand of assignment is sequenced before the left, and `a[i] = i++` is likewise ordered by the C++17 rule that the right operand of = comes first."
+    },
+    {
+      "id": "c03-m10",
+      "section": "Sequencing and evaluation order",
+      "difficulty": "medium",
+      "prompt": "`publish(next_bid(), next_ask());` where both helpers increment a shared counter. What is the defect?",
+      "choices": [
+        "It is undefined behaviour in C++17",
+        "Which argument receives the value 1 is unspecified",
+        "The two calls may interleave with each other",
+        "Nothing — arguments evaluate left to right"
+      ],
+      "answer": 1,
+      "explain": "The calls do not interleave (C++17 forbids that), and nothing here is undefined. But the order is the implementation's choice, so the sequence numbers may land in either parameter. Compute the side effects in separate statements when the order carries meaning."
+    },
+    {
+      "id": "c03-m11",
+      "section": "UB, unspecified, implementation-defined",
+      "difficulty": "medium",
+      "prompt": "Which category must the implementation document its choice for?",
+      "choices": [
+        "Undefined behaviour",
+        "Unspecified behaviour",
+        "Implementation-defined behaviour",
+        "All three"
+      ],
+      "answer": 2,
+      "explain": "Implementation-defined behaviour — the signedness of plain char, the size of long — requires the implementation to pick a permitted choice and document it, so code may rely on it under an explicit platform contract. Unspecified behaviour is chosen per occurrence with no announcement; undefined behaviour has no requirements at all."
+    },
+    {
+      "id": "c03-m12",
+      "section": "UB, unspecified, implementation-defined",
+      "difficulty": "hard",
+      "prompt": "`bool wraps(int value) { return value + 1 < value; }` compiles to `xor eax, eax; ret` — an unconditional false. Why is that legal?",
+      "choices": [
+        "It is a compiler bug that -O0 would avoid",
+        "The comparison is unspecified, so any answer is permitted",
+        "The compiler proved that int addition saturates rather than wraps",
+        "For every input on which the addition is defined, value + 1 > value; the overflow case has undefined behaviour, so the optimiser need not preserve it"
+      ],
+      "answer": 3,
+      "explain": "The optimiser may assume undefined behaviour never occurs on a path a valid program takes. Calling wraps(INT_MAX) does not make it return true — the call simply has undefined behaviour. The language contract, not the hardware's wraparound, is what the compiler is required to honour."
+    },
+    {
+      "id": "c03-m13",
+      "section": "UB, unspecified, implementation-defined",
+      "difficulty": "medium",
+      "prompt": "A build runs clean under UBSan and ASan. What may you conclude?",
+      "choices": [
+        "The program contains no undefined behaviour on the paths that were executed, for the checks those sanitizers instrument",
+        "The program contains no undefined behaviour in the translation units that were instrumented",
+        "Nothing — sanitizers produce too many false negatives to be evidence",
+        "The program contains no undefined behaviour"
+      ],
+      "answer": 0,
+      "explain": "Sanitizers detect only the cases they instrument, and only on executed paths. Uninitialised reads need MemorySanitizer, data races need ThreadSanitizer. A clean run is evidence, not proof."
+    },
+    {
+      "id": "c03-m14",
+      "section": "Declaring, defining, calling functions",
+      "difficulty": "easy",
+      "prompt": "What is the difference between a parameter and an argument?",
+      "choices": [
+        "A parameter is passed by value; an argument by reference",
+        "A parameter is the local name in the declaration; an argument is the expression supplied by a call",
+        "They are interchangeable terms",
+        "A parameter belongs to a member function; an argument to a free function"
+      ],
+      "answer": 1,
+      "explain": "The parameter is the declaration-side name, the argument is the call-side expression. The distinction matters when discussing conversions: it is the argument that is converted to the parameter's type, and the ranking of that conversion is what overload resolution compares."
+    },
+    {
+      "id": "c03-m15",
+      "section": "Declaring, defining, calling functions",
+      "difficulty": "medium",
+      "prompt": "`auto spread(double bid, double ask) -> double` differs from `double spread(double bid, double ask)` how?",
+      "choices": [
+        "The trailing form deduces the return type at instantiation",
+        "The trailing form is a declaration only and needs a separate definition",
+        "They mean the same thing",
+        "The trailing form disables copy elision on return"
+      ],
+      "answer": 2,
+      "explain": "The trailing-return spelling is purely syntactic here. It earns its keep when the return type must mention the parameters — e.g. `auto f(T a, U b) -> decltype(a + b)` — which is not possible with the leading form."
+    },
+    {
+      "id": "c03-m16",
+      "section": "Namespaces and name lookup",
+      "difficulty": "medium",
+      "prompt": "Unqualified lookup finds a name in an inner scope. What happens to declarations of the same name in enclosing scopes?",
+      "choices": [
+        "They participate only if the inner declaration is not viable",
+        "The program is ill-formed due to ambiguity",
+        "They are merged into one overload set",
+        "They are hidden — lookup stops at the first scope containing the name"
+      ],
+      "answer": 3,
+      "explain": "Unqualified lookup works outward and stops at the first scope containing the name; outer declarations are hidden, not combined. This is why a local `int timeout` completely shadows a namespace-scope `timeout`, and why an inner member function hides base-class overloads of the same name."
+    },
+    {
+      "id": "c03-m17",
+      "section": "Namespaces and name lookup",
+      "difficulty": "easy",
+      "prompt": "Why should `using namespace std;` never appear in a header?",
+      "choices": [
+        "Every source file that includes the header inherits the exposed names and their collisions",
+        "It is ill-formed at namespace scope",
+        "It prevents argument-dependent lookup from working",
+        "It slows compilation measurably"
+      ],
+      "answer": 0,
+      "explain": "A using-directive in a header is inflicted on every translation unit that includes it, transitively, with no way for those files to opt out. A using-*declaration* inside a function body (`using std::cout;`) is scoped and harmless."
+    },
+    {
+      "id": "c03-m18",
+      "section": "Overloading and overload resolution",
+      "difficulty": "medium",
+      "prompt": "Given overloads pick(int), pick(long) and pick(double), which does `pick(small)` select for a `short small`?",
+      "choices": [
+        "The call is ambiguous",
+        "pick(int)",
+        "pick(long)",
+        "pick(double)"
+      ],
+      "answer": 1,
+      "explain": "short to int is an integer promotion, which outranks the integral and floating conversions needed for the other two candidates. Overload resolution compares conversion ranks — it does not reason about which destination type is 'closest' in width."
+    },
+    {
+      "id": "c03-m19",
+      "section": "Overloading and overload resolution",
+      "difficulty": "hard",
+      "prompt": "Given the same three overloads, what happens for `unsigned quantity = 42; pick(quantity);`?",
+      "choices": [
+        "pick(int) wins — same width",
+        "pick(long) wins — long can represent every unsigned int value",
+        "The call is ambiguous — all three candidates need a conversion-rank conversion",
+        "pick(double) wins — floating conversions outrank integral ones"
+      ],
+      "answer": 2,
+      "explain": "unsigned int to int, to long, and to double are all ranked simply as 'conversion'. No candidate is better than the others for the only argument, so there is no unique best viable function and compilation fails. Overload sets split across signed and unsigned integers are a reliable source of this."
+    },
+    {
+      "id": "c03-m20",
+      "section": "Overloading and overload resolution",
+      "difficulty": "medium",
+      "prompt": "Given `void inspect(int&)` and `void inspect(const int&)`, which is selected by `inspect(3)`?",
+      "choices": [
+        "Ambiguous",
+        "Ill-formed — a literal cannot bind to any reference",
+        "inspect(int&)",
+        "inspect(const int&)"
+      ],
+      "answer": 3,
+      "explain": "3 is a prvalue and cannot bind to a non-const lvalue reference, so only const int& is viable. For a modifiable lvalue like `int live`, the int& overload wins because it avoids the added const qualification."
+    },
+    {
+      "id": "c03-m21",
+      "section": "Argument-dependent lookup",
+      "difficulty": "medium",
+      "prompt": "Why does `std::cout << order` find an operator<< defined as a friend inside `trading::Order`?",
+      "choices": [
+        "Because argument-dependent lookup searches namespaces and classes associated with the argument types",
+        "Because std::ostream declares a template that matches any type",
+        "Because operator overloads bypass name lookup entirely",
+        "Because friends are injected into the enclosing namespace by ordinary lookup"
+      ],
+      "answer": 0,
+      "explain": "Operator notation is an unqualified call, and ADL adds the namespaces and classes associated with the arguments — here both std and trading. A hidden friend is invisible to ordinary namespace lookup and findable only this way, which keeps it out of unrelated candidate sets."
+    },
+    {
+      "id": "c03-m22",
+      "section": "Argument-dependent lookup",
+      "difficulty": "hard",
+      "prompt": "Why is `using std::swap; swap(left, right);` preferred over `std::swap(left, right);`?",
+      "choices": [
+        "std::swap is deprecated in C++23",
+        "The unqualified call lets ADL find a type-specific swap, with std::swap as the fallback",
+        "The qualified call cannot bind to references",
+        "It avoids one function call at runtime"
+      ],
+      "answer": 1,
+      "explain": "This is the two-step idiom. The using-declaration puts std::swap in the candidate set; the unqualified call lets ADL add trading::swap, which is a better match for trading::Quote. Calling std::swap directly suppresses that customisation point entirely."
+    },
+    {
+      "id": "c03-m23",
+      "section": "Defaults, deduced returns, attributes",
+      "difficulty": "medium",
+      "prompt": "`void publish(std::string symbol = load_primary_symbol());` — when does load_primary_symbol() run?",
+      "choices": [
+        "Once, when the declaration is first seen",
+        "Once, the first time publish() is called with no argument",
+        "At every call that omits the argument",
+        "Never — the default is evaluated lazily inside the function"
+      ],
+      "answer": 2,
+      "explain": "A default argument is an expression evaluated at each call that omits it. A costly default is therefore a cost the call site cannot see: `publish();` builds a std::string and calls a function that is nowhere in that line of source."
+    },
+    {
+      "id": "c03-m24",
+      "section": "Defaults, deduced returns, attributes",
+      "difficulty": "medium",
+      "prompt": "`auto f(bool b) { if (b) return 1; return 1.0; }` — what happens?",
+      "choices": [
+        "It compiles but the return type is unspecified",
+        "It compiles; the return type is double, and 1 converts",
+        "It compiles; the return type is int, and 1.0 truncates",
+        "It is ill-formed — deduced return expressions must agree exactly"
+      ],
+      "answer": 3,
+      "explain": "Every non-discarded return expression must deduce the same type; the compiler does not look for a common arithmetic type the way the conditional operator does. Related rule: a recursive call is only valid after an earlier return has established the type."
+    },
+    {
+      "id": "c03-m25",
+      "section": "Defaults, deduced returns, attributes",
+      "difficulty": "easy",
+      "prompt": "What do [[likely]] and [[unlikely]] do?",
+      "choices": [
+        "Hint block layout and fall-through choices to the compiler",
+        "Insert hardware branch-prediction hints into the instruction stream",
+        "Force the compiler to remove the unlikely branch",
+        "Make a branch condition more probable at runtime"
+      ],
+      "answer": 0,
+      "explain": "They influence code layout — which block falls through, which is placed out of line. They cannot change how often a condition is true, and a wrong hint can worsen instruction fetch. Measure before adding them."
+    },
+    {
+      "id": "c03-m26",
+      "section": "Function pointers, member pointers, std::invoke",
+      "difficulty": "hard",
+      "prompt": "Why must you write `(order_pointer->*notional_member)()` rather than `order_pointer->*notional_member()`?",
+      "choices": [
+        "Because member-function pointers must always be parenthesised",
+        "Because the function-call operator binds more tightly than ->*, so the unparenthesised form tries to call the pointer before applying it to the object",
+        "Because ->* returns a reference that must be materialised first",
+        "Because the const qualifier on the member function requires it"
+      ],
+      "answer": 1,
+      "explain": "The member-pointer operators .* and ->* have lower precedence than a function call, so the unparenthesised spelling parses as `order_pointer->*(notional_member())` and does not compile. This is one place where the parentheses are not stylistic."
+    },
+    {
+      "id": "c03-m27",
+      "section": "Function pointers, member pointers, std::invoke",
+      "difficulty": "medium",
+      "prompt": "What problem does std::invoke solve?",
+      "choices": [
+        "It allows a member function to be called without an object",
+        "It makes indirect calls faster by devirtualising them",
+        "It gives one call syntax to free functions, function pointers, member pointers and function objects",
+        "It owns the callable, unlike a raw function pointer"
+      ],
+      "answer": 2,
+      "explain": "Direct calls need four different spellings — fp(a, b), order.*pm, (order.*pmf)(), fn(x). std::invoke(callable, args...) covers them all, which is what makes generic adapters writable. Owning the callable is std::function's job, not invoke's."
+    },
+    {
+      "id": "c03-m28",
+      "section": "C variadics",
+      "difficulty": "medium",
+      "prompt": "`std::printf(\"%d\\n\", 3.14);` — what is the status of this call?",
+      "choices": [
+        "It is well-defined; printf converts the double to int",
+        "It is ill-formed and will not compile",
+        "It prints a garbage integer, which is implementation-defined",
+        "It is undefined behaviour: %d promises int, the argument is a double"
+      ],
+      "answer": 3,
+      "explain": "Variadic arguments undergo default promotions and the callee retrieves exactly the type the format promised. Retrieving an int where a double was passed is undefined behaviour. -Wformat diagnoses it for a literal format string; a format assembled at runtime defeats that check entirely."
+    },
+    {
+      "id": "c03-m29",
+      "section": "Calling conventions and parameter passing",
+      "difficulty": "medium",
+      "prompt": "On the SysV x86-64 ABI, what happens to `double sum(Order order)` where Order holds two doubles?",
+      "choices": [
+        "Both fields can arrive in xmm registers, so the callee needs no memory access",
+        "The struct is always passed through an invisible pointer",
+        "The call is rejected — aggregates cannot be passed by value",
+        "The Order is copied to the stack and its address passed in rdi"
+      ],
+      "answer": 0,
+      "explain": "A 16-byte trivially copyable aggregate of two doubles satisfies the ABI classification for register passing: the body can be a single addsd. The const Order& version instead passes an address in rdi and issues two dependent loads."
+    },
+    {
+      "id": "c03-m30",
+      "section": "Calling conventions and parameter passing",
+      "difficulty": "hard",
+      "prompt": "Why does adding a std::string member change how a by-value struct parameter is passed?",
+      "choices": [
+        "Because the struct grows beyond 16 bytes",
+        "Because non-trivial copy and destruction behaviour forces the argument through an invisible pointer with the language's copy machinery",
+        "Because std::string members must be passed by const reference",
+        "Because the ABI classifies pointers separately from floating-point fields"
+      ],
+      "answer": 1,
+      "explain": "Register passing under this ABI requires the type to have no user-defined copy machinery, independent of size. Once copy construction and destruction are non-trivial, the caller materialises the object and passes its address. Size is the rule of thumb; triviality is the actual gate."
+    }
+  ],
+  "reading": [
+    {
+      "id": "c03-r01",
+      "section": "Expressions and operators",
+      "prompt": "What does this print?",
+      "code": "#include <cstdint>\n#include <iostream>\n\nint main() {\n    constexpr std::uint32_t snapshot = 0b0001u;\n    std::uint32_t flags = 0;\n\n    bool wrong = flags & snapshot == 0;\n    bool right = (flags & snapshot) == 0;\n\n    std::cout << std::boolalpha << wrong << ' ' << right << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "false true"
+      ],
+      "explain": "== binds tighter than &, so `wrong` is `flags & (snapshot == 0)` — that is `flags & 0`, always zero, always false. The parenthesised version asks the intended question and is true because flags is 0."
+    },
+    {
+      "id": "c03-r02",
+      "section": "Namespaces and name lookup",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n\nint timeout = 1;\n\nnamespace market::feed {\nint timeout = 2;\n\nvoid print_timeout() {\n    int timeout = 3;\n    std::cout << timeout << ' '\n              << market::feed::timeout << ' '\n              << ::timeout << '\\n';\n}\n}\n\nint main() {\n    market::feed::print_timeout();\n}",
+      "kind": "value",
+      "accept": [
+        "3 2 1"
+      ],
+      "explain": "Unqualified lookup stops at the innermost scope containing the name, so the local wins. The two qualified spellings reach past it: market::feed::timeout names the namespace member, and ::timeout names the global."
+    },
+    {
+      "id": "c03-r03",
+      "section": "Overloading and overload resolution",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n\nvoid pick(int) { std::cout << \"int\\n\"; }\nvoid pick(long) { std::cout << \"long\\n\"; }\nvoid pick(double) { std::cout << \"double\\n\"; }\n\nint main() {\n    short small = 7;\n    pick(small);\n}",
+      "kind": "value",
+      "accept": [
+        "int"
+      ],
+      "explain": "short to int is a promotion, which ranks above the integral conversion to long and the floating conversion to double. Rank decides, not apparent closeness of width."
+    },
+    {
+      "id": "c03-r04",
+      "section": "Overloading and overload resolution",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <iostream>\n\nvoid pick(int) { std::cout << \"int\\n\"; }\nvoid pick(long) { std::cout << \"long\\n\"; }\nvoid pick(double) { std::cout << \"double\\n\"; }\n\nint main() {\n    unsigned quantity = 42;\n    pick(quantity);\n}",
+      "kind": "no-compile",
+      "explain": "unsigned int to int, to long, and to double are all plain conversions of the same rank. No candidate is better than the others for the sole argument, so the call is ambiguous."
+    },
+    {
+      "id": "c03-r05",
+      "section": "Defaults, deduced returns, attributes",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n\nint sequence = 0;\n\nint next_sequence() {\n    return ++sequence;\n}\n\nvoid report(int value = next_sequence()) {\n    std::cout << value << '\\n';\n}\n\nint main() {\n    report();\n    report();\n}",
+      "kind": "value",
+      "accept": [
+        "1 2",
+        "1\n2"
+      ],
+      "explain": "The default argument expression is evaluated at each call, not once at the declaration. So the counter advances every time the argument is omitted — a cost and a side effect that are invisible at the call site."
+    },
+    {
+      "id": "c03-r06",
+      "section": "Defaults, deduced returns, attributes",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <iostream>\n\nauto inconsistent(bool use_integer) {\n    if (use_integer) {\n        return 1;\n    }\n    return 1.0;\n}\n\nint main() {\n    std::cout << inconsistent(true) << '\\n';\n}",
+      "kind": "no-compile",
+      "explain": "Deduced return types must agree exactly across every non-discarded return statement. The first return fixes the type as int; the second deduces double and the definitions conflict. Unlike the conditional operator, deduction does not look for a common arithmetic type."
+    },
+    {
+      "id": "c03-r07",
+      "section": "Argument-dependent lookup",
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n\nnamespace trading {\nclass Order {\npublic:\n    Order(int id, double price) : id_(id), price_(price) {}\n\n    friend std::ostream& operator<<(std::ostream& output,\n                                    const Order& order) {\n        return output << order.id_ << '@' << order.price_;\n    }\n\nprivate:\n    int id_;\n    double price_;\n};\n}\n\nint main() {\n    trading::Order order{42, 101.25};\n    std::cout << order << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "42@101.25"
+      ],
+      "explain": "The hidden friend is invisible to ordinary namespace lookup, but ADL adds trading to the candidate search because an argument is a trading::Order. The friend also gets access to the private members it prints."
+    },
+    {
+      "id": "c03-r08",
+      "section": "UB, unspecified, implementation-defined",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <iostream>\n\nint main() {\n    int levels[4] = {100, 101, 102, 103};\n    std::cout << levels[4] << '\\n';\n}",
+      "kind": "ub",
+      "explain": "Reading one past the end of the array is undefined behaviour — no bounds check exists and nothing is thrown. It usually appears to print whatever adjacent stack bytes hold; ASan reports a stack-buffer-overflow."
+    }
+  ],
+  "writing": [
+    {
+      "id": "c03-w01",
+      "section": "Declaring, defining, calling functions",
+      "minutes": 6,
+      "prompt": "Write four functions over a small `Order { std::int64_t id; double price; }`: read the price from a copy, observe it without permitting modification, modify the price through the caller's object, and return the mid of two doubles using the trailing-return spelling.",
+      "checklist": [
+        "By-value parameter for the copy version",
+        "const Order& for the read-only observer",
+        "Order& (non-const) for the mutator",
+        "Trailing return type spelled `auto mid(...) -> double`",
+        "Nothing returns a reference or pointer to a local"
+      ],
+      "solution": "#include <cstdint>\n\nstruct Order {\n    std::int64_t id;\n    double price;\n};\n\ndouble read_price(Order order) {        // receives a copy\n    return order.price;\n}\n\ndouble observe_price(const Order& order) {  // aliases, read-only\n    return order.price;\n}\n\nvoid reprice(Order& order, double price) {  // aliases, may modify\n    order.price = price;\n}\n\nauto mid(double bid, double ask) -> double {\n    return (bid + ask) / 2.0;\n}",
+      "notes": "The declaration itself is the documentation: a caller reading `reprice(Order&, double)` knows its object may change, and one reading `observe_price(const Order&)` knows it will not."
+    },
+    {
+      "id": "c03-w02",
+      "section": "Sequencing and evaluation order",
+      "minutes": 5,
+      "prompt": "`publish(next_bid(), next_ask());` where both helpers increment a shared counter. Rewrite it so the sequence numbers are deterministic, and add a comment saying what rule forced the change.",
+      "checklist": [
+        "Each side effect is computed in its own statement",
+        "The statements run in a defined order before the call",
+        "Comment names unspecified argument evaluation order",
+        "The call itself now takes plain values"
+      ],
+      "solution": "int sequence = 0;\n\nint next_bid() { return ++sequence; }\nint next_ask() { return ++sequence; }\n\nvoid publish(int bid_sequence, int ask_sequence);\n\nvoid publish_in_order() {\n    // Argument evaluation order is unspecified: the calls do not interleave,\n    // but either may run first, so which argument gets 1 is the compiler's\n    // choice. Statements are sequenced, so compute the effects separately.\n    int bid_sequence = next_bid();\n    int ask_sequence = next_ask();\n    publish(bid_sequence, ask_sequence);\n}",
+      "notes": "Note the precise claim: this is unspecified, not undefined. C++17 guarantees the two calls do not interleave — it just refuses to say which goes first."
+    },
+    {
+      "id": "c03-w03",
+      "section": "Argument-dependent lookup",
+      "minutes": 8,
+      "prompt": "Define a struct Quote in namespace trading with a namespace-scope swap for it, then write a free function that swaps two Quotes using the two-step ADL idiom so a type-specific swap is preferred and std::swap is the fallback.",
+      "checklist": [
+        "trading::swap takes two non-const lvalue references",
+        "The caller writes `using std::swap;` inside the function body",
+        "The call to swap is unqualified",
+        "A comment explains that std::swap(a, b) would suppress ADL",
+        "trading::swap is found by ADL, not by a using-directive"
+      ],
+      "solution": "#include <utility>\n\nnamespace trading {\nstruct Quote {\n    int bid;\n    int ask;\n};\n\nvoid swap(Quote& left, Quote& right) {\n    std::swap(left.bid, right.bid);\n    std::swap(left.ask, right.ask);\n}\n}\n\nvoid exchange_quotes(trading::Quote& left, trading::Quote& right) {\n    using std::swap;   // fallback for types with no custom swap\n    swap(left, right); // unqualified: ADL can find trading::swap\n}",
+      "notes": "Writing std::swap(left, right) directly would compile and work, but it would silently bypass any type-specific swap — the exact opposite of what a generic algorithm wants."
+    },
+    {
+      "id": "c03-w04",
+      "section": "Function pointers, member pointers, std::invoke",
+      "minutes": 8,
+      "prompt": "Given `double mid(double, double)`, declare a pointer to it two ways: directly, and through a type alias. Then call it through the pointer.",
+      "checklist": [
+        "Direct declaration spells `double (*name)(double, double)`",
+        "Alias declared with `using` (not a raw typedef of the wrong shape)",
+        "Both are initialised from the function name, relying on function-to-pointer decay",
+        "The call goes through the pointer"
+      ],
+      "solution": "double mid(double bid, double ask) {\n    return (bid + ask) / 2.0;\n}\n\ndouble (*mid_pointer)(double, double) = mid;\n\nusing PriceFunction = double (*)(double, double);\nPriceFunction same_pointer = mid;\n\ndouble current = mid_pointer(100.0, 102.0);  // 101.0",
+      "notes": "The function name decays to a pointer in the initialiser exactly as an array name decays — `&mid` is equivalent and more explicit. The alias is what makes these storable in containers without unreadable declarations."
+    },
+    {
+      "id": "c03-w05",
+      "section": "Function pointers, member pointers, std::invoke",
+      "minutes": 10,
+      "prompt": "For a struct Order with a `double price` member and a `double notional() const` member function, declare a pointer to the data member and a pointer to the member function, then call each — both directly and through std::invoke.",
+      "checklist": [
+        "Data-member pointer declared as `double Order::*`",
+        "Member-function pointer declared as `double (Order::*)() const` — const included",
+        "Direct member-function call parenthesised: (order.*pmf)()",
+        "std::invoke(pm, order) and std::invoke(pmf, order) for the same operations",
+        "Includes <functional>"
+      ],
+      "solution": "#include <functional>\n\nstruct Order {\n    double price;\n    int quantity;\n\n    double notional() const {\n        return price * quantity;\n    }\n};\n\nvoid member_pointer_demo() {\n    Order order{101.5, 200};\n\n    double Order::*price_member = &Order::price;\n    double (Order::*notional_member)() const = &Order::notional;\n\n    double p = order.*price_member;\n    double n = (order.*notional_member)();  // parentheses required\n\n    double p2 = std::invoke(price_member, order);\n    double n2 = std::invoke(notional_member, order);\n\n    (void)p; (void)n; (void)p2; (void)n2;\n}",
+      "notes": "Dropping the const from the member-function pointer type is the usual mistake — it is part of the type, so `double (Order::*)()` will not bind to a const member function."
+    },
+    {
+      "id": "c03-w06",
+      "section": "Defaults, deduced returns, attributes",
+      "minutes": 6,
+      "prompt": "Write a `send_order` returning a bool success flag that the compiler will warn about if a caller ignores it. Add a second function that deliberately discards the result without a warning, and a parameter the function does not use.",
+      "checklist": [
+        "[[nodiscard]] on the returning function",
+        "A deliberate discard uses a cast to void (or otherwise consumes the result)",
+        "[[maybe_unused]] on the intentionally unused parameter",
+        "Attributes are placed on the declaration, before the return type"
+      ],
+      "solution": "[[nodiscard]] bool send_order(int id, [[maybe_unused]] int retry_budget) {\n    return id > 0;\n}\n\nvoid submit_and_ignore(int id) {\n    // Deliberate: we are draining the queue and do not act on failures here.\n    (void)send_order(id, 3);\n}",
+      "notes": "[[nodiscard]] belongs on results whose omission is probably a bug — error codes above all. Chapter 6 applies it to error values callers must inspect."
+    },
+    {
+      "id": "c03-w07",
+      "section": "Calling conventions and parameter passing",
+      "minutes": 7,
+      "prompt": "Write the signatures you would use for four argument kinds: an int tick count, a two-double trivial Order, a large read-only object with a std::string member, and a caller-owned object to be modified. One line of comment each, justifying the choice.",
+      "checklist": [
+        "Scalar passed by value",
+        "Small trivially copyable aggregate passed by value",
+        "Large or non-trivial read-only object passed by const T&",
+        "Object to be modified passed by T&",
+        "Comments justify by copy cost / register eligibility, not by taste"
+      ],
+      "solution": "#include <string>\n\nstruct Order {          // two doubles: trivially copyable, 16 bytes\n    double price;\n    double quantity;\n};\n\nstruct Instrument {     // non-trivial member: copy machinery required\n    std::string symbol;\n    double tick_size;\n};\n\n// Scalar: copying costs no more than indirect access.\nvoid set_ticks(int ticks);\n\n// Small trivial aggregate: the ABI can keep both fields in registers.\ndouble notional(Order order);\n\n// Large or non-trivial read-only: avoid the copy.\nbool is_tradable(const Instrument& instrument);\n\n// Caller-owned and modified: the & makes the mutation explicit.\nvoid reprice(Order& order, double price);",
+      "notes": "The 16-byte threshold is SysV x86-64 specific and is a rule of thumb, not a law — the real gate is that the type has no user-defined copy machinery. Measure at the boundaries that matter."
+    },
+    {
+      "id": "c03-w08",
+      "section": "Value categories",
+      "minutes": 6,
+      "prompt": "Write five initialisations that demonstrate reference binding: a non-const lvalue reference to a variable, a const reference to a prvalue, a const reference to a function returning by value, an lvalue reference to a function returning T&, and a commented-out line showing the binding that is rejected.",
+      "checklist": [
+        "int& binds only to a named variable (an lvalue)",
+        "const int& binds to an arithmetic prvalue",
+        "The commented-out int& binding to a prvalue names why it is rejected",
+        "A function returning T& yields an lvalue expression",
+        "A function returning T yields a prvalue expression"
+      ],
+      "solution": "int make_value();\nint& find_value();\n\nvoid reference_binding_demo() {\n    int quantity = 100;\n\n    int& mutable_view = quantity;             // quantity is an lvalue\n    const int& read_only = quantity + 1;      // quantity + 1 is a prvalue\n    const int& returned_value = make_value(); // returns T: prvalue\n    int& returned_ref = find_value();         // returns T&: lvalue\n\n    // int& bad = quantity + 1;  // error: non-const lvalue ref cannot\n                                 // bind to a prvalue\n\n    mutable_view += 25;\n    (void)read_only; (void)returned_value; (void)returned_ref;\n}",
+      "notes": "Classify the expression, not the declaration. `find_value()` is an lvalue expression because the *return type* is a reference; `make_value()` is a prvalue because it returns an object by value."
+    }
+  ]
+}

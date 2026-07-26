@@ -9,20 +9,26 @@ import {
   chapterTitle,
   chapterSlug,
 } from '../../../lib/chapters';
+import { counts, exerciseChapterSlug, getBookExercises } from '../../../lib/exercises';
 import { href } from '../../../lib/url';
 
 export async function getStaticPaths() {
   const paths = [];
   for (const book of books) {
     const chapters = await getBookChapters(book.slug);
+    const sets = await getBookExercises(book.slug);
+    const bySlug = new Map(sets.map((ex) => [exerciseChapterSlug(ex), ex]));
     for (let i = 0; i < chapters.length; i++) {
+      const slug = chapterSlug(chapters[i]);
+      const ex = bySlug.get(slug);
       paths.push({
-        params: { book: book.slug, chapter: chapterSlug(chapters[i]) },
+        params: { book: book.slug, chapter: slug },
         props: {
           book,
           entry: chapters[i],
           chapters,
           index: i,
+          exerciseCount: ex ? counts(ex).total : 0,
         },
       });
     }
@@ -30,7 +36,7 @@ export async function getStaticPaths() {
   return paths;
 }
 
-const { book, entry, chapters, index } = Astro.props;
+const { book, entry, chapters, index, exerciseCount } = Astro.props;
 const { Content, headings } = await render(entry);
 
 // Top-level sections of this chapter, shown nested under it in the sidebar.
@@ -94,6 +100,17 @@ const currentSlug = chapterSlug(entry);
       <div class="prose">
         <Content />
       </div>
+
+      {
+        exerciseCount > 0 && (
+          <a class="chapter-exercises" href={href(`/books/${book.slug}/${currentSlug}/exercises/`)}>
+            <span class="chapter-exercises-label">Test yourself</span>
+            <span class="chapter-exercises-count">
+              {exerciseCount} exercises for this chapter →
+            </span>
+          </a>
+        )
+      }
 
       <nav class="pager" aria-label="Chapter navigation">
         {

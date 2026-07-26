@@ -337,12 +337,16 @@ struct Quote {
 
     template<class Self>
     decltype(auto) price(this Self&& self) {
-        return std::forward<Self>(self).price_;
+        return (std::forward<Self>(self).price_);  // parentheses are load-bearing
     }
 };
 ```
 
 The single `Quote::price` preserves `const` and lvalue/rvalue category through `Self`. It replaces overload sets that differ only in object qualification.
+
+The parentheses in the return statement are required. `decltype(auto)` applies `decltype` rules to the return expression, and `decltype` of an *unparenthesized* member access reports the member's declared type — so `return std::forward<Self>(self).price_;` returns `int` by value for every `Self`, silently losing the property this member function exists to provide. Parenthesizing makes `decltype` observe an lvalue or xvalue expression instead, yielding `int&`, `const int&`, or `int&&` to match the object. This is the same rule Chapter 2 introduced with `decltype((quantity))`.
+
+A caller that binds the rvalue case must still respect lifetime: `Quote{7}.price()` produces an `int&&` referring to a member of a temporary that dies at the end of the full-expression.
 
 The object can also be passed by value:
 
