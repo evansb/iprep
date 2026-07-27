@@ -52,6 +52,18 @@ const run = (cmd, args, opts = {}) =>
 /** Invoke the compiler. Never subject to the run budget. */
 const compile = (args) => run(CXX, args, { timeout: COMPILE_TIMEOUT_MS });
 
+/**
+ * Execute a built snippet. On macOS the first exec of a freshly written binary
+ * is scanned by the system (seconds of wall time at almost no CPU), which looks
+ * exactly like a hang. A snippet that genuinely loops forever times out twice;
+ * one that was merely being scanned runs immediately the second time.
+ */
+const execute = async (bin, opts) => {
+  const first = await run(bin, [], opts);
+  if (!first.timedOut) return first;
+  return run(bin, [], opts);
+};
+
 async function main() {
   const probe = await run(CXX, ['--version']);
   if (probe.code !== 0) {
@@ -189,7 +201,7 @@ async function check(job, dir) {
   if (build.timedOut) return { level: 'fail', message: 'compiler timed out' };
   if (build.code !== 0) return { level: 'fail', message: 'fails to link', detail: build.stderr };
 
-  const r = await run(bin, [], { env: { ...process.env, ASAN_OPTIONS: 'detect_leaks=0' } });
+  const r = await execute(bin, { env: { ...process.env, ASAN_OPTIONS: 'detect_leaks=0' } });
 
   if (job.expect === 'value') {
     if (r.timedOut) return { level: 'fail', message: 'timed out' };
@@ -201,6 +213,16 @@ async function check(job, dir) {
       return {
         level: 'fail',
         message: `printed ${JSON.stringify(r.stdout.trim())}, accept[] is ${JSON.stringify(job.accept)}`,
+      };
+    }
+    // The quiz grades case-insensitively, but it *shows* accept[0] to a reader
+    // who got it wrong. If that spelling is not what the program prints, the
+    // feedback teaches the wrong answer.
+    const exact = (x) => x.replace(/\s+/g, ' ').trim();
+    if (!job.accept.some((a) => exact(a) === exact(r.stdout))) {
+      return {
+        level: 'warn',
+        message: `accept[0] is ${JSON.stringify(job.accept[0])} but the program prints ${JSON.stringify(r.stdout.trim())} — the reader is shown accept[0]`,
       };
     }
     return null;

@@ -426,201 +426,201 @@
     {
       "id": "c03-r01",
       "section": "Expressions and operators",
-      "prompt": "What does this print?",
-      "code": "#include <cstdint>\n#include <iostream>\n\nint main() {\n    constexpr std::uint32_t snapshot = 0b0001u;\n    std::uint32_t flags = 0;\n\n    bool wrong = flags & snapshot == 0;\n    bool right = (flags & snapshot) == 0;\n\n    std::cout << std::boolalpha << wrong << ' ' << right << '\\n';\n}",
+      "prompt": "An allocator rounds a request up to a power-of-two block. What does this print?",
+      "code": "#include <iostream>\n#include <type_traits>\n\nint main() {\n    int level = 3;\n\n    int width = 1 << level + 1;\n    int half = width >> 1 + 1;\n    auto scaled = level > 2 ? width : width / 2.0;\n\n    std::cout << width << ' ' << half << ' ' << scaled << ' '\n              << std::boolalpha << std::is_same_v<decltype(scaled), double>\n              << '\\n';\n}",
       "kind": "value",
       "accept": [
-        "false true"
+        "16 4 16 true"
       ],
-      "explain": "== binds tighter than &, so `wrong` is `flags & (snapshot == 0)` — that is `flags & 0`, always zero, always false. The parenthesised version asks the intended question and is true because flags is 0."
+      "explain": "Addition binds tighter than either shift, so the first line is 1 << 4 = 16 and the second is 16 >> 2 = 4, not the intended 16 >> 1 = 8. The conditional operator then produces one type for both arms: even though the selected arm is the `int` `width`, the other arm is `double`, so the usual arithmetic conversions give the whole expression type `double` and `scaled` is 16.0 (which streams as `16`). The tempting reading is that `scaled` is an `int` because the taken branch is an `int` — the type of a conditional expression is fixed at compile time from both alternatives, independently of which one runs."
     },
     {
       "id": "c03-r02",
       "section": "Namespaces and name lookup",
       "prompt": "What does this print?",
-      "code": "#include <iostream>\n\nint timeout = 1;\n\nnamespace market::feed {\nint timeout = 2;\n\nvoid print_timeout() {\n    int timeout = 3;\n    std::cout << timeout << ' '\n              << market::feed::timeout << ' '\n              << ::timeout << '\\n';\n}\n}\n\nint main() {\n    market::feed::print_timeout();\n}",
+      "code": "#include <iostream>\n\nint retries = 1;\n\nnamespace net {\nint retries = 2;\n\nnamespace tcp {\nint retries = 3;\n\nint budget() {\n    int retries = 4;\n    return retries * 1000 + net::retries * 100 + ::retries * 10 + net::tcp::retries;\n}\n}\n}\n\nint main() {\n    std::cout << net::tcp::budget() << '\\n';\n}",
       "kind": "value",
       "accept": [
-        "3 2 1"
+        "4213"
       ],
-      "explain": "Unqualified lookup stops at the innermost scope containing the name, so the local wins. The two qualified spellings reach past it: market::feed::timeout names the namespace member, and ::timeout names the global."
+      "explain": "Unqualified lookup stops at the first enclosing scope that declares the name, so the bare `retries` is the block-scope 4 and the enclosing `net::tcp::retries` is hidden, not merged. Each qualified spelling then names exactly one variable: `net::retries` is 2, `::retries` is the global 1, `net::tcp::retries` is 3. The result is 4000 + 200 + 10 + 3. The tempting reading is that `retries` inside `net::tcp` must mean `net::tcp::retries` because that is the enclosing namespace — a local declaration of the same name hides it completely, which is why the qualified form is the only reliable way to reach a shadowed name."
     },
     {
       "id": "c03-r03",
       "section": "Overloading and overload resolution",
-      "prompt": "What does this print?",
-      "code": "#include <iostream>\n\nvoid pick(int) { std::cout << \"int\\n\"; }\nvoid pick(long) { std::cout << \"long\\n\"; }\nvoid pick(double) { std::cout << \"double\\n\"; }\n\nint main() {\n    short small = 7;\n    pick(small);\n}",
+      "prompt": "A metrics sink is overloaded three ways. What does this print?",
+      "code": "#include <cstdint>\n#include <iostream>\n\nvoid record(int) {\n    std::cout << \"int \";\n}\n\nvoid record(double) {\n    std::cout << \"double \";\n}\n\nvoid record(char) {\n    std::cout << \"char \";\n}\n\nint main() {\n    std::uint8_t byte = 5;\n    bool flag = true;\n    float ratio = 0.5f;\n    char letter = 'x';\n\n    record(byte);\n    record(flag);\n    record(ratio);\n    record(letter + 1);\n    std::cout << '\\n';\n}",
       "kind": "value",
       "accept": [
-        "int"
+        "int int double int"
       ],
-      "explain": "short to int is a promotion, which ranks above the integral conversion to long and the floating conversion to double. Rank decides, not apparent closeness of width."
+      "explain": "Every one of the four calls is resolved by a *promotion*, which outranks every other conversion. `std::uint8_t` and `bool` both promote to `int`; `float` promotes to `double`; and `letter + 1` is not a `char` expression at all — the integer promotion applies to `letter` before the addition, so the argument already has type `int`. The tempting reading is that the compiler picks the parameter type that is \"closest\" in width or spelling, which would send the byte and the `char` sum to `record(char)`. Rank is decided by the conversion category, not by apparent nearness."
     },
     {
       "id": "c03-r04",
       "section": "Overloading and overload resolution",
-      "prompt": "What happens when this is compiled and run?",
-      "code": "#include <iostream>\n\nvoid pick(int) { std::cout << \"int\\n\"; }\nvoid pick(long) { std::cout << \"long\\n\"; }\nvoid pick(double) { std::cout << \"double\\n\"; }\n\nint main() {\n    unsigned quantity = 42;\n    pick(quantity);\n}",
+      "prompt": "This arena API was extended with a second capacity unit. Why does the call fail, and would spelling the literal `1024u` fix it?",
+      "code": "#include <cstddef>\n#include <cstdint>\n\nvoid reserve(std::size_t slots);\nvoid reserve(std::int64_t bytes);\n\nvoid warm_up() {\n    reserve(1024);\n}",
       "kind": "no-compile",
-      "explain": "unsigned int to int, to long, and to double are all plain conversions of the same rank. No candidate is better than the others for the sole argument, so the call is ambiguous."
+      "explain": "The argument is an `int`. Reaching `std::size_t` (unsigned 64-bit here) and reaching `std::int64_t` are both integral *conversions*, so the two candidates tie at the same rank and neither is better for any argument: the call is ambiguous. `1024u` does not help — `unsigned int` to `unsigned long` and `unsigned int` to `long` are again both conversions. The tempting reading is that the compiler prefers `std::int64_t` because the literal is signed, or prefers `std::size_t` because the value is nonnegative; overload resolution ranks conversion *sequences*, and signedness of the source is not a tiebreaker. Only an exact match at the call (`reserve(std::size_t{1024})`) or removing one overload resolves it."
     },
     {
       "id": "c03-r05",
       "section": "Defaults, deduced returns, attributes",
-      "prompt": "What does this print?",
-      "code": "#include <iostream>\n\nint sequence = 0;\n\nint next_sequence() {\n    return ++sequence;\n}\n\nvoid report(int value = next_sequence()) {\n    std::cout << value << '\\n';\n}\n\nint main() {\n    report();\n    report();\n}",
+      "prompt": "Trace records get a timestamp unless the caller supplies one. What does this print?",
+      "code": "#include <iostream>\n\nint stamp() {\n    static int clock = 0;\n    return ++clock;\n}\n\nvoid emit(const char* text, int at = stamp()) {\n    std::cout << text << at << ' ';\n}\n\nint main() {\n    emit(\"a\");\n    emit(\"b\", 100);\n    emit(\"c\");\n    std::cout << '\\n';\n}",
       "kind": "value",
       "accept": [
-        "1 2",
-        "1\n2"
+        "a1 b100 c2"
       ],
-      "explain": "The default argument expression is evaluated at each call, not once at the declaration. So the counter advances every time the argument is omitted — a cost and a side effect that are invisible at the call site."
+      "explain": "A default argument is an expression evaluated at each call that omits it, not a value captured when the function was declared. The first call runs `stamp()` and gets 1; the second supplies 100 and never calls `stamp()` at all; the third runs `stamp()` again and gets 2. The tempting reading is `a1 b100 c3`, from assuming the counter advances once per call to `emit`. The visible cost of the default lives at the call site, which is why an expensive default (a string construction, a lookup) is easy to overlook in review."
     },
     {
       "id": "c03-r06",
       "section": "Defaults, deduced returns, attributes",
-      "prompt": "What happens when this is compiled and run?",
-      "code": "#include <iostream>\n\nauto inconsistent(bool use_integer) {\n    if (use_integer) {\n        return 1;\n    }\n    return 1.0;\n}\n\nint main() {\n    std::cout << inconsistent(true) << '\\n';\n}",
+      "prompt": "One of these two functions compiles and one does not. Which, and why does recursion not sink the first one?",
+      "code": "#include <cstddef>\n\nauto run_length(const char* text, std::size_t i) {\n    if (text[i] == '\\0' || text[i] != text[i + 1]) {\n        return 1;\n    }\n    return 1 + run_length(text, i + 1);\n}\n\nauto classify(char c) {\n    if (c >= '0' && c <= '9') {\n        return 0;\n    }\n    return 1.0;\n}",
       "kind": "no-compile",
-      "explain": "Deduced return types must agree exactly across every non-discarded return statement. The first return fixes the type as int; the second deduces double and the definitions conflict. Unlike the conditional operator, deduction does not look for a common arithmetic type."
+      "explain": "`classify` is ill-formed: return-type deduction requires every non-discarded `return` to deduce the *same* type, and `int` and `double` are different. The compiler does not look for a common arithmetic type the way a binary operator would. `run_length` is fine even though it calls itself, because the non-recursive `return 1;` appears first and fixes the deduced type to `int`; the recursive call is then compiled against an already-known return type. The tempting reading is the reverse — that recursion is the problem and mixed arithmetic returns are harmless. Reordering `run_length` so the recursive return came first would break it too."
     },
     {
       "id": "c03-r07",
       "section": "Argument-dependent lookup",
       "prompt": "What does this print?",
-      "code": "#include <iostream>\n\nnamespace trading {\nclass Order {\npublic:\n    Order(int id, double price) : id_(id), price_(price) {}\n\n    friend std::ostream& operator<<(std::ostream& output,\n                                    const Order& order) {\n        return output << order.id_ << '@' << order.price_;\n    }\n\nprivate:\n    int id_;\n    double price_;\n};\n}\n\nint main() {\n    trading::Order order{42, 101.25};\n    std::cout << order << '\\n';\n}",
+      "code": "#include <iostream>\n#include <utility>\n\nnamespace geom {\n\nstruct Point {\n    int x;\n    int y;\n};\n\nvoid swap(Point& a, Point& b) {\n    std::cout << \"geom::swap \";\n    std::swap(a.x, b.x);\n    std::swap(a.y, b.y);\n}\n\n}  // namespace geom\n\nvoid via_qualified(geom::Point& a, geom::Point& b) {\n    std::swap(a, b);\n}\n\nvoid via_adl(geom::Point& a, geom::Point& b) {\n    using std::swap;\n    swap(a, b);\n}\n\nint main() {\n    geom::Point p{1, 2};\n    geom::Point q{3, 4};\n\n    via_qualified(p, q);\n    via_adl(p, q);\n\n    std::cout << p.x << q.x << '\\n';\n}",
       "kind": "value",
       "accept": [
-        "42@101.25"
+        "geom::swap 13"
       ],
-      "explain": "The hidden friend is invisible to ordinary namespace lookup, but ADL adds trading to the candidate search because an argument is a trading::Order. The friend also gets access to the private members it prints."
+      "explain": "The qualified call `std::swap(a, b)` names one function and suppresses argument-dependent lookup entirely, so `geom::swap` is never a candidate and nothing is printed; it still swaps the points, leaving p = {3,4} and q = {1,2}. The unqualified call after `using std::swap` puts the standard template in scope as a fallback while letting ADL add `geom::swap`, which is a non-template exact match and therefore wins — it prints and swaps back, restoring p.x = 1 and q.x = 3. The tempting reading is that `std::swap` and the unqualified `swap` do the same thing because both compile and both swap; only the second is a customization point."
     },
     {
       "id": "c03-r08",
       "section": "UB, unspecified, implementation-defined",
-      "prompt": "What happens when this is compiled and run?",
-      "code": "#include <iostream>\n\nint main() {\n    int levels[4] = {100, 101, 102, 103};\n    std::cout << levels[4] << '\\n';\n}",
+      "prompt": "A report generator picks the longer of two column headers. What is wrong here, and which of the three categories — implementation-defined, unspecified, or undefined — does it fall into?",
+      "code": "#include <iostream>\n#include <string>\n\nconst std::string& wider(const std::string& a, const std::string& b) {\n    return a.size() >= b.size() ? a : b;\n}\n\nint main() {\n    std::string fixed = \"id\";\n    const std::string& widest = wider(fixed, std::string(\"timestamp_micros_utc\"));\n\n    std::cout << widest << '\\n';\n}",
       "kind": "ub",
-      "explain": "Reading one past the end of the array is undefined behaviour — no bounds check exists and nothing is thrown. It usually appears to print whatever adjacent stack bytes hold; ASan reports a stack-buffer-overflow."
+      "explain": "`wider` is not the bug: returning a reference to one of its reference parameters is fine. The bug is at the call. The temporary `std::string(\"timestamp_micros_utc\")` lives only until the end of the full-expression that created it; binding the *returned* reference to `widest` does not extend it, because lifetime extension applies only when a reference is bound directly to a temporary. `widest` therefore dangles on the next line and reading it is undefined behaviour — ASan reports a use-after-free or stack-use-after-scope. The tempting reading is \"the temporary lives as long as the reference that names it\", which is true only for the direct binding `const std::string& s = std::string(...)`. Assigning the result to a `std::string` by value fixes it."
     }
   ],
   "writing": [
     {
       "id": "c03-w01",
       "section": "Declaring, defining, calling functions",
-      "minutes": 6,
-      "prompt": "Write four functions over a small `Order { std::int64_t id; double price; }`: read the price from a copy, observe it without permitting modification, modify the price through the caller's object, and return the mid of two doubles using the trailing-return spelling.",
+      "minutes": 8,
+      "prompt": "Write `parse_uint(text, length, out)`, which converts a run of ASCII digits to a `std::uint32_t`. It must return `false` — leaving `out` untouched — for an empty run, for any non-digit byte, and for a value that would exceed the 32-bit range; it must return `true` and write the result otherwise. Declare it before defining it, and spell the definition with a trailing return type.",
       "checklist": [
-        "By-value parameter for the copy version",
-        "const Order& for the read-only observer",
-        "Order& (non-const) for the mutator",
-        "Trailing return type spelled `auto mid(...) -> double`",
-        "Nothing returns a reference or pointer to a local"
+        "A declaration appears before the definition, and the definition uses the `auto f(...) -> bool` spelling",
+        "The result is delivered through a `std::uint32_t&` out parameter, not a return value",
+        "The accumulator is wider than 32 bits (or the range check happens before the multiply), so the overflow test itself cannot overflow",
+        "Zero length is rejected explicitly",
+        "The digit test rejects anything outside 0-9 rather than relying on the subtraction"
       ],
-      "solution": "#include <cstdint>\n\nstruct Order {\n    std::int64_t id;\n    double price;\n};\n\ndouble read_price(Order order) {        // receives a copy\n    return order.price;\n}\n\ndouble observe_price(const Order& order) {  // aliases, read-only\n    return order.price;\n}\n\nvoid reprice(Order& order, double price) {  // aliases, may modify\n    order.price = price;\n}\n\nauto mid(double bid, double ask) -> double {\n    return (bid + ask) / 2.0;\n}",
-      "notes": "The declaration itself is the documentation: a caller reading `reprice(Order&, double)` knows its object may change, and one reading `observe_price(const Order&)` knows it will not."
+      "solution": "#include <cstddef>\n#include <cstdint>\n\nbool parse_uint(const char* text, std::size_t length, std::uint32_t& out);\n\nauto parse_uint(const char* text, std::size_t length, std::uint32_t& out) -> bool {\n    if (length == 0) {\n        return false;\n    }\n\n    std::uint64_t value = 0;\n    for (std::size_t i = 0; i < length; ++i) {\n        char digit = text[i];\n        if (digit < '0' || digit > '9') {\n            return false;\n        }\n        value = value * 10 + static_cast<std::uint64_t>(digit - '0');\n        if (value > 0xFFFF'FFFFull) {\n            return false;\n        }\n    }\n\n    out = static_cast<std::uint32_t>(value);\n    return true;\n}",
+      "notes": "Accumulating in the destination type and checking afterwards does not work: the wrap has already happened and the evidence is gone. Widening one step and checking each iteration keeps the test meaningful. Leaving `out` untouched on failure means a caller that ignores the return value at least keeps its previous value rather than a half-parsed one."
     },
     {
       "id": "c03-w02",
       "section": "Sequencing and evaluation order",
       "minutes": 5,
-      "prompt": "`publish(next_bid(), next_ask());` where both helpers increment a shared counter. Rewrite it so the sequence numbers are deterministic, and add a comment saying what rule forced the change.",
+      "prompt": "A framing layer calls `send(next_frame_id(), next_frame_id())` and expects the first argument to hold the lower id. Rewrite the call so the order is guaranteed, and add a comment naming which of the three non-portability categories the original falls into and what changed about it in C++17.",
       "checklist": [
-        "Each side effect is computed in its own statement",
-        "The statements run in a defined order before the call",
-        "Comment names unspecified argument evaluation order",
-        "The call itself now takes plain values"
+        "Each call to `next_frame_id()` is hoisted into its own named variable before the call to `send`",
+        "The two variables are initialized in the order the contract requires",
+        "A comment says the original order is *unspecified*, not undefined",
+        "The comment notes that C++17 made the two argument evaluations indeterminately sequenced (no longer undefined behaviour), without fixing which runs first"
       ],
-      "solution": "int sequence = 0;\n\nint next_bid() { return ++sequence; }\nint next_ask() { return ++sequence; }\n\nvoid publish(int bid_sequence, int ask_sequence);\n\nvoid publish_in_order() {\n    // Argument evaluation order is unspecified: the calls do not interleave,\n    // but either may run first, so which argument gets 1 is the compiler's\n    // choice. Statements are sequenced, so compute the effects separately.\n    int bid_sequence = next_bid();\n    int ask_sequence = next_ask();\n    publish(bid_sequence, ask_sequence);\n}",
-      "notes": "Note the precise claim: this is unspecified, not undefined. C++17 guarantees the two calls do not interleave — it just refuses to say which goes first."
+      "solution": "#include <cstdint>\n\nstd::uint64_t next_frame_id();\nvoid send(std::uint64_t first, std::uint64_t second);\n\nvoid send_pair() {\n    // send(next_frame_id(), next_frame_id()) is *unspecified*, not undefined:\n    // since C++17 the two argument evaluations are indeterminately sequenced,\n    // so one finishes before the other starts -- but the implementation, not\n    // the source order, chooses which one runs first.\n    std::uint64_t first = next_frame_id();\n    std::uint64_t second = next_frame_id();\n    send(first, second);\n}",
+      "notes": "Statements are sequenced, so hoisting is the whole fix. Note how little the C++17 change bought here: it removed the undefined behaviour of overlapping side effects but left the choice of order to the implementation, so code that depended on left-to-right was broken before and is still broken."
     },
     {
       "id": "c03-w03",
       "section": "Argument-dependent lookup",
       "minutes": 8,
-      "prompt": "Define a struct Quote in namespace trading with a namespace-scope swap for it, then write a free function that swaps two Quotes using the two-step ADL idiom so a type-specific swap is preferred and std::swap is the fallback.",
+      "prompt": "Give a ring-buffer `Cursor` in namespace `ring` two ADL-visible operations: a hidden-friend stream inserter printing lap and slot, and a namespace-scope `swap`. Then, from an unrelated namespace, write `rotate(Cursor&, Cursor&)` that swaps them and prints both — without naming `ring::` anywhere in the body and without suppressing the customization.",
       "checklist": [
-        "trading::swap takes two non-const lvalue references",
-        "The caller writes `using std::swap;` inside the function body",
-        "The call to swap is unqualified",
-        "A comment explains that std::swap(a, b) would suppress ADL",
-        "trading::swap is found by ADL, not by a using-directive"
+        "The stream inserter is defined inside the class as a `friend`, so ordinary namespace lookup cannot find it",
+        "`ring::swap` is a plain non-template function at namespace scope taking two `Cursor&`",
+        "`rotate` contains `using std::swap;` followed by an *unqualified* `swap(a, b)`",
+        "The stream insertion in `rotate` is likewise unqualified operator syntax",
+        "No `ring::` qualification appears inside the body of `rotate`"
       ],
-      "solution": "#include <utility>\n\nnamespace trading {\nstruct Quote {\n    int bid;\n    int ask;\n};\n\nvoid swap(Quote& left, Quote& right) {\n    std::swap(left.bid, right.bid);\n    std::swap(left.ask, right.ask);\n}\n}\n\nvoid exchange_quotes(trading::Quote& left, trading::Quote& right) {\n    using std::swap;   // fallback for types with no custom swap\n    swap(left, right); // unqualified: ADL can find trading::swap\n}",
-      "notes": "Writing std::swap(left, right) directly would compile and work, but it would silently bypass any type-specific swap — the exact opposite of what a generic algorithm wants."
+      "solution": "#include <iostream>\n#include <utility>\n\nnamespace ring {\n\nstruct Cursor {\n    int lap;\n    int slot;\n\n    friend std::ostream& operator<<(std::ostream& out, const Cursor& c) {\n        return out << c.lap << ':' << c.slot;\n    }\n};\n\nvoid swap(Cursor& a, Cursor& b) {\n    std::swap(a.lap, b.lap);\n    std::swap(a.slot, b.slot);\n}\n\n}  // namespace ring\n\nnamespace app {\n\nvoid rotate(ring::Cursor& a, ring::Cursor& b) {\n    using std::swap;  // fallback for types with no customization\n    swap(a, b);       // unqualified: ADL finds ring::swap\n    std::cout << a << ' ' << b << '\\n';\n}\n\n}  // namespace app",
+      "notes": "The two-step is a protocol, not a style preference: the using-declaration guarantees a candidate exists for every type, and the unqualified call lets ADL supply a better one. Writing `std::swap(a, b)` looks more explicit and quietly opts out of every customization the argument type provides."
     },
     {
       "id": "c03-w04",
       "section": "Function pointers, member pointers, std::invoke",
       "minutes": 8,
-      "prompt": "Given `double mid(double, double)`, declare a pointer to it two ways: directly, and through a type alias. Then call it through the pointer.",
+      "prompt": "Build a table-driven character classifier: an alias for the classifier signature `bool(char)`, three small classifiers (digit, blank, quote), a `constexpr` table holding them, and a `classify(char)` returning the index of the first table entry that accepts the character — or the table size if none does. The table size must be derived from the table itself.",
       "checklist": [
-        "Direct declaration spells `double (*name)(double, double)`",
-        "Alias declared with `using` (not a raw typedef of the wrong shape)",
-        "Both are initialised from the function name, relying on function-to-pointer decay",
-        "The call goes through the pointer"
+        "A type alias names the function-pointer type once (`using Classifier = bool (*)(char);`)",
+        "The table is `constexpr` and its bound is deduced from the initializer",
+        "The size is computed from the array rather than repeated as a literal",
+        "Table entries are called through the pointer without any explicit dereference syntax",
+        "`classify` returns a sentinel equal to the table size for an unclassified character"
       ],
-      "solution": "double mid(double bid, double ask) {\n    return (bid + ask) / 2.0;\n}\n\ndouble (*mid_pointer)(double, double) = mid;\n\nusing PriceFunction = double (*)(double, double);\nPriceFunction same_pointer = mid;\n\ndouble current = mid_pointer(100.0, 102.0);  // 101.0",
-      "notes": "The function name decays to a pointer in the initialiser exactly as an array name decays — `&mid` is equivalent and more explicit. The alias is what makes these storable in containers without unreadable declarations."
+      "solution": "#include <cstddef>\n\nusing Classifier = bool (*)(char);\n\nbool is_digit(char c) {\n    return c >= '0' && c <= '9';\n}\n\nbool is_blank(char c) {\n    return c == ' ' || c == '\\t';\n}\n\nbool is_quote(char c) {\n    return c == '\"' || c == '\\'';\n}\n\nconstexpr Classifier kClassifiers[] = {is_digit, is_blank, is_quote};\nconstexpr std::size_t kClassifierCount =\n    sizeof(kClassifiers) / sizeof(kClassifiers[0]);\n\nstd::size_t classify(char c) {\n    for (std::size_t i = 0; i < kClassifierCount; ++i) {\n        if (kClassifiers[i](c)) {\n            return i;\n        }\n    }\n    return kClassifierCount;\n}",
+      "notes": "A function name decays to a pointer in the initializer, so no `&` is needed, and a pointer to a function is called with ordinary call syntax. The alias is what keeps the table declaration readable — the same declaration written out is `bool (*kClassifiers[])(char)`."
     },
     {
       "id": "c03-w05",
       "section": "Function pointers, member pointers, std::invoke",
       "minutes": 10,
-      "prompt": "For a struct Order with a `double price` member and a `double notional() const` member function, declare a pointer to the data member and a pointer to the member function, then call each — both directly and through std::invoke.",
+      "prompt": "A serializer is handed a field to read and a method to call, both as member pointers. Given `struct Sample { double value; int weight; double weighted() const; };`, write alias declarations for the two member-pointer types and a `report(const Sample&, field, method)` that prints each result twice: once with the raw `.*` syntax and once through `std::invoke`.",
       "checklist": [
-        "Data-member pointer declared as `double Order::*`",
-        "Member-function pointer declared as `double (Order::*)() const` — const included",
-        "Direct member-function call parenthesised: (order.*pmf)()",
-        "std::invoke(pm, order) and std::invoke(pmf, order) for the same operations",
-        "Includes <functional>"
+        "One alias for the data-member pointer (`double Sample::*`) and one for the const member-function pointer",
+        "The data member is read as `sample.*field` and the member function called as `(sample.*method)()`, with the parentheses present",
+        "The `std::invoke` forms pass the object as the first argument after the callable",
+        "`<functional>` is included"
       ],
-      "solution": "#include <functional>\n\nstruct Order {\n    double price;\n    int quantity;\n\n    double notional() const {\n        return price * quantity;\n    }\n};\n\nvoid member_pointer_demo() {\n    Order order{101.5, 200};\n\n    double Order::*price_member = &Order::price;\n    double (Order::*notional_member)() const = &Order::notional;\n\n    double p = order.*price_member;\n    double n = (order.*notional_member)();  // parentheses required\n\n    double p2 = std::invoke(price_member, order);\n    double n2 = std::invoke(notional_member, order);\n\n    (void)p; (void)n; (void)p2; (void)n2;\n}",
-      "notes": "Dropping the const from the member-function pointer type is the usual mistake — it is part of the type, so `double (Order::*)()` will not bind to a const member function."
+      "solution": "#include <functional>\n#include <iostream>\n\nstruct Sample {\n    double value;\n    int weight;\n\n    double weighted() const {\n        return value * weight;\n    }\n};\n\nusing ValueField = double Sample::*;\nusing WeightedMethod = double (Sample::*)() const;\n\nvoid report(const Sample& sample, ValueField field, WeightedMethod method) {\n    std::cout << sample.*field << ' ' << (sample.*method)() << '\\n';\n    std::cout << std::invoke(field, sample) << ' '\n              << std::invoke(method, sample) << '\\n';\n}",
+      "notes": "The parentheses around `sample.*method` are mandatory: the call operator binds tighter than `.*`, so the version without them tries to call `method` first and does not compile. `std::invoke` exists precisely so generic code does not have to branch between these three spellings."
     },
     {
       "id": "c03-w06",
       "section": "Defaults, deduced returns, attributes",
       "minutes": 6,
-      "prompt": "Write a `send_order` returning a bool success flag that the compiler will warn about if a caller ignores it. Add a second function that deliberately discards the result without a warning, and a parameter the function does not use.",
+      "prompt": "An arena exposes `try_reserve(bytes, alignment)`, whose result must never be ignored, and a superseded `reserve(bytes)` that callers should stop using. Write the two declarations with the right standard attributes, plus a caller that consumes the result and takes a diagnostic parameter it does not currently use. Add a comment explaining why the alignment default is a literal rather than a call to a lookup function.",
       "checklist": [
-        "[[nodiscard]] on the returning function",
-        "A deliberate discard uses a cast to void (or otherwise consumes the result)",
-        "[[maybe_unused]] on the intentionally unused parameter",
-        "Attributes are placed on the declaration, before the return type"
+        "`[[nodiscard]]` is on `try_reserve`",
+        "`[[deprecated(\"...\")]]` with a replacement message is on `reserve`",
+        "The unused parameter is marked `[[maybe_unused]]` rather than cast to void",
+        "The caller inspects the return value of `try_reserve`",
+        "A comment states that a default argument is evaluated at every call that omits it"
       ],
-      "solution": "[[nodiscard]] bool send_order(int id, [[maybe_unused]] int retry_budget) {\n    return id > 0;\n}\n\nvoid submit_and_ignore(int id) {\n    // Deliberate: we are draining the queue and do not act on failures here.\n    (void)send_order(id, 3);\n}",
-      "notes": "[[nodiscard]] belongs on results whose omission is probably a bug — error codes above all. Chapter 6 applies it to error values callers must inspect."
+      "solution": "#include <cstddef>\n\n// The alignment default is a literal because a default argument is evaluated\n// on every call that omits it -- a default of default_alignment() would hide a\n// function call at each call site.\n[[nodiscard]] bool try_reserve(std::size_t bytes, std::size_t alignment = 8);\n\n[[deprecated(\"use try_reserve\")]] void reserve(std::size_t bytes);\n\nbool warm_up([[maybe_unused]] std::size_t hint) {\n    if (!try_reserve(4096)) {\n        return false;\n    }\n    return true;\n}",
+      "notes": "`[[nodiscard]]` is a warning, not an error, so it earns its place on results whose omission is nearly always a bug rather than on everything. `[[maybe_unused]]` documents that the parameter is deliberately unused, which survives refactoring better than a `(void)hint;` statement in the body."
     },
     {
       "id": "c03-w07",
       "section": "Calling conventions and parameter passing",
       "minutes": 7,
-      "prompt": "Write the signatures you would use for four argument kinds: an int tick count, a two-double trivial Order, a large read-only object with a std::string member, and a caller-owned object to be modified. One line of comment each, justifying the choice.",
+      "prompt": "Declare four functions and choose the parameter form (`T`, `const T&`, or `T&`) for each, one short comment per parameter justifying the choice: count the fields in a log line held in a `std::string`; add a sample to a `std::vector<int>` histogram in place; measure the width of a two-`double` `Extent`; and compute a backoff from a retry count.",
       "checklist": [
-        "Scalar passed by value",
-        "Small trivially copyable aggregate passed by value",
-        "Large or non-trivial read-only object passed by const T&",
-        "Object to be modified passed by T&",
-        "Comments justify by copy cost / register eligibility, not by taste"
+        "The `std::string` is `const std::string&` — large, read-only, unknown size",
+        "The histogram is `std::vector<int>&` — caller-owned and modified",
+        "The `Extent` is by value — a 16-byte trivially copyable record eligible for register passing",
+        "The retry count is by value",
+        "Each parameter carries a one-line justification, and none of the read-only parameters is `const T` by value"
       ],
-      "solution": "#include <string>\n\nstruct Order {          // two doubles: trivially copyable, 16 bytes\n    double price;\n    double quantity;\n};\n\nstruct Instrument {     // non-trivial member: copy machinery required\n    std::string symbol;\n    double tick_size;\n};\n\n// Scalar: copying costs no more than indirect access.\nvoid set_ticks(int ticks);\n\n// Small trivial aggregate: the ABI can keep both fields in registers.\ndouble notional(Order order);\n\n// Large or non-trivial read-only: avoid the copy.\nbool is_tradable(const Instrument& instrument);\n\n// Caller-owned and modified: the & makes the mutation explicit.\nvoid reprice(Order& order, double price);",
-      "notes": "The 16-byte threshold is SysV x86-64 specific and is a rule of thumb, not a law — the real gate is that the type has no user-defined copy machinery. Measure at the boundaries that matter."
+      "solution": "#include <cstddef>\n#include <string>\n#include <vector>\n\nstruct Extent {\n    double lo;\n    double hi;\n};\n\n// Large, read-only, size unknown to the callee: alias it.\nstd::size_t count_fields(const std::string& line);\n\n// Caller-owned object the callee must modify: the reference says so at the\n// declaration, and the caller sees it at the call.\nvoid add_sample(std::vector<int>& histogram, int value);\n\n// 16 bytes of trivially copyable doubles: SysV x86-64 can pass both fields in\n// registers, so a reference would only add an indirection.\ndouble width(Extent extent);\n\n// Scalar: copying is no more expensive than an indirect access.\nint backoff_ms(int attempts);",
+      "notes": "The 16-byte guidance is an ABI observation, not a language rule; a record of the same size with a `std::string` member has non-trivial copy machinery and travels through an invisible pointer regardless. Measure before promoting a threshold to an interface rule."
     },
     {
       "id": "c03-w08",
       "section": "Value categories",
       "minutes": 6,
-      "prompt": "Write five initialisations that demonstrate reference binding: a non-const lvalue reference to a variable, a const reference to a prvalue, a const reference to a function returning by value, an lvalue reference to a function returning T&, and a commented-out line showing the binding that is rejected.",
+      "prompt": "For a text cursor built on `std::string`, write four initializations that each bind a reference to a different value category: a mutable reference to a named object; a const reference to a prvalue returned by value; a mutable reference to the lvalue produced by a function returning `T&`; and a const reference to the prvalue result of an operator. Then add one commented-out line that does not compile, with a comment naming the rule.",
       "checklist": [
-        "int& binds only to a named variable (an lvalue)",
-        "const int& binds to an arithmetic prvalue",
-        "The commented-out int& binding to a prvalue names why it is rejected",
-        "A function returning T& yields an lvalue expression",
-        "A function returning T yields a prvalue expression"
+        "A `std::string&` bound to a named local",
+        "A `const std::string&` bound to a function call returning by value",
+        "A `std::string&` bound to a call returning `std::string&`",
+        "A `const std::string&` bound to a concatenation expression",
+        "A commented-out `std::string& bad = <prvalue>;` with a comment saying a non-const lvalue reference cannot bind to a prvalue"
       ],
-      "solution": "int make_value();\nint& find_value();\n\nvoid reference_binding_demo() {\n    int quantity = 100;\n\n    int& mutable_view = quantity;             // quantity is an lvalue\n    const int& read_only = quantity + 1;      // quantity + 1 is a prvalue\n    const int& returned_value = make_value(); // returns T: prvalue\n    int& returned_ref = find_value();         // returns T&: lvalue\n\n    // int& bad = quantity + 1;  // error: non-const lvalue ref cannot\n                                 // bind to a prvalue\n\n    mutable_view += 25;\n    (void)read_only; (void)returned_value; (void)returned_ref;\n}",
-      "notes": "Classify the expression, not the declaration. `find_value()` is an lvalue expression because the *return type* is a reference; `make_value()` is a prvalue because it returns an object by value."
+      "solution": "#include <string>\n\nstd::string make_label();     // returns a prvalue\nstd::string& stored_label();  // the call expression is an lvalue\n\nvoid bind_demo() {\n    std::string label = \"cursor\";\n\n    std::string& alias = label;                      // lvalue\n    const std::string& made = make_label();          // prvalue, lifetime extended\n    std::string& existing = stored_label();          // lvalue\n    const std::string& joined = label + \"!\";         // prvalue\n\n    // std::string& bad = label + \"!\";\n    // A non-const lvalue reference cannot bind to a prvalue: the addition\n    // produces a value with no identity, so there is nothing to alias.\n\n    (void)alias;\n    (void)made;\n    (void)existing;\n    (void)joined;\n}",
+      "notes": "Classify the *expression*, not the declared type of what it mentions. `stored_label()` and `make_label()` differ only in return type, and that difference is exactly what decides whether the call expression has identity."
     }
   ]
 }

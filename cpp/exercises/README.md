@@ -86,6 +86,26 @@ Scale to chapter length:
 
 ## Rules
 
+- **Never replay the chapter's own listing.** This is the rule that is easiest
+  to break and hardest to notice. A reading or writing exercise exists to test
+  whether the reader can *apply* the idea somewhere new, not whether they
+  remember the example. Three things make an item genuinely new:
+  - **A different setting.** The chapters lean on one running example (orders,
+    prices, feeds, market data). Put the same concept somewhere else — a ring
+    buffer, a parser, a glyph cache, a schedule, a retry budget.
+  - **Two ideas in collision.** The chapter demonstrates one rule per listing;
+    an exercise should put two together — promotion *inside* a narrowing
+    brace-init, iterator invalidation *during* a range-for, RAII *plus* a
+    constructor that throws. That composition is the transfer step.
+  - **Plausible code with a subtle trap**, rather than a demonstration of the
+    rule. The best items look like code someone would write and defend in
+    review.
+
+  `npm run check:novelty` measures token overlap with the chapter's code blocks
+  and fails above 40%. Treat it as a smoke alarm, not a target: renaming
+  variables lowers the score without making the exercise new, and a chapter
+  about `std::vector` will legitimately mention `push_back`. The real test is
+  whether a reader who just finished the chapter would recognise the snippet.
 - **Answerable from that chapter alone.** No forward references to material a
   reader has not reached.
 - **Cover the chapter proportionally.** Roughly two MCQ per `##` section, more
@@ -107,6 +127,8 @@ Scale to chapter length:
 ```sh
 npm run verify:exercises                       # every book
 npm run verify:exercises cpp/exercises/02-*.json
+npm run check:novelty                          # overlap with the chapter's own code
+node scripts/check-novelty.mjs --list cpp/exercises/02-*.json   # per-item scores
 npm run build                                  # schema check + page generation
 ```
 

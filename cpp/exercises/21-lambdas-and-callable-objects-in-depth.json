@@ -286,146 +286,154 @@
     {
       "id": "c21-r01",
       "section": "Mutable lambdas",
-      "prompt": "What does this print?",
-      "code": "#include <iostream>\n\nint call_copy(auto counter) {\n    return counter();\n}\n\nint main() {\n    auto generator = [sequence = 0]() mutable {\n        return ++sequence;\n    };\n\n    auto first = generator;\n    auto second = generator;\n\n    std::cout << first() << ' ' << second() << ' ';\n    static_cast<void>(call_copy(generator));\n    std::cout << generator() << '\\n';\n}",
+      "prompt": "A sequence generator is handed around through wrappers. What does this print?",
+      "code": "#include <functional>\n#include <iostream>\n\nint main() {\n    std::function<int()> issue = [next = 0]() mutable { return ++next; };\n    auto backup = issue;\n\n    std::cout << issue() << issue() << backup() << ' ';\n\n    auto counter = [next = 0]() mutable { return ++next; };\n    std::function<int()> shared = std::ref(counter);\n    shared();\n    shared();\n\n    std::cout << counter() << '\\n';\n}",
       "kind": "value",
-      "accept": ["1 1 1"],
-      "explain": "Each copy of the closure carries its own `sequence` member, initialised from the original's value of 0. `first` and `second` each increment their own copy to 1, and `call_copy` takes its parameter by value so it mutates a third copy — leaving the original's counter still at 0 until the final call makes it 1. This is exactly why a mutable closure cannot accumulate state across a standard algorithm."
+      "accept": [
+        "121 3"
+      ],
+      "explain": "The first three digits come from the wrapper owning its target: copying a std::function copies the closure inside it, so backup has its own next member starting from the value issue had at the copy (0). issue counts 1 then 2; backup counts 1. The last digit is the escape hatch. std::ref stores a reference_wrapper, which is what gets copied, so both calls through shared and the direct call all reach the same closure object: 1, 2, then 3. Expecting 123 for the first group is the natural reading — it treats std::function as a handle to a callable rather than as a value that owns one, which is exactly the same mistake as expecting a mutable closure to accumulate state across a standard algorithm."
     },
     {
       "id": "c21-r02",
       "section": "Captureless lambdas and function pointers",
-      "prompt": "What happens when this is compiled and run?",
-      "code": "#include <iostream>\n\nstruct Tick {\n    int price;\n};\n\nusing TickCallback = void (*)(const Tick&);\n\nint main() {\n    int fee = 2;\n\n    TickCallback callback = [fee](const Tick& tick) {\n        std::cout << tick.price - fee << '\\n';\n    };\n\n    callback(Tick{101});\n}",
+      "prompt": "A framing layer installs a handler into a plain function-pointer slot. What happens when this is compiled and run?",
+      "code": "#include <iostream>\n\nstruct Frame {\n    int length;\n};\n\nusing Sink = void (*)(const Frame&);\n\nvoid install(Sink sink) {\n    sink(Frame{42});\n}\n\nint main() {\n    constexpr int header_size = 8;\n\n    auto handler = [header_size](const Frame& frame) {\n        std::cout << frame.length - header_size << '\\n';\n    };\n\n    install(handler);\n}",
       "kind": "no-compile",
-      "explain": "A closure with a capture has runtime state, and a function pointer has nowhere to store it, so the implicit conversion to `void (*)(const Tick&)` simply does not exist for this closure type. Remove the capture — or hoist the fee into a namespace-scope constant — and the conversion reappears. A capture of `[&fee]` fails identically: the closure still holds a member."
+      "explain": "The conversion to a function pointer exists only for a lambda with an empty capture list, and this one has a capture list — so the closure type has no conversion operator and the call to install has no viable argument. What makes it worth a second look is that the capture buys nothing: header_size is a constexpr variable used only for its value, so it is not odr-used and needs no capture at all. Delete the capture, leaving [](const Frame& frame), and the body still compiles, the closure is empty, the conversion reappears and install accepts it. The reflex of listing every name the body mentions is what breaks the C-callback wiring here."
     },
     {
       "id": "c21-r03",
       "section": "Init-capture: computed and moved-in state",
-      "prompt": "What happens when this is compiled and run?",
-      "code": "#include <functional>\n#include <iostream>\n#include <vector>\n\nint main() {\n    std::function<int()> callback;\n\n    {\n        std::vector<int> buffer{10, 20, 30};\n        callback = [&buffer] {\n            return buffer.front();\n        };\n    }\n\n    std::cout << callback() << '\\n';\n}",
+      "prompt": "A callback stores only the part of a computed name it needs. What happens when this is compiled and run?",
+      "code": "#include <functional>\n#include <iostream>\n#include <string>\n#include <string_view>\n\nstd::string venue_name() {\n    return std::string(\"EUREX-PRODUCTION-PRIMARY-GATEWAY-0001-EU-CENTRAL\");\n}\n\nint main() {\n    std::function<char()> initial =\n        [name = std::string_view{venue_name()}] { return name.front(); };\n\n    std::cout << initial() << '\\n';\n}",
       "kind": "ub",
-      "explain": "The closure stores a reference to `buffer`, but `buffer` is destroyed when the inner scope ends while the closure outlives it inside `callback`. Invoking it reads a destroyed vector and its freed heap block; ASan reports a use-after-scope or use-after-free. The fix is an init-capture, `[buffer = std::move(buffer)]`, which transfers the allocation into the closure so it owns what it reads."
+      "explain": "An init-capture evaluates its initialiser when the lambda expression is evaluated, and here that initialiser builds a std::string_view over a temporary std::string. The temporary dies at the end of that full-expression; the closure keeps a view onto its freed buffer, and calling it reads deallocated heap memory, which ASan reports as a use-after-free. The tempting reading is that an init-capture owns whatever it stores — it does, but what it stores here is a non-owning view, so the ownership stops one level too early. [name = venue_name()] captures the string itself and is correct; so is capturing only what is actually needed, such as [initial = venue_name().front()]."
     },
     {
       "id": "c21-r04",
       "section": "Capturing `this`",
-      "prompt": "What does this print?",
-      "code": "#include <functional>\n#include <iostream>\n\nstruct Session {\n    int venue = 7;\n\n    std::function<int()> borrowed() {\n        return [this] { return venue; };\n    }\n\n    std::function<int()> snapshot() {\n        return [*this] { return venue; };\n    }\n};\n\nint main() {\n    Session session;\n    auto borrow = session.borrowed();\n    auto snap = session.snapshot();\n\n    session.venue = 99;\n\n    std::cout << borrow() << ' ' << snap() << '\\n';\n}",
+      "prompt": "A throttle hands out two callbacks that both charge against its budget. What does this print?",
+      "code": "#include <functional>\n#include <iostream>\n\nclass Throttle {\npublic:\n    std::function<int()> borrowed() {\n        return [this] { return ++budget_; };\n    }\n\n    std::function<int()> snapshot() {\n        return [*this]() mutable { return ++budget_; };\n    }\n\n    int budget() const { return budget_; }\n\nprivate:\n    int budget_ = 0;\n};\n\nint main() {\n    Throttle throttle;\n    auto borrowed = throttle.borrowed();\n    auto snapshot = throttle.snapshot();\n\n    borrowed();\n    borrowed();\n    snapshot();\n    snapshot();\n\n    std::cout << throttle.budget() << ' ' << snapshot() << '\\n';\n}",
       "kind": "value",
-      "accept": ["99 7"],
-      "explain": "`[this]` stores a pointer, so the callback reads the live object and sees the update to 99. `[*this]` copied the whole Session at capture time, so its callback still reports the snapshot value 7. The invisibility of later changes is not a defect of `[*this]` — it is the semantics you are buying along with independence from the original's lifetime."
+      "accept": [
+        "2 3"
+      ],
+      "explain": "The two closures charge different objects. [this] stores a pointer, so its ++budget_ writes through to the live throttle: two calls leave it at 2. [*this] copied the whole Throttle at capture time — before either call — so its member started at 0 and its three calls take its own copy to 3, leaving the original untouched. Note also why mutable is needed on the second one and not on the first: a closure operator() is const by default, which makes the *members* const, and for [*this] the object is a member. For [this] the member is a pointer, and a const pointer to a non-const Throttle happily allows the write. Reading [*this] as merely a safer [this] is the error the 2 exposes."
     },
     {
       "id": "c21-r05",
       "section": "`constexpr` lambdas",
-      "prompt": "What does this print?",
-      "code": "#include <algorithm>\n#include <array>\n#include <iostream>\n\nconstexpr auto sorted_tick_sizes() {\n    std::array ticks{25, 1, 10, 5};\n    std::sort(ticks.begin(), ticks.end(),\n              [](int left, int right) constexpr {\n                  return left < right;\n              });\n    return ticks;\n}\n\nint main() {\n    constexpr auto tick_sizes = sorted_tick_sizes();\n    static_assert(tick_sizes == std::array{1, 5, 10, 25});\n    std::cout << tick_sizes.front() << ' ' << tick_sizes.back() << '\\n';\n}",
+      "prompt": "A parity table is built by an immediately invoked lambda. What does this print?",
+      "code": "#include <array>\n#include <cstddef>\n#include <cstdint>\n#include <iostream>\n\nconstexpr auto parity_table = [] {\n    std::array<std::uint8_t, 256> table{};\n    for (std::size_t value = 0; value < table.size(); ++value) {\n        std::uint8_t bits = 0;\n        for (std::size_t bit = 0; bit < 8; ++bit) {\n            bits ^= static_cast<std::uint8_t>((value >> bit) & 1U);\n        }\n        table[value] = bits;\n    }\n    return table;\n}();\n\nstatic_assert(parity_table[0] == 0);\nstatic_assert(parity_table[7] == 1);\n\nint main() {\n    std::cout << static_cast<int>(parity_table[255]) << ' '\n              << static_cast<int>(parity_table[254]) << '\\n';\n}",
       "kind": "value",
-      "accept": ["1 25"],
-      "explain": "Initialising a `constexpr` variable is a required constant-evaluation context, so std::sort (constexpr since C++20) runs during translation with the lambda comparator, and the static_assert checks the finished array. The sorted table ships in the program image; no sorting happens at startup or at first use."
+      "accept": [
+        "0 1"
+      ],
+      "explain": "Initialising a constexpr variable is a required constant-evaluation context, so the lambda is invoked during translation and the finished 256-byte table is emitted into read-only data; the static_asserts confirm it before main exists. The values: 255 has eight set bits, so its parity is 0, and 254 has seven, so its parity is 1 — reading these as \"255 is odd, so 1\" confuses the value with the parity of its bit count. The lambda needs no constexpr keyword: a call operator is implicitly constexpr whenever its body qualifies, and writing constexpr explicitly would only turn a body that does not qualify into a diagnostic at the lambda rather than at the use."
     },
     {
       "id": "c21-r06",
       "section": "What a closure weighs",
-      "prompt": "What does this print?",
-      "code": "#include <iostream>\n#include <type_traits>\n\nint main() {\n    int quantity = 10;\n\n    auto empty = [] {};\n    auto by_value = [quantity] { return quantity; };\n    auto by_reference = [&quantity] { return quantity; };\n\n    std::cout << std::boolalpha\n              << (sizeof(empty) == 1) << ' '\n              << (sizeof(by_value) >= sizeof(int)) << ' '\n              << (sizeof(by_reference) == sizeof(void*)) << ' '\n              << std::is_convertible_v<decltype(empty), void (*)()> << ' '\n              << std::is_convertible_v<decltype(by_value), int (*)()>\n              << '\\n';\n}",
+      "prompt": "A dispatch table needs to know what it can do with the closure types it stores. What does this print?",
+      "code": "#include <iostream>\n#include <type_traits>\n\nint main() {\n    int fee = 2;\n\n    auto stateless = [](int price) { return price * 2; };\n    auto stateful = [fee](int price) { return price - fee; };\n\n    std::cout << std::boolalpha\n              << std::is_empty_v<decltype(stateless)> << ' '\n              << std::is_default_constructible_v<decltype(stateless)> << ' '\n              << std::is_copy_assignable_v<decltype(stateless)> << ' '\n              << std::is_copy_constructible_v<decltype(stateful)> << ' '\n              << std::is_copy_assignable_v<decltype(stateful)> << ' '\n              << (sizeof(stateful) >= sizeof(int)) << '\\n';\n}",
       "kind": "value",
-      "accept": ["true true true true false"],
-      "explain": "A captureless closure is an empty class, so its size is the minimum 1 that gives distinct objects distinct addresses, and it converts to a function pointer. The by-value capture is a data member and must be at least as large as an int; the reference capture is represented as a pointer on this ABI. The last answer is the rule that bites in C callback code: once there is state, the function-pointer conversion is gone."
+      "accept": [
+        "true true true true false true"
+      ],
+      "explain": "A captureless closure is an empty class, and since C++20 it is also default-constructible and copy-assignable — which is what lets you store one in a class member or a container element and reassign it. A capturing closure is a different animal: it is copy-constructible (its members are), but its copy assignment operator is deleted, so it can be copied into a new object and never assigned over an existing one. That is the line the last two answers draw, and it is the one that bites when a stateful lambda is put in a std::vector and something calls a resize or a sort that needs assignment. The size answer is a relationship rather than a byte count on purpose: the capture is a data member, so the closure is at least as large as it, but layout is an implementation detail."
     }
   ],
   "writing": [
     {
       "id": "c21-w01",
       "section": "What a closure weighs",
-      "minutes": 7,
-      "prompt": "Write a function that creates four lambdas — captureless, one int by value, two ints by reference, and a large struct by value — and asserts the size relationships between them without hard-coding byte counts beyond the empty case. Comment on which capture makes the closure grow with the referent's size.",
+      "minutes": 10,
+      "prompt": "A queue stores callbacks by value and copies them as it rebalances, and one callback carries a 4 KiB payload. Write two factories returning a callback over that payload: the obvious one, and one whose closure is no larger than two pointers while still owning the payload and never dangling. Assert both size claims with static_asserts on relationships, not byte counts, and note in a comment what the compact version gives up.",
       "checklist": [
-        "A captureless lambda is asserted to have size 1",
-        "The by-value capture is asserted to be at least sizeof(int)",
-        "Each reference capture is asserted to cost about one pointer, not the referent's size",
-        "The large by-value capture is asserted to be at least the captured type's size",
-        "A comment states that a by-value capture is a data member and therefore travels in every copy"
+        "The naive factory captures the payload by value and is asserted to be at least sizeof(payload)",
+        "The compact factory owns the payload indirectly (a unique_ptr or shared_ptr moved in by init-capture)",
+        "A static_assert bounds the compact closure by a small multiple of sizeof(void*)",
+        "No reference to a caller-owned local is captured in either version",
+        "A comment names what the compact version costs: an indirection per call, and move-only-ness if a unique_ptr is used"
       ],
-      "solution": "#include <array>\n#include <cstddef>\n\nstruct MarketSnapshot {\n    std::array<std::byte, 64> bytes;\n};\n\nvoid closure_sizes() {\n    int quantity = 10;\n    int price = 101;\n    MarketSnapshot snapshot{};\n\n    auto empty = [] {};\n    auto one_int = [quantity] { return quantity; };\n    auto two_refs = [&quantity, &price] { return quantity * price; };\n    auto full_snapshot = [snapshot] { return snapshot.bytes[0]; };\n\n    static_assert(sizeof(empty) == 1);\n    static_assert(sizeof(one_int) >= sizeof(int));\n    static_assert(sizeof(two_refs) <= 2 * sizeof(void*));\n\n    // A by-value capture is a data member: the snapshot's 64 bytes travel in\n    // every copy of the closure. A reference capture stays pointer-sized no\n    // matter how large the referent is - and dangles just as easily.\n    static_assert(sizeof(full_snapshot) >= sizeof(MarketSnapshot));\n}",
-      "notes": "Closure member order, padding, and the representation of reference captures are implementation details, so assert relationships rather than exact byte counts unless you are documenting one target ABI on purpose. On a typical 64-bit ABI these come out as 1, 4, 16, and 64."
+      "solution": "#include <array>\n#include <cstddef>\n#include <memory>\n#include <utility>\n\nstruct Payload {\n    std::array<std::byte, 4096> bytes;\n};\n\n// Every by-value capture is a data member, so this closure IS the payload:\n// the queue copies 4 KiB on every rebalance.\nauto make_naive(Payload payload) {\n    return [payload] { return payload.bytes[0]; };\n}\n\n// The closure owns the payload just as firmly, but stores one pointer to it.\n// Cost: one indirection per call, and the closure is now move-only, so the\n// queue must accept move-only callables (std::move_only_function, not\n// std::function).\nauto make_compact(std::unique_ptr<Payload> payload) {\n    return [payload = std::move(payload)] { return payload->bytes[0]; };\n}\n\n// Copyable variant when the queue insists on copyable targets: the copy is a\n// refcount bump, not 4 KiB.\nauto make_shared_compact(std::shared_ptr<Payload> payload) {\n    return [payload = std::move(payload)] { return payload->bytes[0]; };\n}\n\nstatic_assert(sizeof(decltype(make_naive(Payload{}))) >= sizeof(Payload));\nstatic_assert(sizeof(decltype(make_compact(nullptr))) <= sizeof(void*));\nstatic_assert(sizeof(decltype(make_shared_compact(nullptr)))\n              <= 2 * sizeof(void*));",
+      "notes": "Capturing a reference to the payload would also make the closure pointer-sized and would be wrong for a queued callback: the closure outlives the factory call, so it needs ownership, not a borrow. The size of a closure is worth reasoning about precisely because wrappers copy it — an over-large target is also what pushes a std::function past its small-buffer threshold and into an allocation."
     },
     {
       "id": "c21-w02",
       "section": "Captureless lambdas and function pointers",
-      "minutes": 8,
-      "prompt": "Write a C-style callback registration: a `void (*)(const Tick&)` typedef, a `register_tick_callback` taking one, and installation of a captureless lambda using unary `+`. Then add a commented-out stateful version and a comment explaining why it cannot compile and what to do instead.",
+      "minutes": 10,
+      "prompt": "Build a constant dispatch table for a tiny opcode interpreter: an array of plain function pointers indexed by an opcode, populated from lambdas, usable as a compile-time constant. Then wire a handler into a C API whose callback slot is `void (*)(void*, int)` and which carries state only through a `void*` user-data pointer. State in a comment why neither part may capture.",
       "checklist": [
-        "A function-pointer typedef with the exact callback signature",
-        "A captureless lambda installed through the implicit conversion",
-        "Unary + used, with a comment saying it forces the conversion",
-        "A commented-out capturing version with a comment naming the reason it fails",
-        "The suggested workaround stores the state somewhere the captureless lambda can reach (e.g. a namespace-scope constant or a context pointer parameter)"
+        "The table is an array of function-pointer type and is declared constexpr",
+        "Each entry is a captureless lambda relying on (or forced into) the function-pointer conversion",
+        "A dispatch function indexes the table with an opcode and calls through it",
+        "The C-API handler is captureless and recovers its state by casting the void* user data",
+        "A comment states that any capture removes the conversion, and that the void* context is how a C API carries state instead"
       ],
-      "solution": "#include <iostream>\n\nstruct Tick {\n    int price;\n};\n\nusing TickCallback = void (*)(const Tick&);\n\nvoid register_tick_callback(TickCallback callback) {\n    callback(Tick{101});\n}\n\nnamespace {\nconstexpr int fee = 2;\n}\n\nvoid install_callback() {\n    auto handler = [](const Tick& tick) {\n        std::cout << tick.price - fee << '\\n';\n    };\n\n    static_assert(sizeof(handler) == 1);\n\n    // Unary + has no overload for a closure type, so the compiler applies the\n    // implicit function-pointer conversion. Without it, a function template on\n    // the other side could deduce the unique closure type instead.\n    register_tick_callback(+handler);\n}\n\n// void install_fee_callback(int fee) {\n//     TickCallback callback = [fee](const Tick& tick) {   // no conversion\n//         std::cout << tick.price - fee << '\\n';\n//     };\n//     register_tick_callback(callback);\n// }\n// A captured fee is a closure data member, and a function pointer has nowhere\n// to store it. Real C APIs solve this with a void* context parameter passed\n// alongside the callback.",
-      "notes": "The void*-context shape is worth knowing because it is what every C callback API does: the captureless lambda becomes a trampoline that casts the context back to your type and calls into it. That is also, almost exactly, the FunctionRef sketch later in this chapter."
+      "solution": "#include <array>\n#include <cstddef>\n\nstruct Machine {\n    int accumulator = 0;\n};\n\nusing Instruction = void (*)(Machine&, int);\n\n// Captureless lambdas convert to plain function pointers, and that conversion\n// is usable in a constant expression - so the whole table is built at compile\n// time and lives in read-only data. Unary + forces the conversion so the\n// array's element type is deduced from the pointer, not from a closure type.\nconstexpr std::array<Instruction, 3> instructions{\n    +[](Machine& machine, int operand) { machine.accumulator += operand; },\n    +[](Machine& machine, int operand) { machine.accumulator *= operand; },\n    +[](Machine& machine, int) { machine.accumulator = 0; },\n};\n\nvoid step(Machine& machine, std::size_t opcode, int operand) {\n    instructions[opcode](machine, operand);\n}\n\n// A C callback slot has room for a pointer to code and a pointer to data, and\n// nothing else. A capturing lambda has state to store and therefore no\n// conversion; the captureless trampoline below carries its state through the\n// slot the API already provides.\nextern \"C\" void register_sink(void (*sink)(void*, int), void* user_data);\n\nvoid install(Machine& machine) {\n    register_sink(\n        [](void* user_data, int value) {\n            static_cast<Machine*>(user_data)->accumulator += value;\n        },\n        &machine);\n}",
+      "notes": "The trampoline plus context pointer is the shape every C callback API uses, and it is almost exactly the FunctionRef sketch later in this chapter: an erased invoker that casts a void* back to a concrete type. The lifetime obligation moves with it — register_sink must not outlive the machine, and nothing in the type system says so."
     },
     {
       "id": "c21-w03",
       "section": "Init-capture: computed and moved-in state",
       "minutes": 10,
-      "prompt": "Write two versions of a function that queues a callback over a locally built `std::vector<Order>`: the broken one that captures the buffer by reference, and the correct one using an init-capture that moves it in. Comment on what is true of the original buffer afterwards.",
+      "prompt": "Write a factory that returns a callback for a queue, given a large batch of records and a long configuration string. Requirements: the returned closure must remain valid after the factory returns; the batch must be transferred rather than copied; only the one number the callback needs from the configuration string may be stored, not the string; and the callback must be storable in a `std::function`. Add a comment stating what is true of the caller's batch afterwards.",
       "checklist": [
-        "The broken version captures by reference and is marked as UB when invoked later",
-        "The correct version uses `[orders = std::move(buffer)]`",
-        "The correct closure reads only its own member, not the enclosing local",
-        "A comment states the source is valid but moved-from after the capture",
-        "A comment notes that moving in fixes the source's lifetime but not the closure's copy cost"
+        "The batch is moved into the closure with an init-capture",
+        "A computed init-capture stores a summary of the configuration string rather than the string",
+        "Nothing in the closure refers to a local of the factory or to a parameter by reference",
+        "A comment states that the moved-from source is valid but unspecified",
+        "The returned closure is stored in (or returned as) a std::function, so it must be copyable"
       ],
-      "solution": "#include <functional>\n#include <utility>\n#include <vector>\n\nstruct Order {\n    int id;\n};\n\nvoid post(std::function<void()> callback);\nvoid send(const std::vector<Order>& orders);\n\nvoid queue_orders_badly() {\n    std::vector<Order> buffer{{1}, {2}};\n\n    post([&buffer] {\n        send(buffer);   // UB when invoked later: buffer is already dead\n    });\n}\n\nvoid queue_orders() {\n    std::vector<Order> buffer{{1}, {2}};\n\n    // Init-capture (C++14): a new closure member initialised by moving, so the\n    // vector's allocation transfers into the closure and the closure owns it.\n    post([orders = std::move(buffer)] {\n        send(orders);\n    });\n\n    // buffer is valid but moved-from here: it may be queried, assigned to, or\n    // destroyed, and nothing else.\n\n    // Note: owning the buffer fixes the *source's* lifetime, not copy cost.\n    // Passing this closure by value would duplicate the whole vector.\n}",
-      "notes": "The declaration `post(std::function<void()>)` is itself a hint: the wrapper owns a copy of the closure, so an over-SBO closure means an allocation at every post. On a hot path prefer a template parameter or a measured non-owning view."
+      "solution": "#include <cstddef>\n#include <functional>\n#include <string>\n#include <utility>\n#include <vector>\n\nstruct Record {\n    int id;\n};\n\nstd::size_t flush(const std::vector<Record>& records, std::size_t prefix_length);\n\nstd::function<std::size_t()> make_flusher(std::vector<Record> batch,\n                                          const std::string& venue) {\n    return [records = std::move(batch),          // allocation transfers in\n            prefix_length = venue.size()] {      // stores 8 bytes, not the string\n        return flush(records, prefix_length);\n    };\n}\n\nstd::function<std::size_t()> broken_flusher(std::vector<Record> batch,\n                                            const std::string& venue) {\n    // Both captures are borrows of objects that die when this function\n    // returns: batch is a by-value parameter and venue is bound to whatever\n    // the caller passed. Invoking the callback later is undefined behaviour.\n    return [&batch, &venue] { return flush(batch, venue.size()); };\n}\n\nstd::function<std::size_t()> use() {\n    std::vector<Record> batch{{1}, {2}, {3}};\n    auto flusher = make_flusher(std::move(batch), \"EUREX-PRIMARY\");\n    // batch is valid but unspecified here: it may be assigned to, queried or\n    // destroyed, and nothing else should be assumed about it.\n    return flusher;\n}",
+      "notes": "Moving into the closure fixes the source's lifetime, not the closure's copy cost: this closure holds a vector, so every copy of the std::function copies the whole batch, and an over-SBO target allocates on top of that. A queue that only ever moves its callbacks can take std::move_only_function instead and skip both."
     },
     {
       "id": "c21-w04",
       "section": "Capturing `this`",
-      "minutes": 10,
-      "prompt": "Write a class with three registration methods that post a callback to an event loop: one capturing `[this]`, one capturing `[*this]`, and one capturing a `std::weak_ptr` to itself. Comment each with its lifetime precondition and when you would choose it.",
+      "minutes": 12,
+      "prompt": "A reconciler schedules work on a timer that may fire after the reconciler is gone. Write three scheduling methods on it — one that borrows the object, one that snapshots it, one that observes it weakly and does nothing if it has been destroyed — and for each state the precondition it imposes on the caller, its copy cost, and its failure mode if the precondition is broken. Do not use a capture default anywhere.",
       "checklist": [
-        "The [this] version documents that the object must outlive every invocation",
-        "The [*this] version copies the object and is explicitly independent of the original",
-        "The weak version calls lock() and skips its work when the lock fails",
-        "No capture default ([=] or [&]) is used for the object pointer",
-        "Comments name the choice criterion for each, not just the mechanism"
+        "The borrowing version captures `this` explicitly and documents that the object must outlive every invocation",
+        "The snapshot version uses `[*this]` and notes that later changes to the original are invisible",
+        "The weak version locks a weak_ptr and skips its work when the lock fails",
+        "No `[=]` or `[&]` capture default appears anywhere",
+        "Each comment names a precondition, a cost and a failure mode, not just the mechanism"
       ],
-      "solution": "#include <functional>\n#include <memory>\n\nclass EventLoop {\npublic:\n    void post(std::function<void()> callback);\n};\n\nclass ExchangeSession : public std::enable_shared_from_this<ExchangeSession> {\npublic:\n    explicit ExchangeSession(int venue) : venue_(venue) {}\n\n    // Precondition: this session outlives every invocation the loop will make.\n    // Choose when the callback is synchronous or the ownership is obvious.\n    void register_borrowed(EventLoop& loop) {\n        loop.post([this] { on_fill(42); });\n    }\n\n    // Copies the whole session at capture time. Independent of the original's\n    // lifetime, and deliberately blind to later changes. Choose for an\n    // immutable delayed snapshot of a small object.\n    void register_snapshot(EventLoop& loop) {\n        loop.post([*this] { on_fill(42); });\n    }\n\n    // Observes without owning; the work is skipped if the session is gone.\n    // Choose when lifetime is dynamic and cancellation is acceptable.\n    void register_guarded(EventLoop& loop) {\n        loop.post([weak = weak_from_this()] {\n            if (auto owner = weak.lock()) {\n                owner->on_fill(42);\n            }\n        });\n    }\n\nprivate:\n    void on_fill(int order_id) const;\n    int venue_;\n};",
-      "notes": "Write `this` explicitly rather than relying on a capture default: implicit this-capture through `[=]` is deprecated since C++20 precisely because `[=] { return member_; }` reads like a copy and is a borrow. Review the capture list the way you review a class's data members."
+      "solution": "#include <functional>\n#include <memory>\n\nclass Timer {\npublic:\n    void after(int millis, std::function<void()> callback);\n};\n\nclass Reconciler : public std::enable_shared_from_this<Reconciler> {\npublic:\n    // Precondition: the reconciler outlives every callback the timer will run.\n    // Cost: one pointer in the closure. Failure mode: silent use-after-free\n    // inside the timer thread, with no diagnostic anywhere near this line.\n    void schedule_borrowed(Timer& timer) {\n        timer.after(10, [this] { sweep(pending_); });\n    }\n\n    // Precondition: none - the callback is independent of the original.\n    // Cost: a full copy of the reconciler in every scheduled callback.\n    // Failure mode: not a crash but a stale answer, because updates made after\n    // scheduling are invisible to the snapshot.\n    void schedule_snapshot(Timer& timer) {\n        timer.after(10, [*this] { sweep(pending_); });\n    }\n\n    // Precondition: the reconciler is owned by a shared_ptr.\n    // Cost: a weak handle plus a lock() per invocation.\n    // Failure mode: the work is skipped rather than performed, so this is only\n    // correct when cancellation is an acceptable outcome.\n    void schedule_guarded(Timer& timer) {\n        timer.after(10, [weak = weak_from_this()] {\n            if (auto self = weak.lock()) {\n                self->sweep(self->pending_);\n            }\n        });\n    }\n\nprivate:\n    void sweep(int pending) const;\n    int pending_ = 0;\n};",
+      "notes": "Naming this explicitly matters because `[=] { return pending_; }` reads like a copy and is a borrow: the entity captured is this, not the member. Implicit this capture through a by-copy default has been deprecated since C++20 for exactly that reason. Review a capture list the way you review a class's data members — each entry is an ownership decision with a deadline."
     },
     {
       "id": "c21-w05",
       "section": "Mutable lambdas",
-      "minutes": 8,
-      "prompt": "Write a sequence generator as a mutable lambda with an init-captured counter, then demonstrate in the same function that copying it duplicates the state. Add a correct alternative that accumulates shared state across copies, and comment on why the first form cannot be used with a standard algorithm that copies its callable.",
+      "minutes": 10,
+      "prompt": "Fill a vector with 1..N using `std::generate`. The requirement is that the result must be correct even if the algorithm copies its callable — which it is permitted to do — so a mutable counting closure is not acceptable. Give two implementations that satisfy it, state the lifetime obligation each one creates, and leave the broken version in as a commented-out line with the reason.",
       "checklist": [
-        "The generator uses an init-capture and is marked mutable",
-        "Two copies are shown each producing the same first value",
-        "The shared-state alternative keeps the counter outside the closure",
-        "The alternative captures that state by reference (or via std::ref) with a stated lifetime",
-        "A comment names algorithm copying as the reason the mutable form is unreliable"
+        "A commented-out mutable-closure version is present and identified as unreliable because algorithms may copy the callable",
+        "One correct version keeps the counter outside the closure and captures it by reference",
+        "A second correct version passes a named function object through std::ref",
+        "A comment states the lifetime obligation the reference or std::ref creates",
+        "The counter is observable after the call in at least one version, showing the state really accumulated"
       ],
-      "solution": "#include <iostream>\n\nvoid generators() {\n    auto generator = [sequence = 0]() mutable {\n        return ++sequence;\n    };\n\n    auto first = generator;\n    auto second = generator;\n\n    // Each copy carries its own `sequence` member, so both print 1: standard\n    // algorithms are permitted to copy their callable, and the accumulated\n    // state can end up in a copy you never see.\n    std::cout << first() << ' ' << second() << '\\n';\n\n    // Shared state lives outside the closure. The closure borrows it, so\n    // `shared` must outlive every invocation - here, the rest of this scope.\n    int shared = 0;\n    auto counted = [&shared] {\n        return ++shared;\n    };\n\n    counted();\n    auto counted_copy = counted;\n    counted_copy();\n\n    std::cout << shared << '\\n';   // 2: both closures updated the same object\n}",
-      "notes": "The third option is std::ref around a named function object, which gives the wrapper a reference_wrapper to copy instead of the object itself. Use it when identity matters and the state cannot reasonably be hoisted out of the callable."
+      "solution": "#include <algorithm>\n#include <cstddef>\n#include <functional>\n#include <vector>\n\nstd::vector<int> sequence_by_reference(std::size_t count) {\n    std::vector<int> values(count);\n\n    // std::generate(values.begin(), values.end(),\n    //               [next = 0]() mutable { return ++next; });\n    // Unreliable: each copy of the closure carries its own next member, so\n    // the accumulated state may end up in a copy the algorithm discards.\n\n    // The state lives outside the closure, so every copy of the closure\n    // updates the same object. Obligation: next must outlive the call -\n    // trivially true here, and not at all trivial if the closure were stored.\n    int next = 0;\n    std::generate(values.begin(), values.end(), [&next] { return ++next; });\n\n    return values;\n}\n\nstruct Counter {\n    int next = 0;\n    int operator()() { return ++next; }\n};\n\nstd::vector<int> sequence_by_ref_wrapper(std::size_t count, Counter& counter) {\n    std::vector<int> values(count);\n\n    // std::ref hands the algorithm a reference_wrapper: copying that copies\n    // the handle, not the counter, so identity survives. Obligation: the\n    // caller's Counter must outlive the algorithm call.\n    std::generate(values.begin(), values.end(), std::ref(counter));\n\n    // counter.next now reports how many values were produced.\n    return values;\n}",
+      "notes": "The rule generalises past std::generate: any interface that takes a callable by value may copy it, so per-closure state is per-copy state. Use a mutable closure when the state is genuinely local to one closure object — a generator you call yourself — and hoist it out or wrap it in std::ref the moment identity matters to the caller."
     },
     {
       "id": "c21-w06",
       "section": "Callable wrappers: the cost of type erasure",
-      "minutes": 12,
-      "prompt": "Write a non-owning `FunctionRef` for the signature `int(int)`: a void* to the callable plus an erased invoker function pointer, constructible from any lvalue callable. Then write one function taking a template callable and one taking a FunctionRef, and comment on the cost and lifetime differences between those and std::function.",
+      "minutes": 14,
+      "prompt": "A tick processor has three places that accept a callable: an inner loop over a span of ticks, a boundary function compiled in one translation unit that must not be a template, and a registry that keeps handlers configured at startup. Choose a different mechanism for each so that the inner loop can inline, the boundary allocates nothing, and the registry can hold heterogeneous handlers. Implement all three and comment each with its call cost, its ownership, and its lifetime obligation.",
       "checklist": [
-        "FunctionRef stores exactly a void* and a function pointer — no allocation, no ownership",
-        "The invoker is a captureless lambda that casts the void* back to the concrete type",
-        "A template-parameter version is shown alongside the erased version",
-        "Comments state that the template version can inline while the erased one is an indirect call",
-        "A comment names the lifetime rule: the referenced callable must outlive the view"
+        "The inner loop takes the callable as a deduced template parameter",
+        "The boundary takes a non-owning view holding exactly a void* and an invoker function pointer",
+        "The registry stores owning wrappers in a container",
+        "Comments name the call cost for each (inlineable, indirect, erased indirect plus possible allocation)",
+        "A comment states the view's lifetime obligation: the referenced callable must outlive every call through it"
       ],
-      "solution": "#include <iostream>\n\nclass FunctionRef {\npublic:\n    template<class F>\n    FunctionRef(F& function) noexcept\n        : object_(&function),\n          invoke_([](void* object, int value) {\n              return (*static_cast<F*>(object))(value);\n          }) {}\n\n    int operator()(int value) const {\n        return invoke_(object_, value);\n    }\n\nprivate:\n    void* object_;\n    int (*invoke_)(void*, int);\n};\n\n// Concrete closure type preserved: the call usually inlines and constants\n// propagate. Cost: one instantiation per callable type, definition in header.\ntemplate<class Handler>\nint apply_template(int value, Handler handler) {\n    return handler(value);\n}\n\n// Erased: one non-template implementation, but the call goes through an\n// opaque invoker the optimizer normally cannot see past. Owns nothing and\n// allocates nothing - the referenced callable must outlive every call.\nint apply_ref(int value, FunctionRef handler) {\n    return handler(value);\n}\n\nint main() {\n    int bias = 1;\n    auto add_bias = [bias](int value) { return value + bias; };\n\n    std::cout << apply_template(41, add_bias) << ' '\n              << apply_ref(41, add_bias) << '\\n';\n}",
-      "notes": "std::function differs from both: it owns a copy of the target, requires it to be copyable, and allocates when the target misses the implementation's small-buffer criteria — with a fresh allocation on every copy of a heap-backed wrapper. Keep that construction off the tick path; C++26's std::function_ref standardizes the view above."
+      "solution": "#include <cstddef>\n#include <functional>\n#include <span>\n#include <utility>\n#include <vector>\n\nstruct Tick {\n    int price;\n};\n\n// Inner loop. The concrete closure type is preserved, so the call usually\n// inlines and constants propagate into the loop. Owns nothing; the caller\n// keeps the callable alive for the duration of the call. Cost: one emitted\n// specialization per callable type, and the definition must be in the header.\ntemplate<class Handler>\nvoid for_each_tick(std::span<const Tick> ticks, Handler&& handler) {\n    for (const Tick& tick : ticks) {\n        handler(tick);\n    }\n}\n\n// Non-owning view: erases the call operation only. Two pointers, no\n// allocation, an indirect call the optimizer normally cannot see through.\n// Lifetime obligation: the referenced callable must outlive every call made\n// through the view - the same discipline a std::string_view demands.\nclass TickRef {\npublic:\n    template<class F>\n    TickRef(F& callable) noexcept\n        : object_(&callable),\n          invoke_([](void* object, const Tick& tick) {\n              (*static_cast<F*>(object))(tick);\n          }) {}\n\n    void operator()(const Tick& tick) const { invoke_(object_, tick); }\n\nprivate:\n    void* object_;\n    void (*invoke_)(void*, const Tick&);\n};\n\n// Boundary: one non-template implementation, compiled once, header free of\n// template definitions.\nvoid replay(std::span<const Tick> ticks, TickRef handler);\n\n// Registry: owns a copy of each handler, so the callables may be temporaries\n// at the call site. Cost: an erased indirect call plus an allocation whenever\n// a target misses the implementation's small-buffer criteria - acceptable on\n// a configuration path, not in the loop above.\nclass Registry {\npublic:\n    void add(std::function<void(const Tick&)> handler) {\n        handlers_.push_back(std::move(handler));\n    }\n\n    void broadcast(const Tick& tick) const {\n        for (const auto& handler : handlers_) {\n            handler(tick);\n        }\n    }\n\nprivate:\n    std::vector<std::function<void(const Tick&)>> handlers_;\n};",
+      "notes": "The three mechanisms differ on two independent axes — who owns the callable, and whether the call site knows its type — and picking one is really answering those two questions. Copying a heap-backed std::function allocates again, which is why building one inside a loop is a per-iteration allocation; a move-only target needs std::move_only_function (C++23), and C++26 standardises the view above as std::function_ref."
     }
   ]
 }

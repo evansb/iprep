@@ -287,61 +287,61 @@
       "id": "c05-r01",
       "section": "Construction and destruction order",
       "prompt": "What does this print?",
-      "code": "#include <iostream>\n\nstruct Base {\n    Base() { std::cout << \"Base+ \"; }\n    ~Base() { std::cout << \"Base- \"; }\n};\n\nstruct M1 {\n    M1() { std::cout << \"M1+ \"; }\n    ~M1() { std::cout << \"M1- \"; }\n};\n\nstruct M2 {\n    M2() { std::cout << \"M2+ \"; }\n    ~M2() { std::cout << \"M2- \"; }\n};\n\nstruct Derived : Base {\n    Derived() { std::cout << \"Derived+ \"; }\n    ~Derived() { std::cout << \"Derived- \"; }\n\n    M1 first;\n    M2 second;\n};\n\nint main() {\n    Derived value;\n    std::cout << \"| \";\n}",
+      "code": "#include <iostream>\n\nint stamp() {\n    static int clock = 0;\n    return ++clock;\n}\n\nstruct Phase {\n    int begin_ = stamp();\n    int end_ = 0;\n\n    ~Phase() {\n        end_ = stamp();\n        std::cout << begin_ << '-' << end_ << ' ';\n    }\n};\n\nstruct Pipeline {\n    Phase decode_;\n    Phase render_;\n\n    Pipeline() { std::cout << \"| \"; }\n    ~Pipeline() { std::cout << \"] \"; }\n};\n\nint main() {\n    {\n        Pipeline p;\n    }\n    Phase tail;\n}",
       "kind": "value",
       "accept": [
-        "Base+ M1+ M2+ Derived+ | Derived- M2- M1- Base-"
+        "| ] 2-3 1-4 5-6"
       ],
-      "explain": "Construction goes bases, then members in declaration order, then the constructor body. Destruction is the exact reverse: body, members in reverse declaration order, then bases. Note that Derived's own body runs last on the way in and first on the way out — the sequence is not simply 'members, then everything else'."
+      "explain": "Nothing prints during construction of the members, but the stamps are already fixed: default member initializers run in declaration order, so decode_ takes 1 and render_ takes 2, and only then does Pipeline's body print \"| \". Teardown is the exact reverse: the destructor body prints \"] \" first, then members go in reverse declaration order, so render_ (2-3) is reported before decode_ (1-4). The tempting reading is that decode_, having been built first, is also reported first — reverse order is precisely what lets a later member depend on an earlier one. The final 5-6 comes from `tail`, whose static counter is shared: a function-local static is initialized once, on first use, and every later call sees the same `clock`."
     },
     {
       "id": "c05-r02",
       "section": "The initialization zoo",
       "prompt": "What does this print?",
-      "code": "#include <iostream>\n#include <vector>\n\nint main() {\n    std::vector<int> repeated(3, 5);\n    std::vector<int> elements{3, 5};\n\n    std::cout << repeated.size() << ':';\n    for (int value : repeated) {\n        std::cout << ' ' << value;\n    }\n    std::cout << '\\n';\n\n    std::cout << elements.size() << ':';\n    for (int value : elements) {\n        std::cout << ' ' << value;\n    }\n    std::cout << '\\n';\n}",
+      "code": "#include <cstddef>\n#include <initializer_list>\n#include <iostream>\n#include <vector>\n\nstruct Grid {\n    Grid(int rows, int cols)\n        : cells(static_cast<std::size_t>(rows * cols), 0), tag('p') {}\n\n    Grid(std::initializer_list<int> sizes) : cells(sizes), tag('b') {}\n\n    std::vector<int> cells;\n    char tag;\n};\n\nint main() {\n    Grid paren(2, 3);\n    Grid braced{2, 3};\n    Grid copied = {2, 3};\n\n    std::cout << paren.tag << paren.cells.size() << ' '\n              << braced.tag << braced.cells.size() << ' '\n              << copied.tag << copied.cells.size() << '\\n';\n}",
       "kind": "value",
       "accept": [
-        "3: 5 5 5 2: 3 5"
+        "p6 b2 b2"
       ],
-      "explain": "Parentheses select the (count, value) constructor: three copies of 5. Braces prefer the std::initializer_list constructor, so the same two numbers become the elements 3 and 5. Braces are a good default, but for a type with an initializer_list constructor they are not interchangeable with parentheses — check the overloads before converting existing code."
+      "explain": "Parentheses run ordinary overload resolution and pick the (rows, cols) constructor: a 2x3 grid of six cells. Braces prefer an initializer_list constructor whenever one is viable, so `braced` is built from the two-element list {2, 3} and holds two cells. `copied` is copy-list-initialization, which is still list-initialization: the same initializer_list constructor wins, and only an explicit constructor would have been excluded. The tempting reading is that `{2, 3}` and `(2, 3)` differ only in punctuation and select the same constructor — that holds for types without an initializer_list constructor, and fails exactly here."
     },
     {
       "id": "c05-r03",
       "section": "Initialization versus assignment in constructors",
       "prompt": "What does this print?",
-      "code": "#include <iostream>\n#include <string>\n\nclass TracedSymbol {\npublic:\n    TracedSymbol() { std::cout << \"default \"; }\n\n    explicit TracedSymbol(const std::string& value) : value_(value) {\n        std::cout << \"construct \";\n    }\n\n    TracedSymbol& operator=(const std::string& value) {\n        value_ = value;\n        std::cout << \"assign \";\n        return *this;\n    }\n\nprivate:\n    std::string value_;\n};\n\nstruct GoodOrder {\n    explicit GoodOrder(const std::string& s) : symbol_(s) {}\n    TracedSymbol symbol_;\n};\n\nstruct WastefulOrder {\n    explicit WastefulOrder(const std::string& s) { symbol_ = s; }\n    TracedSymbol symbol_;\n};\n\nint main() {\n    GoodOrder good{\"AAPL\"};\n    std::cout << \"| \";\n    WastefulOrder bad{\"MSFT\"};\n    std::cout << '\\n';\n}",
+      "code": "#include <iostream>\n#include <string>\n\nint defaults = 0;\nint converts = 0;\nint assigns = 0;\n\nclass Label {\npublic:\n    Label() { ++defaults; }\n    Label(const char* text) : text_(text) { ++converts; }\n\n    Label& operator=(const char* text) {\n        text_ = text;\n        ++assigns;\n        return *this;\n    }\n\nprivate:\n    std::string text_;\n};\n\nclass Node {\npublic:\n    Node(const char* op, const char* lhs, const char* rhs) : op_(op) {\n        lhs_ = lhs;\n        rhs_ = rhs;\n    }\n\nprivate:\n    Label op_;\n    Label lhs_;\n    Label rhs_;\n};\n\nint main() {\n    Node plus{\"+\", \"x\", \"1\"};\n    std::cout << defaults << ' ' << converts << ' ' << assigns << '\\n';\n}",
       "kind": "value",
       "accept": [
-        "construct | default assign"
+        "2 1 2"
       ],
-      "explain": "GoodOrder initializes symbol_ once from its final value. WastefulOrder's member already exists by the time the constructor body starts, so it is default-constructed and then assigned — two operations, and for a member that allocates, potentially two allocations. The body cannot initialize; it can only assign to something that is already there."
+      "explain": "Only op_ appears in the member initializer list, so only it is built from its final value (one conversion). Every member already exists before the first statement of the constructor body runs, so lhs_ and rhs_ are default-constructed first (two defaults) and then assigned (two assignments) — five operations where three would do. The tempting reading is that `lhs_ = lhs;` initializes lhs_ and so counts as one conversion each, giving `0 3 0`; the body has no way to initialize anything, and the compiler does not promote a body assignment into an initializer. For a member holding a std::string, the wasted default construction can also cost an allocation."
     },
     {
       "id": "c05-r04",
       "section": "Most vexing parse",
-      "prompt": "What happens when this is compiled and run?",
-      "code": "#include <iostream>\n\nclass Widget {\npublic:\n    void reset() { std::cout << \"reset\\n\"; }\n};\n\nint main() {\n    Widget w();\n    w.reset();\n}",
-      "kind": "no-compile",
-      "explain": "`Widget w();` is parsed as a declaration of a function taking no arguments and returning Widget, so no object exists. The declaration itself is legal — the diagnostic appears at `w.reset()`, where the base type 'Widget ()' is not an object. Writing `Widget w{};` removes the ambiguity, because empty braces cannot describe a parameter list."
+      "prompt": "What does this print?",
+      "code": "#include <iostream>\n\nint depth = 0;\n\nstruct Policy {};\n\nclass Indent {\npublic:\n    explicit Indent(Policy) { ++depth; }\n    ~Indent() { --depth; }\n};\n\nvoid guarded() {\n    Indent guard(Policy());\n    std::cout << depth;\n}\n\nvoid really_guarded() {\n    Indent guard{Policy{}};\n    std::cout << depth;\n}\n\nint main() {\n    std::cout << depth;\n    guarded();\n    really_guarded();\n    std::cout << depth << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "0010"
+      ],
+      "explain": "`Indent guard(Policy());` can be read as a declaration, so it is one: `guard` is a function taking an unnamed parameter of function type and returning Indent. No Indent object is created, no constructor runs, and depth is still 0 when guarded() prints. really_guarded() uses braces, which cannot describe a parameter list, so it really does construct a guard and prints 1 — then the destructor puts depth back to 0. The tempting reading is `0110`: an RAII guard that silently fails to acquire anything looks identical at the call site, which is why the vexing parse is dangerous in exactly this idiom. Note that nothing here is ill-formed; clang only warns."
     },
     {
       "id": "c05-r05",
       "section": "Temporaries and lifetime extension",
       "prompt": "What happens when this is compiled and run?",
-      "code": "#include <iostream>\n#include <string>\n\nstd::string make_name() {\n    return \"EURUSD-SPOT-PRIMARY-VENUE-SESSION-01\";\n}\n\nconst std::string& pass_through(const std::string& value) {\n    return value;\n}\n\nint main() {\n    const std::string& symbol = pass_through(make_name());\n    std::cout << symbol << '\\n';\n}",
-      "kind": "ub",
-      "explain": "Lifetime extension applies only to a temporary bound *directly* to the reference. Here the temporary binds to pass_through's parameter, and returning that reference grants no further extension, so the temporary string is destroyed at the end of the initialization statement. Reading symbol afterwards is a lifetime violation; the string is long enough to allocate, so ASan reports a heap-use-after-free."
+      "code": "#include <iostream>\n#include <string>\n\nstd::string current_theme() {\n    return \"solarized-dark\";\n}\n\nclass Prompt {\npublic:\n    Prompt() : theme_(current_theme()) {}\n\n    void show() const { std::cout << theme_ << '\\n'; }\n\nprivate:\n    const std::string& theme_;\n};\n\nint main() {\n    Prompt p;\n    p.show();\n}",
+      "kind": "no-compile",
+      "explain": "A reference *member* is one of the bindings that lifetime extension deliberately excludes, and current C++ makes the construction ill-formed: clang reports that theme_ binds to a temporary whose lifetime would be shorter than the constructed object's. The tempting reading is that this is the same shape as `const std::string& s = current_theme();` — a const reference bound directly to a temporary — and so extends to the enclosing object's lifetime. Extension is granted to a local reference's direct binding only. Older compilers did accept this form, and the temporary then died when the constructor returned, leaving a dangling member; storing a std::string by value is the fix."
     },
     {
       "id": "c05-r06",
-      "section": "Statics and the initialization order fiasco",
-      "prompt": "What does this print?",
-      "code": "#include <iostream>\n\nstruct Counter {\n    int value = 0;\n\n    Counter() { std::cout << \"init \"; }\n};\n\nCounter& counter() {\n    static Counter instance;\n    return instance;\n}\n\nint main() {\n    std::cout << \"start \";\n    ++counter().value;\n    ++counter().value;\n    std::cout << counter().value << '\\n';\n}",
-      "kind": "value",
-      "accept": [
-        "start init 2"
-      ],
-      "explain": "A function-local static is initialized the first time control reaches its declaration, not before main — so \"start\" prints first and \"init\" appears only on the first call to counter(). Later calls return the same object, so the two increments accumulate to 2. A namespace-scope Counter would instead have been constructed during startup, in an order unspecified relative to other translation units."
+      "section": "Storage, lifetime, and the object model",
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <iostream>\n#include <string>\n\nstruct Sample {\n    std::string label;\n    int celsius;\n};\n\nint main() {\n    const Sample* latest = nullptr;\n\n    for (int hour = 0; hour < 3; ++hour) {\n        Sample reading{\"sensor-cabinet-inlet-probe-\" + std::to_string(hour),\n                       20 + hour};\n        if (hour == 1) {\n            latest = &reading;\n        }\n    }\n\n    std::cout << latest->label << ' ' << latest->celsius << '\\n';\n}",
+      "kind": "ub",
+      "explain": "`reading` is an automatic object whose lifetime ends at the closing brace of each loop iteration; the pointer saved on the second iteration outlives it, and dereferencing it afterwards is a lifetime violation. The tempting reading is that the storage is still there and the last iteration happened to write similar bytes into it, so the program prints something plausible — a pointer holding the same address says nothing about whether its former object still exists. This one is easy to catch: ASan reports stack-use-after-scope, and the label is long enough to have owned a heap buffer that the destructor already returned."
     }
   ],
   "writing": [
@@ -349,93 +349,93 @@
       "id": "c05-w01",
       "section": "RAII — the idiom of the book",
       "minutes": 12,
-      "prompt": "Write an RAII owner `FileHandle` for a `std::FILE*`. Its constructor takes a path and a mode and aborts if the file cannot be opened; its destructor closes the file; copying is disabled. Then write `bool write_report(const char* path, const char* text)` with at least three return paths and no explicit cleanup call.",
+      "prompt": "A terminal library exposes `int raw_mode_begin(int fd)`, which returns a nonnegative token or -1 on failure, and `void raw_mode_end(int token)`, which must be called exactly once for every successful token. Write an owner type for that token, then write `bool run_editor(int fd, const char* script)` that opens raw mode and has at least three distinct exit paths. Contract: the source must contain exactly one call to `raw_mode_end`, `run_editor` must contain none, and no path may call it on a token that was never acquired.",
+      "starter": "// The C API you are wrapping.\nint raw_mode_begin(int fd);\nvoid raw_mode_end(int token);\n\n// TODO: an owner type whose destructor is the only release site.\n\nbool run_editor(int fd, const char* script);",
       "checklist": [
-        "The constructor acquires the resource in its member initializer list and establishes the invariant (non-null handle) before the body finishes",
-        "The destructor releases the handle with no extra validity branch, because the invariant guarantees it",
+        "The token is acquired in the constructor's member initializer list, and a failed acquisition (-1) never produces a completed object",
+        "`raw_mode_end` appears exactly once in the whole file, inside the destructor, with no validity branch around it",
         "Both the copy constructor and the copy-assignment operator are `= delete`",
-        "write_report has multiple return statements and contains no fclose call",
-        "An accessor exposes the raw handle without transferring ownership"
+        "`run_editor` has at least three return statements and contains no release call",
+        "An accessor hands out the token without implying a transfer of ownership"
       ],
-      "solution": "#include <cstdio>\n#include <cstdlib>\n\nclass FileHandle {\npublic:\n    FileHandle(const char* path, const char* mode)\n        : file_(std::fopen(path, mode)) {\n        if (file_ == nullptr) {\n            std::abort();\n        }\n    }\n\n    ~FileHandle() {\n        std::fclose(file_);\n    }\n\n    FileHandle(const FileHandle&) = delete;\n    FileHandle& operator=(const FileHandle&) = delete;\n\n    std::FILE* get() const {\n        return file_;\n    }\n\nprivate:\n    std::FILE* file_;\n};\n\nbool write_report(const char* path, const char* text) {\n    FileHandle output{path, \"w\"};\n\n    if (text == nullptr) {\n        return false;  // output closes\n    }\n    if (std::fputs(text, output.get()) < 0) {\n        return false;  // output closes\n    }\n    return true;       // output closes\n}",
-      "notes": "The destructor needs no `if (file_ != nullptr)` because construction either establishes a valid handle or never completes. Copying the raw FILE* would create two apparent owners and two fclose calls, so both copy operations are deleted rather than left to the compiler. Aborting on acquisition failure is a placeholder for structured reporting (Chapter 6), and transferring ownership out of a FileHandle needs move operations (Chapter 7)."
+      "solution": "#include <cstdio>\n#include <cstdlib>\n\n// The C API being wrapped: begin() yields a nonnegative token or -1, and every\n// successful token must be handed to end() exactly once.\nint raw_mode_begin(int fd);\nvoid raw_mode_end(int token);\n\nclass RawMode {\npublic:\n    explicit RawMode(int fd) : token_(raw_mode_begin(fd)) {\n        if (token_ < 0) {\n            std::abort();  // Chapter 6 replaces this with structured reporting\n        }\n    }\n\n    ~RawMode() { raw_mode_end(token_); }\n\n    RawMode(const RawMode&) = delete;\n    RawMode& operator=(const RawMode&) = delete;\n\n    int token() const { return token_; }\n\nprivate:\n    int token_;\n};\n\nbool run_editor(int fd, const char* script) {\n    RawMode mode{fd};\n\n    if (script == nullptr) {\n        return false;  // raw mode restored\n    }\n    if (script[0] == '\\0') {\n        return false;  // raw mode restored\n    }\n    if (std::fputs(script, stdout) < 0) {\n        return false;  // raw mode restored\n    }\n    return mode.token() >= 0;  // raw mode restored\n}",
+      "notes": "The invariant is what removes the branch from the destructor: either the constructor established a valid token or the object never came into existence, so there is no state in which `raw_mode_end` should be skipped. Copying is deleted because the token is a value, not a resource — a memberwise copy would produce two apparent owners and two restore calls. The payoff is structural: adding a fourth early return to `run_editor` cannot introduce a leaked terminal, whereas a hand-written begin/end pair puts that obligation on every future edit. Handing ownership out of a `RawMode` needs move operations (Chapter 7)."
     },
     {
       "id": "c05-w02",
-      "section": "Initialization versus assignment in constructors",
-      "minutes": 8,
-      "prompt": "Write a class `Session` with a `const int id_`, a `std::string& log_` reference member, and a `std::string endpoint_`. Initialize all three properly. Add a short comment saying which of the three could not have been given their value in the constructor body, and why.",
+      "section": "Construction and destruction order",
+      "minutes": 10,
+      "prompt": "Write a `RingBuffer` whose constructor takes a requested size, rounds it up to a power of two, and keeps three members: the rounded capacity, a bitmask equal to capacity minus one, and the backing storage sized to the capacity. Contract: every member is initialized in the member initializer list, the constructor body is empty, and no member initializer may read a member that has not yet been initialized — on any ordering the compiler is allowed to choose. Add a `slot(index)` accessor that wraps with the mask, and a comment naming the rule that decides the order.",
       "checklist": [
-        "All three members appear in the member initializer list, none assigned in the body",
-        "Members are listed in declaration order (no -Wreorder warning)",
-        "A comment states that the const member must receive its value during initialization",
-        "A comment states that the reference member must bind during initialization and can never be reseated",
-        "The std::string member is identified as merely wasteful to assign, not impossible"
+        "The rounding is done by something other than a member read during initialization (a static helper, a free function, or the constructor parameter)",
+        "Members are declared so that declaration order matches the dependency order: capacity before mask, mask and capacity before storage",
+        "The initializer list names the members in the same order they are declared, so -Wreorder is silent",
+        "The constructor body is empty — no member is assigned there",
+        "A comment states that members are initialized in declaration order regardless of the initializer list's order"
       ],
-      "solution": "#include <string>\n\nclass Session {\npublic:\n    Session(int id, std::string& log, const std::string& endpoint)\n        // A const member can only ever receive a value here: there is no\n        // assignment that could set it afterwards.\n        : id_(id),\n        // A reference must bind during initialization and can never be\n        // reseated, so the body could not have established it either.\n          log_(log),\n        // endpoint_ *could* have been assigned in the body — that would just\n        // default-construct it first and then assign, doing two operations\n        // (and possibly two allocations) where this does one.\n          endpoint_(endpoint) {}\n\n    const std::string& endpoint() const { return endpoint_; }\n\nprivate:\n    const int id_;\n    std::string& log_;\n    std::string endpoint_;\n};",
-      "notes": "The distinction is worth keeping sharp: const members, reference members, and class members without a default constructor make body assignment *impossible*; everything else makes it merely a construct-then-assign pair. The initializer list is written in declaration order not because the compiler cares about the list's order — it does not — but because writing it out of order invites -Wreorder and makes the code lie about what happens first."
+      "solution": "#include <cstddef>\n#include <vector>\n\nclass RingBuffer {\npublic:\n    explicit RingBuffer(std::size_t requested)\n        : capacity_(round_up_pow2(requested)),\n          mask_(capacity_ - 1),\n          storage_(capacity_, 0) {}\n\n    std::size_t capacity() const { return capacity_; }\n\n    int& slot(std::size_t index) { return storage_[index & mask_]; }\n\nprivate:\n    // A static helper rather than a member, so the very first initializer\n    // reads nothing that has not been initialized yet.\n    static std::size_t round_up_pow2(std::size_t n) {\n        std::size_t power = 1;\n        while (power < n) {\n            power *= 2;\n        }\n        return power;\n    }\n\n    // Members are initialized in *declaration* order, whatever order the\n    // initializer list is written in. So declaration order has to be the\n    // dependency order: mask_ reads capacity_, and storage_ reads capacity_.\n    std::size_t capacity_;\n    std::size_t mask_;\n    std::vector<int> storage_;\n};",
+      "notes": "The trap this contract is built to avoid is a class that looks right because its initializer list reads top-down in dependency order while the declarations disagree: `mask_` would then be computed from an indeterminate `capacity_`, and reading an indeterminate value is undefined behavior long before the arithmetic is wrong. -Wreorder catches the mismatch, but the fix is to move the declarations, not to shuffle the list. If two members ever needed each other in both directions, that is the signal to compute the shared value once — here, in `round_up_pow2` — and feed both from it."
     },
     {
       "id": "c05-w03",
-      "section": "Construction and destruction order",
-      "minutes": 6,
-      "prompt": "Fix this class so that buffer_ is genuinely sized by size_, and add a comment naming the rule that makes the original wrong.\n\n```cpp\nclass Packet {\npublic:\n    explicit Packet(int size) : size_(size), buffer_(size_) {}\nprivate:\n    std::vector<int> buffer_;\n    int size_;\n};\n```",
-      "starter": "#include <vector>\n\nclass Packet {\npublic:\n    explicit Packet(int size) : size_(size), buffer_(size_) {}\n\nprivate:\n    std::vector<int> buffer_;\n    int size_;\n};",
+      "section": "Temporaries and lifetime extension",
+      "minutes": 10,
+      "prompt": "`std::string status_line()` returns by value. Write a `render()` that (a) binds one const reference to a status line and uses it on two separate statements, and (b) counts the digits in a status line with a range-for directly over a call to `status_line()`. Then write a `broken()` that binds a const reference to the result of `const std::string& longer(const std::string&, const std::string&)` called on two temporaries. Contract: `render()` must have no dangling reference and must call `status_line()` at most once per binding; every binding in both functions carries a comment saying exactly when its temporary dies, and the dangling use is left commented out.",
       "checklist": [
-        "size_ is declared before buffer_ — the fix changes declaration order, not just the initializer list",
-        "The initializer list is written in the same order as the declarations",
-        "A comment states that members are initialized in declaration order, regardless of initializer-list order",
-        "The int is converted to a size type explicitly, or the dependency is otherwise well-typed",
-        "No member is assigned in the constructor body"
+        "`render()` binds a temporary directly to a local `const std::string&` and uses it after the initializing statement",
+        "The range-for iterates over the call expression itself, with a comment noting that C++23 keeps the range temporary alive for the whole loop",
+        "`longer` returns a reference chosen from its two parameters, and `broken()` binds a local const reference to its result",
+        "A comment in `broken()` states that the temporaries die at the end of that full-expression, so the reference dangles immediately",
+        "The dangling read is commented out or otherwise never executed"
       ],
-      "solution": "#include <cstddef>\n#include <vector>\n\nclass Packet {\npublic:\n    // Members are initialized in *declaration* order, whatever order the\n    // initializer list uses. In the original, buffer_ was declared first and\n    // so read size_ before size_ had been initialized. Reordering only the\n    // initializer list would have changed nothing; the declarations are the\n    // dependency order. Compilers flag the mismatch with -Wreorder.\n    explicit Packet(int size)\n        : size_(size), buffer_(static_cast<std::size_t>(size_)) {}\n\n    std::size_t capacity() const { return buffer_.size(); }\n\nprivate:\n    int size_;\n    std::vector<int> buffer_;\n};",
-      "notes": "Rearranging the initializer list to match the declarations is the cosmetic half of the fix; it silences the warning without changing behavior. What actually repairs the bug is making the declaration order match the dependency order. If two members genuinely depend on each other in both directions, that is a signal to compute the shared value in a helper and pass it to both."
+      "solution": "#include <iostream>\n#include <string>\n\nstd::string status_line() {\n    return \"build 4711 -- 3 warnings, 0 errors\";\n}\n\nconst std::string& longer(const std::string& a, const std::string& b) {\n    return a.size() >= b.size() ? a : b;\n}\n\nvoid render() {\n    // Direct binding of a temporary to a local const reference: the temporary\n    // lives until the end of this scope, so both uses below are fine.\n    const std::string& line = status_line();\n    std::cout << line.size() << '\\n';\n    std::cout << line << '\\n';\n\n    // C++23 extends temporaries created in a range-for's range expression\n    // through the loop, so this string dies only after the last iteration.\n    int digits = 0;\n    for (char c : status_line()) {\n        if (c >= '0' && c <= '9') {\n            ++digits;\n        }\n    }\n    std::cout << digits << '\\n';\n}\n\nvoid broken() {\n    // Both temporaries bind to longer()'s parameters, which keeps them alive\n    // for the call and no longer. Returning one of those references grants no\n    // second extension, so both die at the semicolon on this line.\n    const std::string& banner = longer(status_line(), std::string{\"short\"});\n    // std::cout << banner << '\\n';  // UB: banner dangles\n    (void)banner;\n}",
+      "notes": "Extension is a property of one direct binding, not a property the reference carries around. `longer` never touches lifetimes — it only passes a reference through — yet routing the binding through it is enough to lose the extension while every visible type stays the same. The C++23 range-for rule is a genuinely different guarantee, attached to the range expression rather than to a named reference, and it does not rescue a reference to a temporary that was already destroyed inside a called function. Note also that `line` is a reference, not a copy: nothing is allocated a second time."
     },
     {
       "id": "c05-w04",
-      "section": "Temporaries and lifetime extension",
-      "minutes": 10,
-      "prompt": "Write two functions that both bind a `const std::string&` to the result of a value-returning `make_name()`. One must be correct, the other must dangle by routing the binding through a pass-through helper. Comment each with when the temporary dies.",
+      "section": "The initialization zoo",
+      "minutes": 8,
+      "prompt": "A job queue describes work with `struct Deadline { std::uint16_t seconds; std::uint8_t retries; };` and `struct JobSpec { Deadline deadline; int priority; double weight; };`. Write a factory returning a fully specified JobSpec using designated initializers, including a nested brace for the Deadline. Contract: no line may leave a member indeterminate; show a value-initialized JobSpec and a positional one; include one commented-out line whose nested brace narrows, with the reason; and add a namespace-scope JobSpec with a comment on why it differs from a block-scope `JobSpec s;`.",
       "checklist": [
-        "The correct function binds the temporary directly to a local const reference",
-        "Its comment states the temporary lives until the end of the reference's scope",
-        "The dangling function routes the binding through a function returning a reference to its parameter",
-        "Its comment states the temporary dies at the end of that full-expression",
-        "A comment names the rule: extension attaches to the direct binding and does not propagate"
+        "The factory uses designated initializers, in declaration order, for every member of JobSpec",
+        "The Deadline member is initialized with a nested brace (designated or positional)",
+        "`JobSpec zeroed{};` appears and is identified as value-initialization producing zeros",
+        "A commented-out line narrows inside the *nested* brace, with a comment naming the offending value and target type",
+        "A comment contrasts the namespace-scope object (zero-initialized before startup) with a block-scope `JobSpec s;` (members indeterminate; reading one is UB)"
       ],
-      "solution": "#include <iostream>\n#include <string>\n\nstd::string make_name() {\n    return \"EURUSD\";\n}\n\nconst std::string& pass_through(const std::string& value) {\n    return value;\n}\n\nvoid correct() {\n    // Direct binding of a temporary to a local const reference: the\n    // temporary's lifetime is extended to the end of this scope.\n    const std::string& symbol = make_name();\n    std::cout << symbol << '\\n';\n}  // temporary destroyed here\n\nvoid dangling() {\n    // The temporary binds to pass_through's *parameter*, which keeps it alive\n    // for the duration of the call and no longer. Returning that parameter's\n    // reference grants no second extension, so the temporary is destroyed at\n    // the semicolon below.\n    const std::string& symbol = pass_through(make_name());\n    std::cout << symbol << '\\n';  // UB: symbol dangles\n}",
-      "notes": "The rule to memorize is that extension is a property of a specific direct binding, not a property that travels with the reference. Copying the reference into another reference, returning it, or storing it in a member does not re-extend anything. Compilers catch the blatant 'return a reference to a local' shape with -Wall, but a temporary laundered through one or two helpers usually escapes diagnosis."
+      "solution": "#include <cstdint>\n\nstruct Deadline {\n    std::uint16_t seconds;\n    std::uint8_t retries;\n};\n\nstruct JobSpec {\n    Deadline deadline;\n    int priority;\n    double weight;\n};\n\n// Static storage duration: zero-initialized before any startup work runs, so\n// every member is 0 without anyone writing an initializer. A block-scope\n// `JobSpec s;` gets no such guarantee — its members are indeterminate, and\n// reading one is undefined behavior.\nJobSpec startup_default;\n\nJobSpec from_priority(int priority) {\n    return JobSpec{.deadline = {.seconds = 30, .retries = 3},\n                   .priority = priority,\n                   .weight = 1.0};\n}\n\nvoid examples() {\n    // Value-initialization: every member is zero, nested aggregate included.\n    JobSpec zeroed{};\n\n    // Positional aggregate initialization, in declaration order. Swapping the\n    // two Deadline fields still compiles: both are unsigned integers.\n    JobSpec positional{{30, 3}, 5, 1.0};\n\n    // Ill-formed: 300 is a constant expression that does not fit in\n    // std::uint8_t, and braces reject the narrowing even one level down.\n    // JobSpec narrowed{{30, 300}, 5, 1.0};\n\n    (void)zeroed;\n    (void)positional;\n}",
+      "notes": "Two guarantees are doing the work here and they are easy to conflate. Braces reject narrowing, which is a compile-time property of the initializer and applies inside nested braces just as it does at the top level — the diagnostic points at 300, not at the JobSpec. Zero-initialization of static-storage objects is a property of where the object lives, not of how it is spelled, which is why `JobSpec startup_default;` is safe and the same declaration inside a function is not. Designated initializers add no guarantee at all; they buy readability, and catch the transposition that two same-typed adjacent members invite."
     },
     {
       "id": "c05-w05",
       "section": "Statics and the initialization order fiasco",
-      "minutes": 8,
-      "prompt": "Two translation units each define a namespace-scope object, and one constructor uses the other object. Rewrite the dependency so the ordering is guaranteed, and write a comment explaining what was unspecified before and what is guaranteed now.",
-      "starter": "// logger.cpp\nstruct Logger {\n    Logger();\n    void write(const char* message) const;\n};\n\nLogger global_logger;\n\n// config.cpp\nstruct Config {\n    Config();\n};\n\nConfig global_config;\n\nConfig::Config() {\n    global_logger.write(\"loading config\");  // may run first\n}",
+      "minutes": 10,
+      "prompt": "Codec plugins self-register: each translation unit defines a namespace-scope object whose constructor adds a name to a shared registry, and the registry is read after main starts. Write this so it is correct no matter how the linker orders the translation units. Contract: no namespace-scope object may name another namespace-scope object; the registry must be usable from a constructor running during dynamic initialization; and a comment must state what was unspecified in the naive version and what is guaranteed in yours.",
+      "starter": "// The naive version, which has a bug that a given link order may hide.\n//\n// registry.cpp:\n//   std::vector<std::string> g_registry;\n//\n// flac.cpp:\n//   struct Registrar { Registrar(const char* n) { g_registry.push_back(n); } };\n//   Registrar flac_codec{\"flac\"};\n//\n// Rewrite so the order cannot matter.",
       "checklist": [
-        "The depended-upon object moves behind a function-local static accessor returning a reference",
-        "The dependent constructor calls the accessor instead of naming a namespace-scope object",
-        "A comment states that cross-translation-unit initialization order is unspecified",
-        "A comment states that a function-local static is initialized on first use, so it is alive before the accessor returns",
-        "No namespace-scope object depends on another namespace-scope object"
+        "The registry lives in a function-local static inside an accessor that returns a reference to it",
+        "The registrar's constructor reaches the registry only through that accessor",
+        "No namespace-scope object refers to another namespace-scope object by name",
+        "A comment states that cross-translation-unit dynamic initialization order is unspecified",
+        "A comment states that a function-local static is initialized on first use, so it is alive before the accessor returns"
       ],
-      "solution": "#include <cstdio>\n\nstruct Logger {\n    Logger() { /* acquire logging destination */ }\n\n    void write(const char* message) const { std::puts(message); }\n};\n\n// Before: `Logger global_logger;` in one translation unit and\n// `Config global_config;` in another. Within one translation unit dynamic\n// initialization follows definition order, but *across* translation units the\n// relative order is unspecified, so Config's constructor could touch storage\n// where no Logger object had begun its lifetime yet.\n//\n// After: a function-local static is initialized the first time control reaches\n// its declaration, so the Logger is fully constructed before logger() returns,\n// on every path that could ever use it.\nLogger& logger() {\n    static Logger instance;\n    return instance;\n}\n\nstruct Config {\n    Config() { logger().write(\"loading config\"); }\n};\n\nConfig global_config;",
-      "notes": "The reason this class of bug is dangerous is not that it fails often — it is that a given linker invocation picks a repeatable order, so it passes every test on the build that produced it and fails on a rearranged one. Destruction has the mirror problem: teardown order follows construction order, whose cross-unit relationship was never specified, so a global destructor can touch an already-destroyed object at shutdown. `constinit` (Chapter 22) enforces the other fix — constant initialization, with no startup ordering at all."
+      "solution": "#include <cstddef>\n#include <string>\n#include <vector>\n\n// Naive version: a namespace-scope `std::vector<std::string> g_registry;` in\n// one translation unit, touched by a registrar's constructor in another. Within\n// one translation unit dynamic initialization follows definition order, but\n// across translation units the relative order is unspecified — the registrar\n// may push into storage where no vector object has begun its lifetime.\n//\n// Here the registry is a function-local static, initialized the first time\n// control reaches its declaration. Whichever registrar runs first constructs\n// it, and it is fully alive before registry() returns.\nstd::vector<std::string>& registry() {\n    static std::vector<std::string> names;\n    return names;\n}\n\nclass Registrar {\npublic:\n    explicit Registrar(const char* name) { registry().push_back(name); }\n};\n\n// Each of these would normally live in its own translation unit. Their order\n// relative to one another is still unspecified — but now that only permutes\n// the contents, instead of touching an object that does not yet exist.\nRegistrar flac_codec{\"flac\"};\nRegistrar opus_codec{\"opus\"};\n\nstd::size_t codec_count() { return registry().size(); }",
+      "notes": "Notice what the fix does and does not buy. It removes the dependency on initialization *order*, so no constructor can touch a not-yet-alive object; it does not make the registry's contents deterministic, since which registrar runs first is still unspecified. Anything that depends on the order of the names needs a sort. The mirror problem remains at shutdown: destruction order follows construction order, so a global destructor that reaches into `registry()` after it has been destroyed is the same bug played backwards — one reason a registry like this is often deliberately never destroyed. Constant initialization, enforced with `constinit` (Chapter 22), is the other escape: an object with no dynamic initialization has no ordering to get wrong."
     },
     {
       "id": "c05-w06",
-      "section": "The initialization zoo",
-      "minutes": 7,
-      "prompt": "Given `struct Quote { double bid; double ask; int venue; };`, write initializations demonstrating: value-initialization, positional aggregate initialization, designated initialization, and a braced initialization that is rejected for narrowing. Comment each with the form it uses and what it guarantees.",
+      "section": "Most vexing parse",
+      "minutes": 6,
+      "prompt": "Write a scoped `Sampler` guard that increments a depth counter on construction, decrements it on destruction, cannot be copied, and reports the depth it entered at. Then write `probe()` that creates one from a default-constructed `Policy` in a form that cannot be parsed as a declaration. Contract: include, commented out, the two spellings that would declare functions instead, each labelled with exactly what it declares and why no constructor runs.",
       "checklist": [
-        "`Quote q{};` is shown and identified as value-initialization producing zeros",
-        "A positional aggregate initialization initializes members in declaration order",
-        "A designated initializer names members and keeps them in declaration order",
-        "One line is commented as ill-formed because braces reject a narrowing conversion, and is left commented out so the file compiles",
-        "A comment notes that positional values are easy to transpose, which is what designated initializers fix"
+        "The guard's counter change happens in the constructor (initializer list or body) and is undone in the destructor",
+        "Both copy operations are `= delete`",
+        "`probe()` constructs the guard with braces, and the constructed object is used (its entered depth is read or printed)",
+        "One commented-out line shows `Sampler guard(Policy());` labelled as declaring a function",
+        "One commented-out line shows a no-argument spelling labelled as declaring a function returning Sampler"
       ],
-      "solution": "struct Quote {\n    double bid;\n    double ask;\n    int venue;\n};\n\nvoid initialization_forms() {\n    // Value-initialization: every member is zero.\n    Quote zeroed{};\n\n    // Positional aggregate initialization: members are initialized in\n    // declaration order. Nothing stops bid and ask being transposed here --\n    // both are double, so the compiler cannot help.\n    Quote positional{99.50, 99.70, 3};\n\n    // Designated initializers (C++20) name the members and must follow\n    // declaration order. This is the form that survives a code review.\n    Quote named{.bid = 99.50, .ask = 99.70, .venue = 3};\n\n    // Ill-formed: braces reject narrowing, and 3.5 does not convert to int\n    // without losing value. With parentheses this would silently store 3.\n    // Quote narrowed{99.50, 99.70, 3.5};\n\n    (void)zeroed;\n    (void)positional;\n    (void)named;\n}",
-      "notes": "The narrowing rejection is the strongest practical argument for braces: a value that cannot round-trip is a compile error rather than a silent truncation. The one place to stop and check is a type with a std::initializer_list constructor, where braces change which constructor is selected rather than merely tightening the conversions allowed."
+      "solution": "#include <iostream>\n\nint depth = 0;\n\nstruct Policy {};\n\nclass Sampler {\npublic:\n    explicit Sampler(Policy) : entered_(++depth) {}\n    ~Sampler() { --depth; }\n\n    Sampler(const Sampler&) = delete;\n    Sampler& operator=(const Sampler&) = delete;\n\n    int entered() const { return entered_; }\n\nprivate:\n    int entered_;\n};\n\nvoid probe() {\n    // Braces cannot describe a parameter list, so this must be a definition.\n    Sampler guard{Policy{}};\n    std::cout << guard.entered() << '\\n';\n\n    // Declares a function named guard, taking one unnamed parameter of type\n    // \"Policy()\" (adjusted to a pointer to function) and returning Sampler.\n    // Nothing is constructed and depth never changes.\n    // Sampler guard(Policy());\n\n    // Declares a function named guard taking no arguments and returning\n    // Sampler. Also not an object — and Sampler has no default constructor.\n    // Sampler guard();\n}",
+      "notes": "The failure mode worth internalising is that neither commented line is ill-formed. Both are perfectly good declarations, so the compiler is silent at the point of the mistake and objects only at the first attempted use — and if the guard is never used, as an RAII guard usually is not, there is no use to object to. The result is a scope that silently never acquires anything, which looks identical in review to one that does. Braces remove the parse entirely, which is why they are the right default here even for readers who prefer parentheses elsewhere."
     }
   ]
 }

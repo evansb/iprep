@@ -287,155 +287,155 @@
       "id": "c12-r01",
       "section": "C strings: the legacy floor",
       "prompt": "What does this print?",
-      "code": "#include <cstring>\n#include <iostream>\n\nint main() {\n    const char message[] = \"FIX\";\n\n    std::cout << sizeof(message) << ' '\n              << std::strlen(message) << ' '\n              << (message[3] == '\\0') << '\\n';\n}",
+      "code": "#include <cstring>\n#include <iostream>\n\nint main() {\n    char header[16] = \"Host: quant.io\";\n\n    std::cout << sizeof(header) << ' ' << std::strlen(header) << ' ';\n\n    header[4] = '\\0'; // \"truncate\" the header name in place\n\n    std::cout << std::strlen(header) << ' '\n              << std::strlen(header + 6) << ' '\n              << static_cast<int>(header[15]) << '\\n';\n}",
       "kind": "value",
       "accept": [
-        "4 3 1"
+        "16 14 4 8 0"
       ],
-      "explain": "The literal \"FIX\" has type const char[4]: three characters plus the terminator, and sizeof sees the array type and reports its full storage. strlen answers the different question of how many characters precede the zero, which it must scan to find. message[3] is that terminator, so the comparison is true and streams as 1 without std::boolalpha. Once the array decays to a const char*, only the strlen answer remains obtainable."
+      "explain": "sizeof reports the array's storage — sixteen bytes, whatever is in them — while strlen answers the unrelated question of how many characters precede the first zero, which it must scan for. The tempting reading is that writing a zero at index 4 destroyed the rest of the line; it did not. The bytes are untouched, only the C string's end moved: strlen(header) becomes 4, and strlen(header + 6) still finds \"quant.io\" and reports 8. Copy-initialising a char[16] from a 14-character literal zero-fills the remaining bytes, so header[15] is 0. Length is encoded, not stored, which is why a C string can be shortened by a single store and why nothing a `const char*` receives can tell you the buffer now holds two of them."
     },
     {
       "id": "c12-r02",
       "section": "std::string_view: the read-only parameter type",
       "prompt": "What does this print?",
-      "code": "#include <cstddef>\n#include <iostream>\n#include <string_view>\n\nint main() {\n    std::string_view message = \"35=D|55=IBM|44=100.25\";\n    int fields = 0;\n\n    while (!message.empty()) {\n        const std::size_t separator = message.find('|');\n        std::cout << message.substr(0, separator) << ' ';\n        ++fields;\n\n        if (separator == std::string_view::npos) {\n            break;\n        }\n        message.remove_prefix(separator + 1);\n    }\n\n    std::cout << fields << '\\n';\n}",
+      "code": "#include <iostream>\n#include <string_view>\n\nbool strip_scheme(std::string_view url) {\n    if (url.starts_with(\"https://\")) {\n        url.remove_prefix(8);\n        return true;\n    }\n    return false;\n}\n\nint main() {\n    std::string_view url = \"https://quant.io/orders\";\n    const bool stripped = strip_scheme(url);\n\n    std::cout << std::boolalpha << stripped << ' '\n              << url.size() << ' ' << url.substr(0, 5) << '\\n';\n}",
       "kind": "value",
       "accept": [
-        "35=D 55=IBM 44=100.25 3"
+        "true 23 https"
       ],
-      "explain": "substr(0, separator) with separator == npos clamps to the rest of the view, so the final field needs no special case beyond the loop exit. remove_prefix advances the view's pointer and shrinks its length without touching a character, and substr returns another pointer-and-length pair — the whole split runs with zero allocations and no copying. Doing this with std::string::substr would allocate a fresh string per field."
+      "explain": "remove_prefix narrows the view it is called on, and that view is a by-value parameter — a private copy of the caller's pointer and length. The function reports true, but main's window is as wide as before: 23 characters still beginning with \"https\". The tempting answer, `true 15 quant`, assumes remove_prefix either edits characters or reaches back through the parameter; it does neither, since a view owns nothing and narrowing it is arithmetic on its own two members. Passing a view by value is right precisely because it is two words, but a router written this way has to return the narrowed view, or take `std::string_view&`, for the caller to see it."
     },
     {
       "id": "c12-r03",
-      "section": "Lifetime hazards",
+      "section": "std::string_view: the read-only parameter type",
       "prompt": "What happens when this is compiled and run?",
-      "code": "#include <iostream>\n#include <string>\n#include <string_view>\n\nstd::string qualify(std::string_view symbol) {\n    return std::string{symbol} + \"_UNITED_STATES_EQUITIES\";\n}\n\nint main() {\n    std::string_view view = qualify(\"IBM\");\n    std::cout << view << '\\n';\n}",
-      "kind": "ub",
-      "explain": "qualify returns a std::string by value; the view records that temporary's pointer and length, and the temporary is destroyed at the end of the initialising full expression. Binding to a string_view extends nothing — that rule is for const references — so the stream reads characters that have already been freed, and ASan reports a heap-use-after-free. The result here is long enough to be heap-backed; a short one would be no more defined, merely quieter."
+      "code": "#include <string>\n#include <string_view>\n#include <vector>\n\nstd::vector<std::string> rejected;\n\n// The dictionary lookup failed; keep an owning copy of the word.\nstd::string canonical(std::string_view word) {\n    return word;\n}\n\nint main() {\n    rejected.push_back(canonical(\"teh\"));\n}",
+      "kind": "no-compile",
+      "explain": "std::string's constructor from a string-view-like type is explicit, so `return word;` — a copy-initialisation of the return object — finds no viable conversion and the translation unit is rejected. The tempting reading is that because a std::string converts implicitly *to* a string_view, the reverse must work too; the asymmetry is deliberate. Owner to view costs nothing and cannot allocate, while view to owner copies the characters and may call the allocator, so the standard makes that direction something you write down: `return std::string{word};`."
     },
     {
       "id": "c12-r04",
-      "section": "std::span: string_view for every T",
+      "section": "Lifetime hazards",
       "prompt": "What happens when this is compiled and run?",
-      "code": "#include <iostream>\n#include <span>\n#include <vector>\n\nint main() {\n    std::vector<int> quantities{10, 20, 30};\n    std::span<const int> view{quantities};\n\n    view[0] = 99;\n\n    std::cout << quantities[0] << '\\n';\n}",
-      "kind": "no-compile",
-      "explain": "span<const int>::operator[] yields a const int&, so there is no viable assignment. The constness lives in the span's element type, not in the span object: `view` is itself a non-const local, and making it const would only stop the pointer and length from being reassigned. Declare std::span<int> when the elements are meant to be writable — the underlying vector is not const and would happily allow it."
+      "code": "#include <cstdio>\n#include <span>\n#include <vector>\n\n// A window onto the most recent samples of a rolling series.\nstd::span<double> tail(std::vector<double>& samples, std::size_t count) {\n    return std::span<double>{samples}.last(count);\n}\n\nint main() {\n    std::vector<double> samples{1.0, 2.0, 3.0, 4.0};\n    std::span<double> window = tail(samples, 2);\n\n    samples.push_back(5.0);\n\n    window[0] += 10.0;\n    std::printf(\"%.1f\\n\", window[0]);\n}",
+      "kind": "ub",
+      "explain": "A span is a pointer and a length over storage it does not own, so it follows exactly the discipline a string_view does: it dangles when its source dies *and* when its source moves the elements. The vector was built from a four-element initialiser list, so its capacity is four and the push_back must reallocate — the elements go to fresh storage and the old block is freed, leaving `window` pointing into it. The read-modify-write is then a heap-use-after-free, which ASan reports. The tempting reading is that `samples` is still alive and still holds five doubles, so the window must still name one of them; object lifetime is not the question, pointer validity is. Nothing in a span observes its container, and the stored length of 2 is stale as well."
     },
     {
       "id": "c12-r05",
       "section": "from_chars and to_chars: number conversion for hot paths",
       "prompt": "What does this print?",
-      "code": "#include <charconv>\n#include <iostream>\n#include <string_view>\n\nint main() {\n    std::string_view field = \"100.25oops\";\n    double price = 0.0;\n\n    const char* end = field.data() + field.size();\n    auto [next, error] = std::from_chars(field.data(), end, price);\n\n    std::cout << std::boolalpha << (error == std::errc{}) << ' '\n              << price << ' ' << (next == end) << '\\n';\n}",
+      "code": "#include <charconv>\n#include <iostream>\n#include <string_view>\n\nint main() {\n    // One line of a config file, read into a buffer with no terminator.\n    const char config[] = {'r', 'e', 't', 'r', 'i', 'e', 's', '=', ' ', '7'};\n    std::string_view line{config, sizeof(config)};\n    std::string_view value = line.substr(line.find('=') + 1);\n\n    int retries = -1;\n    auto [next, error] = std::from_chars(\n        value.data(), value.data() + value.size(), retries);\n\n    std::cout << (error == std::errc::invalid_argument) << ' '\n              << retries << ' ' << (next - value.data()) << '\\n';\n}",
       "kind": "value",
       "accept": [
-        "true 100.25 false"
+        "1 -1 0"
       ],
-      "explain": "from_chars consumes the longest valid numeric prefix and reports no error for it, so a parser that inspects only `error` accepts this field and quietly keeps 100.25. The returned pointer is the part that carries the bad news: it stops at 'o', so `next == end` is false. Checking both is what enforces full-field consumption. Note also that from_chars needed no terminator — data() and size() described the range exactly."
+      "explain": "from_chars does not skip leading whitespace, so the space before the 7 is not a harmless formatting detail: it is the first character of the range and it is not a digit. The call fails with invalid_argument, leaves `retries` at its previous -1 rather than zeroing it, and returns a pointer equal to its first argument, so the offset prints as 0. The tempting answer, `0 7 2`, is what std::atoi or std::strtod would have trained you to expect, since those do skip whitespace and would silently accept the field. Note what did work: `config` contains no terminator anywhere, and neither substr nor from_chars needed one, because a view's data() and size() describe the range exactly."
     },
     {
       "id": "c12-r06",
       "section": "std::string: `vector<char>` with benefits",
       "prompt": "What does this print?",
-      "code": "#include <iostream>\n#include <string>\n\nint main() {\n    std::string message = \"35=D|55=IBM\";\n    std::string field = message.substr(5, 6);\n\n    field[0] = 'X';\n\n    std::cout << message << ' ' << field << ' '\n              << (message.data()[message.size()] == '\\0') << '\\n';\n}",
+      "code": "#include <iostream>\n#include <string>\n#include <string_view>\n\nint main() {\n    std::string path;\n    path.reserve(64);\n    const char* base = path.data();\n\n    for (std::string_view part : {\"usr\", \"local\", \"bin\"}) {\n        path += '/';\n        path += part;\n    }\n\n    std::cout << path << ' ' << path.size() << ' '\n              << (path.data() == base) << ' '\n              << (path.capacity() >= 64) << '\\n';\n}",
       "kind": "value",
       "accept": [
-        "35=D|55=IBM X5=IBM 1"
+        "/usr/local/bin 14 1 1"
       ],
-      "explain": "std::string::substr returns a new owning string holding copies of the six characters starting at index 5, so mutating it cannot reach back into message — which is precisely the difference from string_view::substr, where the result would alias the same storage and the assignment would not even compile. The last check exercises the terminator guarantee: reading data()[size()] is defined and yields '\\0'. Writing anything else through that position would not be."
+      "explain": "reserve sets capacity, not size, so the string is still empty afterwards and `base` names the start of a buffer holding no characters. Every append then lands inside that reservation: a string reallocates only when its size would exceed its capacity, and capacity never shrinks on its own, so the buffer is never replaced and data() still equals `base` — the appends are pure stores, and any pointer or view taken after the reserve would have survived them. The tempting reading is that reserve pre-sized the string, making the result 64 characters long or leaving fourteen bytes of filler in front of the appended text. The last check is deliberately an inequality: an implementation may reserve more than asked, so an exact capacity is never a portable thing to assert."
     }
   ],
   "writing": [
     {
       "id": "c12-w01",
-      "section": "std::string: `vector<char>` with benefits",
-      "minutes": 6,
-      "prompt": "Write `build_message` that joins four `std::string_view` fields into one `std::string` with a single deliberate capacity decision, so that no growth occurs during the appends. Add a comment saying how many string results the equivalent `a + b + c + d` expression would create.",
+      "section": "string_view is not null-terminated",
+      "minutes": 8,
+      "prompt": "A C logging API takes `const char*`. Write `bool to_c_string(std::string_view text, std::span<char> buffer)` that copies `text` into the caller-supplied buffer and null-terminates it. It must allocate nothing, must not assume `text` is followed by a zero byte, must reserve room for the terminator, and must return false rather than truncate when the text does not fit.",
       "checklist": [
-        "Calls reserve before any append, sized from the fields' actual lengths",
-        "Uses append (or operator+=) rather than building intermediate results with operator+",
-        "Comment states that the operator+ chain creates a temporary result per addition, each of which can allocate",
-        "Takes the fields as std::string_view by value, not const std::string&",
-        "Returns the built std::string by value"
+        "Allocates nothing: no std::string, no new — the caller owns the storage",
+        "Rejects the call when buffer.size() < text.size() + 1, so the terminator is accounted for",
+        "Copies exactly text.size() characters, driven by size() rather than by any C string function applied to the view",
+        "Writes '\\0' at buffer[text.size()] on success",
+        "Takes std::string_view and std::span<char> by value"
       ],
-      "solution": "#include <string>\n#include <string_view>\n\nstd::string build_message(std::string_view begin,\n                          std::string_view symbol,\n                          std::string_view price,\n                          std::string_view checksum) {\n    std::string message;\n    message.reserve(begin.size() + symbol.size() +\n                    price.size() + checksum.size());\n\n    // `begin + symbol + price + checksum` would instead create three\n    // temporary string results, each of which can acquire capacity.\n    message.append(begin);\n    message.append(symbol);\n    message.append(price);\n    message.append(checksum);\n    return message;\n}",
-      "notes": "reserve changes capacity, not size, so the string is still empty after the call and the appends land inside the reservation. Note that the string_view parameters accept literals, owning strings and slices without any of them being converted to a std::string first."
+      "solution": "#include <cstring>\n#include <span>\n#include <string_view>\n\n// Returns false, having written nothing, when the text plus its terminator\n// does not fit. The view is never assumed to be terminated: its end is its\n// length, so the copy is bounded by size() and not by a scan for a zero.\nbool to_c_string(std::string_view text, std::span<char> buffer) {\n    if (buffer.size() < text.size() + 1) {\n        return false;\n    }\n    if (!text.empty()) {\n        std::memcpy(buffer.data(), text.data(), text.size());\n    }\n    buffer[text.size()] = '\\0';\n    return true;\n}",
+      "notes": "This is the allocation-free form of the `std::string terminated{view}; api(terminated.c_str());` bridge: the characters still have to be copied and terminated somewhere, but here the caller decides where, so a hot path can reuse one stack buffer instead of visiting the allocator per call. std::strncpy is not a substitute — it terminates only when the source is shorter than the count, and it would treat the view as a C string in the first place. The empty guard is not decoration either: passing a null data() to memcpy is undefined even for a zero count."
     },
     {
       "id": "c12-w02",
       "section": "std::string_view: the read-only parameter type",
-      "minutes": 10,
-      "prompt": "Write `next_field(std::string_view& message, char separator)` that returns the next field as a `std::string_view` and advances `message` past it, returning an empty view once the message is exhausted. It must allocate nothing and must handle a final field with no trailing separator.",
+      "minutes": 6,
+      "prompt": "An INI parser needs `std::string_view trim(std::string_view text)` that strips leading and trailing spaces and tabs. It must allocate nothing and copy no characters, must return an empty view when the input is entirely blank or empty, and its result must still point into the caller's original storage.",
       "checklist": [
-        "Returns std::string_view, never std::string — no allocation anywhere",
-        "Uses find to locate the separator and substr to cut the field",
-        "Handles npos (no separator left) as the final field rather than as an error",
-        "Advances the caller's view with remove_prefix, past the separator",
-        "Leaves message empty after the final field so a loop terminates"
+        "Returns std::string_view and performs no allocation and no character copy",
+        "Strips both spaces and tabs, from both ends",
+        "Handles an all-blank or empty input by returning an empty view rather than computing a length from npos",
+        "Narrows the window with remove_prefix/remove_suffix or substr instead of building a new string",
+        "Never requires the input to be null-terminated"
       ],
-      "solution": "#include <string_view>\n\nstd::string_view next_field(std::string_view& message, char separator) {\n    if (message.empty()) {\n        return {};\n    }\n\n    const std::size_t position = message.find(separator);\n    const std::string_view field = message.substr(0, position);\n\n    if (position == std::string_view::npos) {\n        message = {};  // consumed the last field\n    } else {\n        message.remove_prefix(position + 1);\n    }\n    return field;\n}",
-      "notes": "substr clamps against npos, so the final field needs no arithmetic special case. The returned view points into whatever storage the caller's message described — the function has created no lifetime of its own, and every returned field is only as valid as that original buffer."
+      "solution": "#include <string_view>\n\nstd::string_view trim(std::string_view text) {\n    constexpr std::string_view blanks = \" \\t\";\n\n    const std::size_t first = text.find_first_not_of(blanks);\n    if (first == std::string_view::npos) {\n        return text.substr(text.size());  // empty, still inside the input\n    }\n\n    text.remove_prefix(first);\n    const std::size_t last = text.find_last_not_of(blanks);\n    text.remove_suffix(text.size() - (last + 1));\n    return text;\n}",
+      "notes": "The all-blank case is the one that bites: find_last_not_of returns npos there, and `npos + 1` is 0, so trimming the suffix first and the prefix afterwards silently produces a nonsense length. One check of find_first_not_of up front settles it. Everything else is arithmetic on a pointer and a length, so a whole config file can be tokenised without a single allocation — and every returned view is only as valid as the buffer the caller passed in."
     },
     {
       "id": "c12-w03",
-      "section": "string_view is not null-terminated",
-      "minutes": 7,
-      "prompt": "An `extern \"C\" void send_symbol(const char*)` must be called with the text of a `std::string_view`. Write the call correctly, and add a comment explaining what passing `symbol.data()` directly would do.",
+      "section": "from_chars and to_chars: number conversion for hot paths",
+      "minutes": 12,
+      "prompt": "Timeouts arrive as text such as `\"150ms\"` or `\"30s\"`. Write `parse_duration(std::string_view text)` returning a `struct Duration { bool ok; std::int64_t count; std::string_view unit; }`, where `unit` is the unparsed remainder *as a view into the input*. Use `std::from_chars`. It must not allocate, must not throw, must not require the input to be null-terminated, and must report failure when no digits could be consumed or the value is out of range.",
       "checklist": [
-        "Constructs a std::string from the view before calling",
-        "Passes c_str() (or data() on the owning string), not the view's data()",
-        "Comment states that the view's last character need not be followed by '\\0'",
-        "Comment notes that the bridge copies the characters and can allocate",
-        "The owning string outlives the call"
+        "Calls std::from_chars over text.data() and text.data() + text.size()",
+        "Reports failure for both invalid_argument and result_out_of_range",
+        "Derives the suffix from the pointer from_chars returned, not from a second scan for the first non-digit",
+        "Returns the suffix as a std::string_view into the caller's text, with no allocation",
+        "A bare number with no suffix succeeds and yields an empty unit",
+        "Includes <charconv>"
       ],
-      "solution": "#include <string>\n#include <string_view>\n\nextern \"C\" void send_symbol(const char*);\n\nvoid forward(std::string_view symbol) {\n    // symbol.data() is not usable here: a view's end is recorded by its\n    // length, not by a terminator, so the C function would read past the\n    // logical end -- out of bounds, or silently the wrong text if some\n    // later zero byte happens to stop it.\n    const std::string terminated{symbol};  // copies; may allocate\n    send_symbol(terminated.c_str());\n}",
-      "notes": "Keep this bridge at the boundary where the C API is actually reached, not once per parsed field. It is the one place in an otherwise allocation-free view pipeline that owns characters, and beyond the inline SSO capacity it will call the allocator."
+      "solution": "#include <charconv>\n#include <cstdint>\n#include <string_view>\n\nstruct Duration {\n    bool ok = false;\n    std::int64_t count = 0;\n    std::string_view unit;\n};\n\nDuration parse_duration(std::string_view text) {\n    std::int64_t count = 0;\n    const char* const end = text.data() + text.size();\n    const auto [next, error] = std::from_chars(text.data(), end, count);\n\n    if (error != std::errc{}) {\n        return {};  // invalid_argument or result_out_of_range\n    }\n\n    const auto consumed = static_cast<std::size_t>(next - text.data());\n    return {true, count, text.substr(consumed)};\n}",
+      "notes": "Here the returned pointer is the product rather than merely an error check: from_chars stops at the first character it could not consume, which is exactly where the unit begins, so no second scan is needed. It is also why `next == end` is only sometimes the right test — a full-field parser must reject a remainder, a suffixed-value parser has to consume it. Since from_chars refuses leading whitespace, `\" 150ms\"` fails outright instead of parsing quietly, and the unit view costs nothing because it points into the caller's characters."
     },
     {
       "id": "c12-w04",
       "section": "Lifetime hazards",
-      "minutes": 8,
-      "prompt": "This class is broken: `class Order { public: Order(std::string symbol) : symbol_(symbol) {} std::string_view symbol() const { return symbol_; } private: std::string_view symbol_; };`. Diagnose it in a comment and rewrite it so an Order remains readable for its whole lifetime.",
-      "starter": "#include <string>\n#include <string_view>\n\nclass Order {\npublic:\n    explicit Order(std::string symbol) : symbol_(symbol) {}\n\n    std::string_view symbol() const { return symbol_; }\n\nprivate:\n    std::string_view symbol_;  // fix me\n};",
+      "minutes": 10,
+      "prompt": "This log sink caches a view of the most recently written line. Explain in a comment why `last()` is unsafe, then fix the class so that `last()` is valid until the next call to `write`. Keep the accessor returning `std::string_view` and keep every line in the single `text_` buffer — do not add a second owning string member.",
+      "starter": "#include <string>\n#include <string_view>\n\nclass Journal {\npublic:\n    void write(std::string_view line) {\n        last_ = line;\n        text_ += line;\n        text_ += '\\n';\n    }\n\n    std::string_view last() const { return last_; }\n\nprivate:\n    std::string text_;\n    std::string_view last_;  // fix me\n};",
       "checklist": [
-        "Comment identifies that the by-value parameter is destroyed when the constructor returns, leaving symbol_ dangling",
-        "The member becomes an owning std::string",
-        "The parameter is moved into the member rather than copied",
-        "The accessor may still return std::string_view, now over storage the object owns",
-        "The constructor stays explicit"
+        "Comment names both hazards: last_ aliases the caller's argument, whose lifetime the Journal does not control, and any view into text_ dies when an append reallocates",
+        "The view member is replaced by an offset and a length into text_",
+        "last() rebuilds the view from text_ at the point of the call",
+        "write still appends the line and a newline to text_, with no extra owning copy of the line",
+        "The offset is captured before the append, so it names the start of the new line"
       ],
-      "solution": "#include <string>\n#include <string_view>\n#include <utility>\n\nclass Order {\npublic:\n    // The old member was a std::string_view over the by-value parameter,\n    // which is a local object destroyed when the constructor returns: every\n    // Order was dangling before it was ever used. A class built from a\n    // by-value std::string must store its own std::string.\n    explicit Order(std::string symbol) : symbol_(std::move(symbol)) {}\n\n    std::string_view symbol() const { return symbol_; }\n\nprivate:\n    std::string symbol_;\n};",
-      "notes": "Returning a view from the accessor is fine, because the characters are now owned by the object and outlive the call — but the caller still must not keep that view past a mutation of the Order. A view member is only defensible with an explicit, documented contract naming who owns the characters and for how long."
+      "solution": "#include <cstddef>\n#include <string>\n#include <string_view>\n\nclass Journal {\npublic:\n    // The old member was unsound twice over. It aliased the caller's\n    // argument, which the Journal neither owns nor can outlive; and even a\n    // view into text_ would have dangled, because the very next append can\n    // outgrow the capacity and free the buffer it pointed into. An offset\n    // and a length survive that, because they name a position in the string\n    // rather than an address in whatever storage it happens to hold now.\n    void write(std::string_view line) {\n        last_offset_ = text_.size();\n        last_size_ = line.size();\n        text_ += line;\n        text_ += '\\n';\n    }\n\n    std::string_view last() const {\n        return std::string_view{text_}.substr(last_offset_, last_size_);\n    }\n\nprivate:\n    std::string text_;\n    std::size_t last_offset_ = 0;\n    std::size_t last_size_ = 0;\n};",
+      "notes": "Indices are the standard answer whenever a stored reference into a growable container would have to survive a mutation — the same reasoning that rules out keeping pointers into a std::vector across push_back. The view last() hands out is still governed by the usual rule: it is valid until the next write, and the class should document that, because the caller cannot see the append that will invalidate it."
     },
     {
       "id": "c12-w05",
       "section": "std::span: string_view for every T",
       "minutes": 8,
-      "prompt": "Write two functions over a wire message held in a byte buffer: `checksum(std::span<const std::byte> message)` returning the sum of the bytes as an int, and `split_header(std::span<const std::byte> message)` returning the first four bytes and the remainder as a pair of spans. Neither may copy the bytes.",
+      "prompt": "Write two functions for a sample-processing pipeline: `scale(samples, factor)`, which multiplies every sample in place, and `newest(samples, count)`, which returns a read-only window on the last `count` samples and must clamp when fewer than `count` exist. Neither may copy the samples, and both must accept a `double[]`, a `std::array<double, N>` and a `std::vector<double>` with no overloading and no templates of your own.",
       "checklist": [
-        "Both parameters are std::span<const std::byte> taken by value",
-        "checksum uses std::to_integer<int> rather than an arithmetic operator on std::byte",
-        "split_header uses first and subspan, not a copy into a new container",
-        "split_header guards against a message shorter than four bytes",
-        "Includes <cstddef> and <span>"
+        "scale takes std::span<double> (mutable elements); newest takes std::span<const double>",
+        "Both spans are taken by value, and neither function is a template or names a container type",
+        "scale mutates through the span rather than copying elements out and back",
+        "newest clamps count to samples.size() instead of handing an oversized count to last",
+        "newest returns std::span<const double> built with last or subspan — no new container"
       ],
-      "solution": "#include <cstddef>\n#include <span>\n#include <utility>\n\nint checksum(std::span<const std::byte> message) {\n    int total = 0;\n    for (std::byte value : message) {\n        total += std::to_integer<int>(value);\n    }\n    return total;\n}\n\nusing Split = std::pair<std::span<const std::byte>,\n                        std::span<const std::byte>>;\n\nSplit split_header(std::span<const std::byte> message) {\n    if (message.size() < 4) {\n        return {message, {}};\n    }\n    return {message.first(4), message.subspan(4)};\n}",
-      "notes": "std::byte deliberately has no arithmetic operators, so the conversion in checksum has to be written out — that is the same protection against accidental promotion that made it preferable to unsigned char for raw storage. Both returned spans point into the caller's buffer and are only as valid as it is."
+      "solution": "#include <cstddef>\n#include <span>\n\nvoid scale(std::span<double> samples, double factor) {\n    for (double& sample : samples) {\n        sample *= factor;\n    }\n}\n\nstd::span<const double> newest(std::span<const double> samples,\n                               std::size_t count) {\n    // last(n) with n > size() is undefined behaviour, not a clamp.\n    return samples.last(count < samples.size() ? count : samples.size());\n}",
+      "notes": "The element type carries the permission: span<double> hands out mutable references and therefore cannot be constructed from a const container at all, while span<const double> accepts either and forbids writing. One non-template parameter absorbing arrays, std::array and vector alike is the span analogue of a single string_view parameter absorbing literals, strings and slices. Both the passed and the returned span point into the caller's storage and are only as valid as it is."
     },
     {
       "id": "c12-w06",
-      "section": "from_chars and to_chars: number conversion for hot paths",
-      "minutes": 12,
-      "prompt": "Write `parse_quantity(std::string_view field)` returning `std::optional<std::int64_t>`, using `std::from_chars`. It must reject an empty field, a non-numeric field, an out-of-range value, and a field with trailing characters — each without throwing and without allocating.",
+      "section": "std::string: `vector<char>` with benefits",
+      "minutes": 7,
+      "prompt": "Write `join(std::span<const std::string_view> parts, char separator)` returning a `std::string` — one CSV row built from its fields. Compute the exact final length and reserve it once before appending anything, so that no growth occurs during the build. There must be no separator after the last field, an empty input must produce an empty string, and empty fields in the middle must be preserved.",
       "checklist": [
-        "Uses std::from_chars over field.data() and field.data() + field.size()",
-        "Rejects std::errc::invalid_argument",
-        "Rejects std::errc::result_out_of_range",
-        "Checks the returned pointer against the end to reject trailing characters",
-        "Returns std::nullopt on every rejection path and never throws",
-        "Includes <charconv>"
+        "Computes the total length, separators included, before the first append",
+        "Calls reserve exactly once, before any append",
+        "Builds with append or operator+= only — no operator+ chain and no intermediate std::string",
+        "Emits separators between fields only, leaving no trailing one",
+        "Returns an empty string for an empty span without underflowing the separator count"
       ],
-      "solution": "#include <charconv>\n#include <cstdint>\n#include <optional>\n#include <string_view>\n\nstd::optional<std::int64_t> parse_quantity(std::string_view field) {\n    if (field.empty()) {\n        return std::nullopt;\n    }\n\n    std::int64_t quantity = 0;\n    const char* const end = field.data() + field.size();\n    const auto [next, error] =\n        std::from_chars(field.data(), end, quantity);\n\n    if (error != std::errc{}) {\n        return std::nullopt;  // invalid_argument or result_out_of_range\n    }\n    if (next != end) {\n        return std::nullopt;  // trailing characters\n    }\n    return quantity;\n}",
-      "notes": "The empty-field guard is belt and braces: from_chars already reports invalid_argument for it. The `next != end` check is the one that is easy to omit and hard to notice, because everything with a valid numeric prefix parses successfully without it. from_chars also refuses leading whitespace, which is usually what a wire grammar wants."
+      "solution": "#include <cstddef>\n#include <span>\n#include <string>\n#include <string_view>\n\nstd::string join(std::span<const std::string_view> parts, char separator) {\n    if (parts.empty()) {\n        return {};  // parts.size() - 1 would wrap on an unsigned zero\n    }\n\n    std::size_t total = parts.size() - 1;  // the separators\n    for (std::string_view part : parts) {\n        total += part.size();\n    }\n\n    std::string row;\n    row.reserve(total);\n\n    row.append(parts.front());\n    for (std::string_view part : parts.subspan(1)) {\n        row += separator;\n        row.append(part);\n    }\n    return row;\n}",
+      "notes": "An `a + b + c` chain would instead create a temporary string per addition, each free to acquire its own capacity and each copying everything accumulated so far. Reserving the measured total turns the whole row into one allocation followed by pure stores. The empty guard earns its place: parts.size() - 1 is unsigned arithmetic, so on an empty span it wraps to an enormous reserve request. Reserve changes capacity only, so the string is still empty when the appends begin."
     }
   ]
 }

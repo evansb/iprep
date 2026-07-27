@@ -287,145 +287,145 @@
       "id": "c11-r01",
       "section": "Ordered maps and sets in practice",
       "prompt": "What does this print?",
-      "code": "#include <iostream>\n#include <map>\n#include <string>\n\nint main() {\n    std::map<std::string, int> counts{{\"AAPL\", 4}, {\"IBM\", 2}};\n    const auto before = counts.size();\n\n    if (counts[\"GOOG\"] != 0) {\n        std::cout << \"traded\\n\";\n    }\n\n    std::cout << before << ' ' << counts.size() << ' '\n              << counts.count(\"GOOG\") << '\\n';\n}",
+      "code": "#include <iostream>\n#include <map>\n#include <utility>\n\nusing Cell = std::pair<int, int>;\n\ndouble diagonal_sum(std::map<Cell, double>& sparse, int n) {\n    double total = 0.0;\n    for (int i = 0; i < n; ++i) {\n        total += sparse[{i, i}];\n    }\n    return total;\n}\n\nint main() {\n    std::map<Cell, double> sparse{\n        {{0, 0}, 2.5}, {{1, 2}, 4.0}, {{2, 2}, 1.5}};\n\n    const double total = diagonal_sum(sparse, 3);\n    std::cout << total << ' ' << sparse.size() << ' '\n              << sparse.count({1, 1}) << '\\n';\n}",
       "kind": "value",
-      "accept": ["2 3 1"],
-      "explain": "The comparison looks like a pure query, but operator[] inserts {\"GOOG\", 0} on the miss and returns a reference to that value, so the map grows from two entries to three and now genuinely contains the key. Had the test been written with `contains` or `find`, the size would still be 2. This is the standard way a map silently accumulates keys that were only ever asked about."
+      "accept": ["4 4 1"],
+      "explain": "The sum is right for the reason expected — 2.5 + 0 + 1.5 — but a sparse matrix that is only being read has grown a stored zero. `sparse[{1, 1}]` misses, so operator[] inserts {{1,1}, 0.0} and returns a reference to it; size goes from 3 to 4 and count for the missing cell now answers 1. The tempting reading is `4 3 0`: the function takes a non-const reference and its body looks like pure arithmetic, so nothing in the call site suggests mutation. A read-only sweep has to use `find` (or `contains`, or take the map by const reference so operator[] would not compile) and treat a miss as an implicit zero rather than a stored one."
     },
     {
       "id": "c11-r02",
       "section": "Lookup, insertion, and node transfer",
       "prompt": "What does this print?",
-      "code": "#include <iostream>\n#include <map>\n#include <string>\n\nint main() {\n    std::map<std::string, int> limits{{\"XNAS\", 10}};\n\n    auto [kept, inserted_a] = limits.try_emplace(\"XNAS\", 99);\n    std::cout << std::boolalpha << inserted_a << ' ' << kept->second << ' ';\n\n    auto [updated, inserted_b] = limits.insert_or_assign(\"XNAS\", 77);\n    std::cout << inserted_b << ' ' << updated->second << '\\n';\n}",
+      "code": "#include <iostream>\n#include <map>\n#include <string>\n#include <vector>\n\nint main() {\n    std::map<std::string, std::vector<int>> routes;\n\n    routes.try_emplace(\"/health\", 3, 200);\n    routes.try_emplace(\"/health\", 1, 404);\n    routes.insert_or_assign(\"/api\", std::vector<int>{500});\n    routes[\"/api\"].push_back(503);\n\n    std::cout << routes[\"/health\"].size() << ' '\n              << routes[\"/health\"].front() << ' '\n              << routes[\"/api\"].size() << '\\n';\n}",
       "kind": "value",
-      "accept": ["false 10 false 77"],
-      "explain": "Both calls find the key already present, so both report false. They then diverge: try_emplace leaves the existing mapped value untouched at 10 and never constructs the 99, while insert_or_assign exists to overwrite and assigns 77 in place. Reading the Boolean alone would not distinguish them — the contract difference is entirely in what happens to the stored value. Note that the first print has to happen before the second call: both iterators denote the same element, so `kept->second` would read 77 as well if it were evaluated afterwards."
+      "accept": ["3 200 2"],
+      "explain": "Two separate traps meet here. First, try_emplace forwards its trailing arguments to the mapped type's constructor, so `(3, 200)` selects `std::vector<int>(3, 200)` — three elements each 200, not the two-element list {3, 200}; the brace-list reading would give `2 3 ...`. Second, the repeat call for \"/health\" finds the key present, so it constructs nothing and changes nothing: the stored vector keeps its 200s and the 404 is never built. Only insert_or_assign overwrites, which is why \"/api\" starts at {500} and reaches size 2 after the push_back through operator[] on an existing key. Answering `1 404 2` means reading try_emplace as an update; it is the operation that deliberately is not one."
     },
     {
       "id": "c11-r03",
       "section": "Associative lookup and what keys must provide",
       "prompt": "What does this print?",
-      "code": "#include <functional>\n#include <iostream>\n#include <map>\n#include <string>\n#include <string_view>\n\nint main() {\n    std::map<std::string, int, std::less<>> venues{\n        {\"IBM\", 1}, {\"MSFT\", 2}, {\"AAPL\", 3}};\n\n    auto found = venues.find(std::string_view{\"MSFT\"});\n    auto bound = venues.lower_bound(std::string_view{\"B\"});\n\n    std::cout << found->second << ' ' << bound->first << '\\n';\n}",
+      "code": "#include <functional>\n#include <iostream>\n#include <set>\n#include <string>\n#include <string_view>\n\nstd::size_t with_prefix(const std::set<std::string, std::less<>>& dict,\n                        std::string_view prefix) {\n    std::size_t n = 0;\n    for (auto it = dict.lower_bound(prefix); it != dict.end(); ++it) {\n        if (it->compare(0, prefix.size(), prefix) != 0) {\n            break;\n        }\n        ++n;\n    }\n    return n;\n}\n\nint main() {\n    const std::set<std::string, std::less<>> dict{\n        \"cat\", \"catalog\", \"catch\", \"cot\", \"dog\"};\n\n    std::cout << with_prefix(dict, \"cat\") << ' '\n              << with_prefix(dict, \"co\") << ' '\n              << with_prefix(dict, \"z\") << '\\n';\n}",
       "kind": "value",
-      "accept": ["2 IBM"],
-      "explain": "std::less<> is transparent, so both calls compare the string_view against the keys directly and no temporary std::string is built. The map iterates in comparator order — AAPL, IBM, MSFT — and lower_bound returns the first key not less than \"B\", which is IBM. Note that lower_bound answers with a position rather than a match: \"B\" is not in the map at all."
+      "accept": ["3 1 0"],
+      "explain": "The set iterates in comparator order: cat, catalog, catch, cot, dog. lower_bound lands on the first key not less than the prefix, and because every string starting with that prefix sorts immediately after it, the matches form one contiguous run that ends at the first non-match — three for \"cat\", one (cot) for \"co\", and none for \"z\", where lower_bound already returns end(). The transparent std::less<> is what lets the string_view be compared against the keys directly; with the default std::less<std::string> the call would not even compile, since string_view does not implicitly convert to string. A tempting wrong answer is 2 for \"cat\", from assuming lower_bound skips the exactly-equal key — it does not; that is upper_bound's job."
     },
     {
       "id": "c11-r04",
-      "section": "Ordered maps and sets in practice",
+      "section": "Associative lookup and what keys must provide",
       "prompt": "What happens when this is compiled and run?",
-      "code": "#include <iostream>\n#include <map>\n#include <string>\n\nint main() {\n    std::map<std::string, int> counts{{\"AAPL\", 4}, {\"IBM\", 2}};\n\n    auto it = counts.begin();\n    it->first = \"MSFT\";\n\n    std::cout << it->first << '\\n';\n}",
+      "code": "#include <iostream>\n#include <string>\n#include <string_view>\n#include <unordered_map>\n\nint hits_for(const std::unordered_map<std::string, int>& sessions,\n             std::string_view token) {\n    auto found = sessions.find(token);\n    return found == sessions.end() ? 0 : found->second;\n}\n\nint main() {\n    const std::unordered_map<std::string, int> sessions{{\"a1b2\", 7}};\n    std::cout << hits_for(sessions, \"a1b2\") << '\\n';\n}",
       "kind": "no-compile",
-      "explain": "A map element has type std::pair<const Key, T>, so `first` is a const std::string and has no viable assignment operator. The key is const precisely because changing it in place would leave the element in the wrong position in the tree. When a key genuinely must change, extract the node, assign through node.key(), and insert it back so the container re-searches under the new key."
+      "explain": "`find` on an unordered container takes `const key_type&` unless both the hash and the equality predicate are transparent, and neither std::hash<std::string> nor std::equal_to<std::string> is. So the only candidate needs a std::string, and the conversion from string_view to string is explicit — no implicit conversion exists, so overload resolution finds nothing. The tempting reading is that this is the transparent lookup the chapter showed: that worked because std::map was given std::less<> as its comparator. Opting an unordered_map in requires supplying both a hash and an equality type that declare is_transparent; writing `sessions.find(std::string{token})` compiles instead, at the price of the temporary and its possible allocation on every call."
     },
     {
       "id": "c11-r05",
       "section": "The tree underneath and what it costs",
       "prompt": "What happens when this is compiled and run?",
-      "code": "#include <iostream>\n#include <map>\n#include <string>\n\nint main() {\n    std::map<std::string, int> counts{{\"AAPL\", 4}, {\"IBM\", 2}};\n\n    auto it = counts.find(\"AAPL\");\n    counts.erase(it);\n\n    std::cout << it->second << '\\n';\n}",
+      "code": "#include <iostream>\n#include <map>\n#include <string>\n\nint main() {\n    std::map<std::string, int> seen{\n        {\"boot\", 1}, {\"gc\", 5}, {\"retry\", 2}, {\"warn\", 9}};\n\n    for (auto it = seen.begin(); it != seen.end(); ++it) {\n        if (it->second < 3) {\n            seen.erase(it);\n        }\n    }\n\n    std::cout << seen.size() << '\\n';\n}",
       "kind": "ub",
-      "explain": "A map insertion invalidates nothing, which makes it easy to assume erasure is equally forgiving. It is not: erase invalidates exactly the iterators, pointers and references that denote the erased element, and the node holding that pair has been destroyed and deallocated. Dereferencing `it` afterwards reads freed storage — ASan reports a heap-use-after-free. Capture erase's return value if the next element is what you wanted."
+      "explain": "The loop is undefined behaviour, so no output can be predicted. Erasure invalidates exactly the iterators that denote the erased element, and `it` is one of them: the node holding {\"boot\", 1} is destroyed and deallocated, and the `++it` at the top of the next round reads its child and parent pointers to find the successor. ASan reports a heap-use-after-free inside the tree's increment. What makes this plausible enough to survive review is the other half of the guarantee — a map insertion invalidates nothing, and an erase leaves every other element's iterator alone — so the loop looks like it only disturbs what it removes. The fix is to advance from erase's return value, `it = seen.erase(it)`, and only ++it on the branch that keeps the element."
     },
     {
       "id": "c11-r06",
-      "section": "Unordered maps and sets: buckets and chains",
+      "section": "Load factor and rehashing",
       "prompt": "What does this print?",
-      "code": "#include <iostream>\n#include <string>\n#include <unordered_map>\n\nint main() {\n    std::unordered_map<std::string, int> counts;\n    counts.reserve(8);\n\n    counts.emplace(\"AAPL\", 4);\n    counts.emplace(\"IBM\", 2);\n    counts.emplace(\"AAPL\", 9);\n\n    std::cout << counts.size() << ' ' << counts.at(\"AAPL\") << ' '\n              << counts.count(\"MSFT\") << '\\n';\n}",
+      "code": "#include <iostream>\n#include <unordered_map>\n\nint main() {\n    std::unordered_map<int, long> tally;\n    tally.emplace(1, 100);\n\n    long* const slot = &tally.at(1);\n    const auto start = tally.bucket_count();\n\n    for (int key = 2; key <= 500; ++key) {\n        tally.emplace(key, key);\n    }\n    *slot += 1;\n\n    std::cout << (tally.bucket_count() > start) << ' '\n              << tally.at(1) << ' ' << tally.size() << '\\n';\n}",
       "kind": "value",
-      "accept": ["2 4 0"],
-      "explain": "emplace on a unique-key container leaves an existing element alone, so the third call is a no-op and AAPL keeps its original 4 — the 9 is discarded, not assigned. size is therefore 2 and count for an absent key is 0. Note what this snippet deliberately does not do: printing the container by iteration, because the traversal order of an unordered container is unspecified and would make the expected output unpredictable."
+      "accept": ["1 101 500"],
+      "explain": "499 further insertions under the default maximum load factor of 1.0 must push the bucket count past what one element needed, so the first field is 1 — the exact counts are implementation-specific, which is why the code compares rather than prints them. The pointer nonetheless still names the same element: a rehash allocates a new bucket array and relinks the existing nodes into it, so pointers and references to elements survive, and the write through `slot` lands on the stored 100. The tempting wrong reading is that a rehash behaves like std::vector growth and leaves `slot` dangling; the distinction is that vector moves its elements while a chained hash table moves only the links. Had `slot` been an *iterator* saved across those insertions, it really would have been invalidated."
     }
   ],
   "writing": [
     {
       "id": "c11-w01",
       "section": "Associative lookup and what keys must provide",
-      "minutes": 10,
-      "prompt": "Define a `Symbol` struct with a `std::uint16_t exchange` and a `std::uint32_t id` that can be used as an `std::unordered_map` key. Supply defaulted equality and a `std::hash<Symbol>` specialization that combines both fields, then declare an `std::unordered_map<Symbol, double>` and insert one entry.",
+      "minutes": 12,
+      "prompt": "A spell checker wants a dictionary in which \"Cat\", \"cat\" and \"CAT\" are the same word. Build `std::unordered_set<std::string, H, E>` with your own hash and equality types so that lookup is case-insensitive, and write `is_known(dict, word)` that answers without inserting. The two function objects must agree: any pair of words your equality accepts must hash to the same value.",
       "checklist": [
-        "operator== is provided (defaulted is fine) — the container needs equality as well as a hash",
-        "std::hash<Symbol> is specialized and its operator() is const and noexcept",
-        "The hash combines both fields rather than returning only one of them",
-        "Equal Symbols provably produce equal hashes — the combination reads only the members",
-        "The map is declared with no explicit third argument, relying on the std::hash specialization"
+        "A dedicated equality type compares the words case-insensitively (it is not left as std::equal_to)",
+        "The hash folds case before mixing, so equal-by-the-predicate words provably hash alike",
+        "Both operator() overloads are const; the hash's is noexcept",
+        "The set is declared with both custom types as its second and third template arguments",
+        "is_known takes the set by const reference and uses find or contains, never operator[] or at"
       ],
-      "solution": "#include <cstdint>\n#include <functional>\n#include <unordered_map>\n\nstruct Symbol {\n    std::uint16_t exchange;\n    std::uint32_t id;\n\n    bool operator==(const Symbol&) const = default;\n};\n\ntemplate <>\nstruct std::hash<Symbol> {\n    std::size_t operator()(const Symbol& symbol) const noexcept {\n        const auto h1 = std::hash<std::uint16_t>{}(symbol.exchange);\n        const auto h2 = std::hash<std::uint32_t>{}(symbol.id);\n        return h1 * 0x9e3779b1U ^ h2;\n    }\n};\n\nvoid use_symbol_map() {\n    std::unordered_map<Symbol, double> prices;\n    prices.emplace(Symbol{7, 42}, 101.25);\n}",
-      "notes": "Hashing only `exchange` would satisfy the contract — equal keys would still hash equally — but every symbol on one venue would land in the same bucket and lookup would degrade to a linear chain walk. Hash quality is a latency control, not a correctness one."
+      "solution": "#include <cctype>\n#include <cstddef>\n#include <string>\n#include <unordered_set>\n\nstruct CaseFoldHash {\n    std::size_t operator()(const std::string& word) const noexcept {\n        std::size_t h = 14695981039346656037ULL;\n        for (unsigned char c : word) {\n            h ^= static_cast<std::size_t>(std::tolower(c));\n            h *= 1099511628211ULL;\n        }\n        return h;\n    }\n};\n\nstruct CaseFoldEqual {\n    bool operator()(const std::string& a,\n                    const std::string& b) const noexcept {\n        if (a.size() != b.size()) {\n            return false;\n        }\n        for (std::size_t i = 0; i < a.size(); ++i) {\n            if (std::tolower(static_cast<unsigned char>(a[i])) !=\n                std::tolower(static_cast<unsigned char>(b[i]))) {\n                return false;\n            }\n        }\n        return true;\n    }\n};\n\nusing Dictionary =\n    std::unordered_set<std::string, CaseFoldHash, CaseFoldEqual>;\n\nbool is_known(const Dictionary& dict, const std::string& word) {\n    return dict.find(word) != dict.end();\n}",
+      "notes": "Replacing only the equality and keeping std::hash<std::string> compiles and passes a small test, then fails in production: \"Cat\" and \"cat\" hash to different buckets, so the lookup never reaches the chain where the match lives and the container silently holds duplicates. The contract runs one way — equal keys must hash equally — and it is the customised half that has to chase the customised half. Widening the equality relation always means widening the hash to match."
     },
     {
       "id": "c11-w02",
       "section": "Lookup, insertion, and node transfer",
       "minutes": 10,
-      "prompt": "Write three small functions over a `std::map<std::string, int, std::less<>>& counts`: `ensure(key)` that inserts a zero only when the key is absent and never disturbs an existing count; `overwrite(key, value)` that replaces an existing count or inserts a new one and reports which happened; and `bump(key)` that increments an existing count and does nothing at all when the key is missing.",
+      "prompt": "Write `tally(freq, word)` that increments a word's count in a word-frequency table, where `word` arrives as a `std::string_view` carved out of a larger buffer. Contract: repeat sightings — the overwhelming majority of calls — must not construct a std::string at all, and each call must search the container exactly once on that path. Only the first sighting of a word may materialise an owning key.",
       "checklist": [
-        "ensure uses try_emplace (or insert), not operator[]",
-        "overwrite uses insert_or_assign and returns or reports its bool",
-        "bump uses find and compares against end() before touching the value",
-        "bump does not use operator[], which would insert on a miss",
-        "The map is taken by non-const reference"
+        "The map's comparator is std::less<> so the string_view can be looked up directly",
+        "The already-present path performs exactly one lookup and constructs no std::string",
+        "The increment goes through the iterator returned by that lookup, not a second operator[] or at",
+        "operator[] is not used anywhere: it would both construct a key and insert on a miss",
+        "The absent path constructs the owning std::string exactly once"
       ],
-      "solution": "#include <functional>\n#include <map>\n#include <string>\n#include <string_view>\n\nusing Counts = std::map<std::string, int, std::less<>>;\n\nvoid ensure(Counts& counts, std::string_view key) {\n    counts.try_emplace(std::string{key}, 0);\n}\n\nbool overwrite(Counts& counts, std::string_view key, int value) {\n    auto [position, inserted] =\n        counts.insert_or_assign(std::string{key}, value);\n    (void)position;\n    return inserted;  // true means a new key, false means an update\n}\n\nvoid bump(Counts& counts, std::string_view key) {\n    auto found = counts.find(key);  // transparent: no temporary string\n    if (found != counts.end()) {\n        ++found->second;\n    }\n}",
-      "notes": "Only `bump` gets to use the transparent lookup, because only it never inserts: the insertion operations must materialise a real std::string key to store. That asymmetry is the usual reason a hot read path and a cold write path end up with different key handling."
+      "solution": "#include <functional>\n#include <map>\n#include <string>\n#include <string_view>\n\nusing Frequencies = std::map<std::string, int, std::less<>>;\n\nvoid tally(Frequencies& freq, std::string_view word) {\n    const auto found = freq.find(word);   // transparent: no temporary key\n    if (found != freq.end()) {\n        ++found->second;                  // hot path: no allocation at all\n        return;\n    }\n    freq.emplace(std::string{word}, 1);   // first sighting pays for the key\n}",
+      "notes": "The obvious one-liner, `++freq[std::string{word}]`, constructs and possibly allocates a std::string on every call including the millions that hit an existing entry, and is only correct because the value-initialised 0 happens to be the right starting count. The two-path version costs a branch and one extra tree descent on the rare miss, and removes the allocation from the hot path entirely. Note that the insertion genuinely needs an owning key — transparent lookup makes searching cheap, never storing."
     },
     {
       "id": "c11-w03",
       "section": "Ordered maps and sets in practice",
-      "minutes": 8,
-      "prompt": "Write `print_range(const std::map<std::string, int>& counts, const std::string& low, const std::string& high)` that prints every key-value pair whose key lies in the half-open interval [low, high), in sorted order, using the map's own boundary operations rather than scanning the whole container.",
+      "minutes": 10,
+      "prompt": "A timer wheel keeps pending work in a `std::multimap<int, std::string>` keyed by due time; several tasks may share a time. Write `run_due(schedule, now)` that dispatches every task due at or before `now`, in ascending time order, removes exactly those entries, and returns how many ran. Contract: one pass over the due prefix, no scan of the tasks that are not yet due, and no iterator may be dereferenced or incremented after the element it names has been erased.",
       "checklist": [
-        "Uses lower_bound for the start of the range",
-        "Uses lower_bound (not upper_bound) for the exclusive end, giving a half-open interval",
-        "Iterates from the first boundary to the second with a plain iterator loop or range-for over the subrange",
-        "Binds elements with const auto& or the exact const std::pair<const std::string, int>& type",
-        "Prints nothing when the interval is empty, with no special case needed"
+        "Uses upper_bound(now) so tasks due exactly at now are included",
+        "Never inspects the keys beyond that boundary — no full traversal, no per-element key comparison in the loop",
+        "Dispatches in ascending key order by walking from begin() to the boundary",
+        "Erasure is the range form erase(begin, boundary), performed after the dispatch loop, or the loop advances from erase's return value",
+        "Returns the number dispatched and works with no special case when nothing is due"
       ],
-      "solution": "#include <iostream>\n#include <map>\n#include <string>\n\nvoid print_range(const std::map<std::string, int>& counts,\n                 const std::string& low,\n                 const std::string& high) {\n    const auto first = counts.lower_bound(low);   // first key >= low\n    const auto last = counts.lower_bound(high);   // first key >= high\n\n    for (auto it = first; it != last; ++it) {\n        std::cout << it->first << \": \" << it->second << '\\n';\n    }\n}",
-      "notes": "The half-open pair of boundaries needs no emptiness test: when nothing falls in the interval the two iterators are equal and the loop simply does not run. A hash container cannot answer this question at all — there is no order to walk — which is the clearest reason to keep a tree or a flat_map when range queries exist."
+      "solution": "#include <cstddef>\n#include <map>\n#include <string>\n\nvoid dispatch(const std::string& task);\n\nstd::size_t run_due(std::multimap<int, std::string>& schedule, int now) {\n    const auto last = schedule.upper_bound(now);  // first task strictly later\n\n    std::size_t ran = 0;\n    for (auto it = schedule.begin(); it != last; ++it) {\n        dispatch(it->second);\n        ++ran;\n    }\n\n    schedule.erase(schedule.begin(), last);\n    return ran;\n}",
+      "notes": "upper_bound rather than lower_bound is what makes the interval closed at `now`, so a task scheduled for exactly this tick is not left for the next one. Holding `last` across the dispatch loop is safe because nothing is erased while the loop runs and a multimap erase would in any case only invalidate the elements it removes. Erasing inside the loop is the version that goes wrong: `schedule.erase(it)` followed by `++it` walks a freed node, and the fix is to write `it = schedule.erase(it)` instead."
     },
     {
       "id": "c11-w04",
       "section": "Load factor and rehashing",
-      "minutes": 8,
-      "prompt": "Write a function that fills a `std::unordered_map<int, int>` with `count` entries with no rehash occurring during the fill, and verifies that claim by comparing the bucket count before and after. Add a comment explaining why saving an iterator across the loop would be wrong even so.",
+      "minutes": 10,
+      "prompt": "Write a small `HitCounters` class over a `std::unordered_map<int, long>`. Its `open(channel)` returns a `long*` that callers are allowed to keep and write through indefinitely, even while other channels are being opened; the constructor takes the number of channels expected. Contract: opening a channel that already exists must not reset its count, the returned handle must remain valid across every later insertion, and the comment must justify why that promise is keepable here.",
       "checklist": [
-        "Calls reserve(count) before the insertion loop",
-        "Captures bucket_count() after reserve and compares it after the loop",
-        "Comment states that a rehash invalidates iterators but not pointers or references",
-        "reserve is described in elements, not buckets",
-        "No iterator is retained across an insertion"
+        "The constructor calls reserve with the expected element count, and a comment notes reserve counts elements rather than buckets",
+        "open uses try_emplace (or find plus insert), so re-opening an existing channel leaves its count alone",
+        "open returns the address of the mapped value, not an iterator, and no iterator is stored between calls",
+        "A comment states that a rehash relinks nodes without moving elements, so pointers and references survive while iterators do not",
+        "The counting operation goes through that same address rather than a second lookup by key"
       ],
-      "solution": "#include <iostream>\n#include <unordered_map>\n\nbool fill_without_rehash(std::unordered_map<int, int>& values,\n                         int count) {\n    values.reserve(static_cast<std::size_t>(count));  // elements, not buckets\n    const auto prepared = values.bucket_count();\n\n    for (int key = 0; key < count; ++key) {\n        values.emplace(key, key);\n    }\n\n    // Even here, holding an iterator across the loop would be a bad habit:\n    // any insertion that exceeded max_load_factor() would rehash, and a\n    // rehash invalidates every iterator (though pointers and references to\n    // elements survive, because the nodes are relinked rather than moved).\n    return values.bucket_count() == prepared;\n}",
-      "notes": "reserve(n) prepares for at least n elements under the current maximum load factor, so the bucket count it chooses is implementation-specific and generally larger than n. Never infer a safe insertion budget from one library's observed growth sequence."
+      "solution": "#include <cstddef>\n#include <unordered_map>\n\nclass HitCounters {\npublic:\n    explicit HitCounters(std::size_t expected) {\n        channels_.reserve(expected);  // elements, not buckets\n    }\n\n    // The returned pointer stays valid across later open() and record()\n    // calls: an insertion may rehash, and a rehash relinks the existing\n    // nodes into a new bucket array without moving the elements. An\n    // iterator would not survive that; a pointer or reference does.\n    long* open(int channel) {\n        auto [position, inserted] = channels_.try_emplace(channel, 0);\n        return &position->second;\n    }\n\n    void record(int channel) { ++*open(channel); }\n\n    std::size_t live() const { return channels_.size(); }\n\nprivate:\n    std::unordered_map<int, long> channels_;\n};\n",
+      "notes": "This is the one guarantee std::unordered_map has that a flat hash map does not: chained nodes are allocated individually and only relinked on growth, so an element's address is fixed for its lifetime. Porting this class to absl::flat_hash_map or boost::unordered_flat_map would compile and then hand out pointers that dangle after the next rehash — there the equivalent design stores stable ids, or unique_ptr values, and looks the element up each time. The reserve is a latency measure rather than a correctness one: it moves the O(n) relink out of the first burst of opens."
     },
     {
       "id": "c11-w05",
       "section": "Sorted vectors: `flat_map` and `flat_set`",
-      "minutes": 8,
-      "prompt": "Given a `std::vector<std::pair<std::uint32_t, int>>` of symbol-id and position-limit rows loaded from reference data, build a `std::flat_map<std::uint32_t, int>` in one bulk step and write a lookup returning `std::optional<int>` for a symbol id. Comment on the complexity of the build and of the lookup.",
+      "minutes": 12,
+      "prompt": "Network zones are given as a list of (first address, zone name) pairs; a zone owns every address from its own start up to the next zone's start. Build a `std::flat_map<std::uint32_t, std::string>` from that list and write `zone_of(zones, address)` returning `std::optional<std::string>`. Contract: the table is built in one bulk step rather than one insertion at a time, the query does no linear scan, and an address below the lowest start yields nullopt rather than the first zone.",
       "checklist": [
-        "Constructs the flat_map from the row range in one call, not by looping insert",
-        "Comment gives the build as O(n log n) and the lookup as O(log n)",
-        "Lookup uses find (or contains/at), and checks the result against end() before dereferencing",
-        "Returns std::nullopt for an absent id",
+        "The flat_map is constructed from the range in a single call; there is no per-row insert loop",
+        "A comment gives the build as O(n log n) and states why repeated insertion would be O(n^2)",
+        "The query uses upper_bound and steps back one position, rather than iterating",
+        "The begin() case is checked before decrementing, so an address below every start returns std::nullopt",
         "Includes <flat_map> and <optional>"
       ],
-      "solution": "#include <cstdint>\n#include <flat_map>\n#include <optional>\n#include <utility>\n#include <vector>\n\nusing Rows = std::vector<std::pair<std::uint32_t, int>>;\nusing Limits = std::flat_map<std::uint32_t, int>;\n\nLimits build_limits(const Rows& rows) {\n    // One bulk construction: O(n log n) sorting, one pair of allocations.\n    // Inserting the rows one at a time would shift a tail each time, O(n^2).\n    return Limits(rows.begin(), rows.end());\n}\n\nstd::optional<int> limit_for(const Limits& limits, std::uint32_t id) {\n    // O(log n) binary search over contiguous keys: no dependent node loads.\n    const auto found = limits.find(id);\n    if (found == limits.end()) {\n        return std::nullopt;\n    }\n    return found->second;\n}",
-      "notes": "std::flat_map is standard C++23 but shipped in different library releases at different times, so a compiler that accepts -std=c++23 may still lack <flat_map>. Note also that it stores keys and values in two separate contiguous containers — a structure-of-arrays layout — so the key search touches only the key array."
+      "solution": "#include <cstdint>\n#include <flat_map>\n#include <optional>\n#include <string>\n#include <utility>\n#include <vector>\n\nusing Zones = std::flat_map<std::uint32_t, std::string>;\n\nZones build_zones(std::vector<std::pair<std::uint32_t, std::string>> starts) {\n    // One bulk construction sorts once: O(n log n) over contiguous storage.\n    // Inserting row by row would shift a tail each time, so O(n^2) overall.\n    return Zones(starts.begin(), starts.end());\n}\n\nstd::optional<std::string> zone_of(const Zones& zones, std::uint32_t address) {\n    auto above = zones.upper_bound(address);  // first start > address\n    if (above == zones.begin()) {\n        return std::nullopt;                  // below every zone start\n    }\n    --above;                                  // the zone that contains it\n    return above->second;\n}",
+      "notes": "The interesting part is that the query is not a point lookup at all — no address except a zone's own start is a key in the table — and a hash container cannot answer it in any number of probes. Ordering is the data structure here, and the workload is the one flat_map exists for: bulk-built at startup, then queried without mutation, with the binary search stepping through a contiguous key array instead of chasing tree nodes. `zones.upper_bound(address)` followed by a decrement is the standard predecessor query; guarding against begin() is what distinguishes 'no zone' from 'the first zone'."
     },
     {
       "id": "c11-w06",
       "section": "Lookup, insertion, and node transfer",
       "minutes": 10,
-      "prompt": "Write `rename(std::map<std::string, int>& books, const std::string& from, const std::string& to)` that changes a key without destroying and rebuilding the element. It must return false when `from` is absent and when `to` already exists, and in the latter case must not lose the element.",
+      "prompt": "Two `std::map<std::string, Session>` tables hold active and idle sessions. Write `retire(active, idle, id)` that moves one session from the first to the second. Contract: no Session object may be copied, moved, or reconstructed, and no allocation may occur for the element; the function returns false if the id is absent from `active` or already present in `idle`, and in the failing case the session must still be findable in `active` afterwards.",
       "checklist": [
-        "Uses extract to obtain a node handle",
-        "Checks node.empty() to detect the missing source key",
-        "Assigns through node.key() while the node is outside the tree",
-        "Inserts the node back and checks the returned .inserted flag",
-        "On a failed insertion, reinstates the element (or otherwise does not drop it) rather than letting the node handle die"
+        "Uses extract to detach the element, so the existing node allocation is reused",
+        "Checks the handle's empty() to detect the absent id before touching key() or the mapped value",
+        "Inserts the node handle itself into the destination rather than inserting a value built from it",
+        "Inspects the insert result's .inserted flag and reinserts the still-owned .node into the source on failure",
+        "No path lets a non-empty node handle go out of scope, which would destroy the session"
       ],
-      "solution": "#include <map>\n#include <string>\n#include <utility>\n\nbool rename(std::map<std::string, int>& books,\n            const std::string& from,\n            const std::string& to) {\n    auto node = books.extract(from);\n    if (node.empty()) {\n        return false;  // nothing by that name\n    }\n\n    node.key() = to;  // legal: the node is outside the tree\n    auto result = books.insert(std::move(node));\n\n    if (!result.inserted) {\n        // result.node still owns the element; put it back under its old key\n        // so the rename fails without losing data.\n        result.node.key() = from;\n        books.insert(std::move(result.node));\n        return false;\n    }\n    return true;\n}",
-      "notes": "The mapped object is never copied, moved or reconstructed — the same allocation leaves the tree and rejoins it. If the failed-insert branch simply returned, the node handle would be destroyed at the end of the function and the element would be silently lost, which is why insert's result hands the node back to you."
+      "solution": "#include <map>\n#include <string>\n#include <utility>\n\nstruct Session {\n    std::string user;\n    int requests;\n};\n\nusing Sessions = std::map<std::string, Session>;\n\nbool retire(Sessions& active, Sessions& idle, const std::string& id) {\n    auto node = active.extract(id);\n    if (node.empty()) {\n        return false;  // no such session\n    }\n\n    auto result = idle.insert(std::move(node));\n    if (!result.inserted) {\n        // result.node still owns the element; return it to active so the\n        // failed move loses nothing. Neither step allocates.\n        active.insert(std::move(result.node));\n        return false;\n    }\n    return true;\n}",
+      "notes": "Writing this with find, insert and erase would copy or move the Session into the destination and then destroy the original, which is both slower and observable if anything holds a pointer to it — the node transfer keeps the same object at the same address. Two preconditions are easy to miss: the containers must have compatible allocators and identical key, mapped, and comparator types, and a node handle is a unique owner, so the rejected-insert branch must do something with `result.node` or the session disappears with it. `active.merge(idle)` performs this same transfer for every node at once, leaving exactly the colliding ones behind."
     }
   ]
 }

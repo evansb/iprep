@@ -351,71 +351,81 @@
     {
       "id": "c16-r01",
       "section": "Size, alignment, and padding",
-      "prompt": "What does this print on a 64-bit target?",
-      "code": "#include <iostream>\n\nstruct OrderWide {\n    char side;\n    double price;\n    int quantity;\n};\n\nstruct OrderCompact {\n    double price;\n    int quantity;\n    char side;\n};\n\nint main() {\n    std::cout << sizeof(OrderWide) << ' ' << sizeof(OrderCompact) << ' '\n              << alignof(OrderWide) << '\\n';\n}",
+      "prompt": "An audio clip header embeds a format record. What does this print on a 64-bit target?",
+      "code": "#include <cstddef>\n#include <iostream>\n\nstruct SampleFormat {\n    double sample_rate;\n    int channel_count;\n};\n\nstruct ClipHeader {\n    SampleFormat format;\n    int frame_count;\n};\n\nint main() {\n    std::cout << sizeof(SampleFormat) << ' '\n              << sizeof(ClipHeader) << ' '\n              << offsetof(ClipHeader, frame_count) << '\\n';\n}",
       "kind": "value",
-      "accept": ["24 16 8"],
-      "explain": "OrderWide pays seven bytes of interior padding to align price and four bytes of tail padding to reach a multiple of 8. Reordering to decreasing alignment removes the interior gap: price fills 0–7, quantity 8–11, side 12, and three bytes of tail padding complete 16. Both structs carry identical data; the difference is one third of every array element."
+      "accept": [
+        "16 24 16"
+      ],
+      "explain": "SampleFormat is 16 bytes: the double fills 0-7, channel_count 8-11, and four bytes of tail padding round the size up to the 8-byte alignment. The tempting answer is that ClipHeader is also 16, because frame_count looks like it should slot into the member subobject's unused bytes 12-15. It cannot: a member subobject occupies its full sizeof, so format spans 0-15 and frame_count starts at offset 16, giving 24 bytes with four more tail bytes. Nesting a struct with tail padding therefore costs the padding twice."
     },
     {
       "id": "c16-r02",
       "section": "Empty members cost nothing (if you ask)",
-      "prompt": "What does this print on a 64-bit target?",
-      "code": "#include <iostream>\n\nstruct Less {};\n\nstruct NaivePolicy {\n    Less compare;\n    double price;\n};\n\nstruct ModernPolicy {\n    [[no_unique_address]] Less compare;\n    double price;\n};\n\nint main() {\n    std::cout << sizeof(NaivePolicy) << ' ' << sizeof(ModernPolicy) << '\\n';\n}",
+      "prompt": "A physics engine tags bodies with an empty policy type. What does this print?",
+      "code": "#include <iostream>\n\nstruct Tag {};\n\nstruct Front {\n    [[no_unique_address]] Tag tag;\n    double mass;\n};\n\nstruct Back {\n    double mass;\n    [[no_unique_address]] Tag tag;\n};\n\nstruct Twice {\n    [[no_unique_address]] Tag first;\n    [[no_unique_address]] Tag second;\n    double mass;\n};\n\nint main() {\n    std::cout << sizeof(Front) << ' ' << sizeof(Back) << ' '\n              << sizeof(Twice) << '\\n';\n}",
       "kind": "value",
-      "accept": ["16 8"],
-      "explain": "A complete empty class still needs a nonzero size so two objects can be told apart by address, so NaivePolicy's compare occupies one byte and then seven bytes of padding align the double — 16 bytes to store one double. [[no_unique_address]] relaxes the unique-address requirement, letting compare overlap and the struct collapse to 8. The member still exists and its constructor still runs; only the address requirement changed."
+      "accept": [
+        "8 8 8"
+      ],
+      "explain": "All three are 8: the attribute lets each empty member overlap storage that the double already occupies, in front of it, behind it, or both. The tempting answer is 8 16 16 — that a member can only overlap what precedes it, so a trailing Tag needs its own byte, and two Tags need two. The layout rule is weaker than that: it only forbids two potentially-overlapping subobjects of the *same type* from sharing one address, and first and second satisfy that by sitting at two different offsets inside the padding-free double. Without the attribute Front would be 16, because the byte for tag drags seven padding bytes behind it."
     },
     {
       "id": "c16-r03",
-      "section": "Pinning layout: offsetof and the wire flagship",
-      "prompt": "What does this print on a 64-bit target?",
-      "code": "#include <cstddef>\n#include <cstdint>\n#include <iostream>\n\nstruct MdAddOrder {\n    std::uint64_t sequence;\n    std::uint64_t order_id;\n    std::uint32_t price;\n    std::uint32_t quantity;\n    std::uint16_t symbol_id;\n    std::byte side;\n    std::byte flags;\n    std::uint16_t participant_id;\n    std::byte reserved[2];\n};\n\nint main() {\n    std::cout << sizeof(MdAddOrder) << ' '\n              << offsetof(MdAddOrder, symbol_id) << ' '\n              << offsetof(MdAddOrder, participant_id) << ' '\n              << offsetof(MdAddOrder, reserved) << '\\n';\n}",
-      "kind": "value",
-      "accept": ["32 24 28 30"],
-      "explain": "Walk the offsets: sequence 0–7, order_id 8–15, price 16–19, quantity 20–23, symbol_id 24–25, side 26, flags 27, participant_id 28–29, reserved 30–31. Every member lands on a naturally aligned offset with no implicit padding, and the two explicit reserved bytes occupy what would otherwise have been tail padding — which is why the record needs no interior gaps and the final offset plus the field size exactly reaches sizeof."
+      "section": "Punning done right",
+      "prompt": "A sprite loader wants one integer per pixel. What happens when this is compiled and run?",
+      "code": "#include <bit>\n#include <cstdint>\n#include <iostream>\n\nstruct Rgb {\n    std::uint8_t red;\n    std::uint8_t green;\n    std::uint8_t blue;\n};\n\nint main() {\n    const Rgb pixel{0x12, 0x34, 0x56};\n    const auto packed = std::bit_cast<std::uint32_t>(pixel);\n    std::cout << packed << '\\n';\n}",
+      "kind": "no-compile",
+      "explain": "std::bit_cast requires sizeof(From) == sizeof(To), and Rgb is three bytes against four for std::uint32_t, so the call is ill-formed. The tempting reading is that padding rounds Rgb up to four bytes: it does not, because alignof(Rgb) is 1 and no padding is needed. The fix is to state the encoding explicitly (shift the three channels into a uint32_t) or to add a fourth explicit channel byte to the struct so the sizes really do match."
     },
     {
       "id": "c16-r04",
-      "section": "Punning done right",
-      "prompt": "What does this print on an IEEE-754 target?",
-      "code": "#include <bit>\n#include <cstdint>\n#include <iostream>\n\nint main() {\n    float value = 1.0F;\n    std::uint32_t image = std::bit_cast<std::uint32_t>(value);\n\n    std::cout << image << ' '\n              << (std::bit_cast<float>(image) == value) << ' '\n              << static_cast<std::uint32_t>(value) << '\\n';\n}",
+      "section": "Byte order",
+      "prompt": "A sensor feed sends IEEE-754 floats in network order. What does this print?",
+      "code": "#include <bit>\n#include <cstddef>\n#include <cstdint>\n#include <cstring>\n#include <iostream>\n#include <span>\n\nfloat read_be_float(std::span<const std::byte, 4> bytes) {\n    std::uint32_t image;\n    std::memcpy(&image, bytes.data(), sizeof(image));\n    if constexpr (std::endian::native == std::endian::little) {\n        image = std::byteswap(image);\n    }\n    return std::bit_cast<float>(image);\n}\n\nint main() {\n    const std::byte wire[]{std::byte{0x3F}, std::byte{0xC0},\n                           std::byte{0x00}, std::byte{0x00}};\n\n    const float value = read_be_float(std::span<const std::byte, 4>{wire});\n    std::cout << value << ' '\n              << (std::bit_cast<std::uint32_t>(value) == 0x3FC00000u) << '\\n';\n}",
       "kind": "value",
-      "accept": ["1065353216 1 1"],
-      "explain": "bit_cast reinterprets the representation, so 1.0F becomes 0x3F800000 — sign 0, biased exponent 127, zero fraction — which is 1065353216. Casting back reproduces the original float exactly, since no bits were lost. The third value is the contrast that matters: static_cast performs the *numeric* conversion and gives 1. Choosing the wrong one of these two is the classic punning bug."
+      "accept": [
+        "1.5 1"
+      ],
+      "explain": "The four wire bytes 3F C0 00 00 are the big-endian encoding of 1.5f. The bytes are copied into an integer, swapped only on a little-endian host, and then reinterpreted as a float with std::bit_cast, so the round trip back to the integer image reproduces 0x3FC00000 and the comparison is true. The tempting mistake is to byteswap the float itself — there is no numeric swap of a float, and swapping after the bit_cast would produce a different value entirely. Note that the swap is conditional: on a big-endian host the bytes are already in place."
     },
     {
       "id": "c16-r05",
-      "section": "Byte order",
-      "prompt": "What does this print?",
-      "code": "#include <bit>\n#include <cstddef>\n#include <cstdint>\n#include <cstring>\n#include <iostream>\n\nint main() {\n    const std::byte wire[]{std::byte{0x00}, std::byte{0x01},\n                           std::byte{0x86}, std::byte{0xA0}};\n\n    std::uint32_t value;\n    std::memcpy(&value, wire, sizeof(value));\n    if constexpr (std::endian::native == std::endian::little) {\n        value = std::byteswap(value);\n    }\n\n    std::cout << value << '\\n';\n}",
+      "section": "Lifetime, storage reuse, and unions",
+      "prompt": "A window toolkit stores events in a union. What does this print?",
+      "code": "#include <cstdint>\n#include <iostream>\n\nstruct KeyDown {\n    std::uint32_t kind;\n    std::uint32_t timestamp;\n    std::uint16_t scancode;\n};\n\nstruct Resized {\n    std::uint32_t kind;\n    std::uint32_t timestamp;\n    float scale;\n};\n\nunion Event {\n    KeyDown key;\n    Resized resized;\n};\n\nint main() {\n    Event event{};\n    event.resized = Resized{2u, 4096u, 1.5f};\n\n    std::cout << event.key.kind << ' ' << event.key.timestamp << '\\n';\n}",
       "kind": "value",
-      "accept": ["100000"],
-      "explain": "The four wire bytes spell 0x000186A0 in big-endian order, which is 100000. memcpy loads them in address order, so on a little-endian host the integer initially reads 0xA0860100 and the byteswap corrects it; on a big-endian host the if constexpr branch is discarded and no swap happens. Either way the printed value is the same, which is the property a wire decoder needs."
+      "accept": [
+        "2 4096"
+      ],
+      "explain": "Resized is the active member, yet kind and timestamp may be inspected through KeyDown: both structs are standard-layout and their first two members have layout-compatible types, so those two members form the common initial sequence. The sequence stops at the first mismatch, so reading event.key.scancode would be undefined behaviour even though it sits at an offset that exists in both structs — the tempting reading is that \"the bytes are there, so any member is readable\". Only the matching prefix is guaranteed."
     },
     {
       "id": "c16-r06",
-      "section": "Pointers: arithmetic, provenance, aliasing",
-      "prompt": "What happens when this is compiled and run?",
-      "code": "#include <cstddef>\n#include <cstdint>\n#include <iostream>\n\nint main() {\n    alignas(8) std::byte storage[16]{};\n    auto* field = reinterpret_cast<std::uint32_t*>(storage + 1);\n\n    *field = 1;\n    std::cout << *field << '\\n';\n}",
+      "section": "Pinning layout: offsetof and the wire flagship",
+      "prompt": "A parser skips a one-byte frame marker before reading a header. What happens when this is compiled and run?",
+      "code": "#include <cstddef>\n#include <cstdint>\n#include <iostream>\n\nstruct Header {\n    std::uint32_t sequence;\n    std::uint16_t length;\n    std::uint16_t kind;\n};\n\nint main() {\n    alignas(4) std::byte frame[16]{};\n    frame[0] = std::byte{0x7E};  // one-byte start marker\n    frame[1] = std::byte{0x2A};\n\n    const auto* header = reinterpret_cast<const Header*>(frame + 1);\n    std::cout << header->sequence << '\\n';\n}",
       "kind": "ub",
-      "explain": "storage is 8-byte aligned, so storage + 1 is an odd address and cannot satisfy std::uint32_t's 4-byte alignment requirement; both the store and the load through that pointer are undefined behaviour, and UBSan reports 'misaligned address ... which requires 4 byte alignment'. This is exactly the hazard behind a packed wire record: x86 often tolerates the unaligned access at some cost, but the C++ program is still undefined. Use std::memcpy into a properly aligned object."
+      "explain": "frame + 1 is not a multiple of alignof(Header), and there is no Header object living in those bytes, so the member access has undefined behaviour on two counts: misaligned access and access through a type that cannot alias an array of std::byte. The tempting reading is that x86 tolerates unaligned loads so the code is merely slow; tolerance of the instruction is not permission from the language, and the sanitizer reports the misaligned member access. Copy the bytes into a Header with std::memcpy instead — the copy is defined at any offset and normally compiles to the same loads."
     },
     {
       "id": "c16-r07",
-      "section": "The type property ladder",
-      "prompt": "What happens when this is compiled and run?",
-      "code": "#include <cstdint>\n#include <string>\n#include <type_traits>\n\nstruct RichTick {\n    std::int64_t timestamp;\n    double price;\n\nprivate:\n    std::string symbol;\n};\n\nstatic_assert(std::is_trivially_copyable_v<RichTick>);\nstatic_assert(std::is_standard_layout_v<RichTick>);\n\nint main() {}",
-      "kind": "no-compile",
-      "explain": "Both assertions fail. std::string has a non-trivial copy constructor and destructor, so RichTick is not trivially copyable and cannot be memcpy'd; separately, the private member sits under a different access specifier from the public ones, which breaks standard layout. This is the maintenance tripwire the chapter recommends: adding ownership to a wire type fails at the type definition rather than silently corrupting a feed handler."
+      "section": "Pointers: arithmetic, provenance, aliasing",
+      "prompt": "A tile map keeps two rows as separate arrays. What happens when this is compiled and run?",
+      "code": "#include <iostream>\n\nint main() {\n    int upper[4]{1, 2, 3, 4};\n    int lower[4]{5, 6, 7, 8};\n\n    int* cursor = upper + 4;  // one past the end of upper\n    int total = 0;\n    for (int i = 0; i < 4; ++i) {\n        total += cursor[i];   // \"the next row starts here\"\n    }\n\n    std::cout << total << ' ' << lower[0] << '\\n';\n}",
+      "kind": "ub",
+      "explain": "cursor is a valid one-past-the-end pointer for upper, but every dereference through it leaves that array. Physical adjacency of the two locals grants nothing: the pointer's provenance is upper, so the reads are out of bounds and the sanitizer reports a stack overflow. The tempting reading is that the two arrays are laid out back to back so the loop simply sums lower — the compiler is free to reorder, pad, or keep lower in registers, and it may assume the loop stays inside upper. A tile map that needs one flat address space must allocate one array and index into it."
     },
     {
       "id": "c16-r08",
-      "section": "Pointers: arithmetic, provenance, aliasing",
-      "prompt": "What happens when this is compiled and run?",
-      "code": "#include <iostream>\n\nint left[4]{1, 2, 3, 4};\nint right[4]{5, 6, 7, 8};\n\nint main() {\n    int* finish = left + 4;\n    std::cout << *finish << '\\n';\n}",
-      "kind": "ub",
-      "explain": "finish is the one-past-the-end pointer for left: forming and comparing it is legal, dereferencing it is undefined behaviour. It is tempting to reason that right is laid out immediately after left and therefore 5 is printed — ASan reports a global-buffer-overflow instead. Provenance is the point: the pointer belongs to the left array, and physical adjacency supplies no additional element."
+      "section": "The type property ladder",
+      "prompt": "Three record types from a glyph cache. What does this print?",
+      "code": "#include <iostream>\n#include <type_traits>\n\nstruct GlyphKey {\n    char32_t code;\n\nprivate:\n    unsigned page = 0;\n};\n\nstruct FrameTimer {\n    unsigned ticks;\n    ~FrameTimer() {}\n};\n\nstruct SlotRef {\n    int& target;\n};\n\nint main() {\n    std::cout << std::is_trivially_copyable_v<GlyphKey>\n              << std::is_standard_layout_v<GlyphKey> << ' '\n              << std::is_trivially_copyable_v<FrameTimer>\n              << std::is_standard_layout_v<FrameTimer> << ' '\n              << std::is_trivially_copyable_v<SlotRef>\n              << std::is_standard_layout_v<SlotRef> << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "10 01 10"
+      ],
+      "explain": "The two properties are largely independent, which is exactly what this prints. GlyphKey mixes public and private data members, so it is not standard-layout, but its copy operations and destructor are still trivial. FrameTimer is the mirror image: a user-provided destructor destroys trivial copyability while the C-like layout survives. SlotRef holds a reference, which disqualifies standard layout but leaves a trivial, non-deleted copy constructor, so it remains trivially copyable. The tempting reading is that these are nested categories where one failure implies the other; asking for the exact property the operation needs is the only reliable test."
     }
   ],
   "writing": [
@@ -423,122 +433,121 @@
       "id": "c16-w01",
       "section": "The second pass: objects as bytes",
       "minutes": 8,
-      "prompt": "Write `dump_bytes(std::span<const std::byte>)` printing each byte as two lowercase hex digits, and a `value_equal(const Quote&, const Quote&)` for a padded `struct Quote { char side; int quantity; };`. Add a comment saying why memcmp is not the right implementation of value_equal.",
+      "prompt": "A glyph cache keyed by `struct Glyph { char32_t code; std::uint8_t page; float advance; };` reports intermittent misses on keys that compare equal: the previous hash hashed all `sizeof(Glyph)` bytes. Write `same_glyph` and `glyph_hash` satisfying this contract: two Glyph values whose members are all equal must always produce the same hash, whatever the storage they were built in, and neither function may inspect raw bytes. Add one comment naming the defect in the byte-wise version.",
       "checklist": [
-        "dump_bytes takes std::span<const std::byte>, not a raw pointer and length",
-        "Bytes are converted with std::to_integer before printing",
-        "Formatting produces exactly two hex digits per byte",
-        "value_equal compares members, not bytes",
-        "A comment states that memcmp also compares padding, whose contents are unspecified"
+        "same_glyph compares the three members and returns bool",
+        "glyph_hash combines per-member hashes; no memcpy, memcmp or std::byte view appears",
+        "A comment states that the byte-wise hash also hashed padding, whose contents are unspecified",
+        "Both functions take const Glyph& and are marked noexcept"
       ],
-      "solution": "#include <cstddef>\n#include <format>\n#include <iostream>\n#include <span>\n\nstruct Quote {\n    char side;\n    int quantity;\n};\n\nvoid dump_bytes(std::span<const std::byte> bytes) {\n    for (std::byte byte : bytes) {\n        std::cout << std::format(\"{:02x} \",\n                                 std::to_integer<unsigned int>(byte));\n    }\n    std::cout << '\\n';\n}\n\n// std::memcmp compares the whole object representation, including the three\n// padding bytes between side and quantity. Member assignment does not promise\n// anything about those bytes, so equal values can compare unequal.\nbool value_equal(const Quote& left, const Quote& right) {\n    return left.side == right.side && left.quantity == right.quantity;\n}",
-      "notes": "std::as_bytes(std::span{&quote, 1}) is the idiomatic way to obtain the span. The same argument applies to hashing: hashing sizeof(T) bytes of a padded struct can give two hashes for one value, so hash the members or define a canonical encoding with no implicit padding."
+      "solution": "#include <cstdint>\n#include <functional>\n\nstruct Glyph {\n    char32_t code;\n    std::uint8_t page;\n    float advance;\n};\n\nbool same_glyph(const Glyph& left, const Glyph& right) noexcept {\n    return left.code == right.code && left.page == right.page &&\n           left.advance == right.advance;\n}\n\n// The old implementation hashed sizeof(Glyph) bytes, which includes the three\n// padding bytes after the page member. Member assignment promises nothing\n// about padding,\n// so two equal keys built in different storage could hash differently and miss.\nstd::size_t glyph_hash(const Glyph& glyph) noexcept {\n    std::size_t seed = std::hash<char32_t>{}(glyph.code);\n    seed = seed * 1000003U ^ std::hash<std::uint8_t>{}(glyph.page);\n    seed = seed * 1000003U ^ std::hash<float>{}(glyph.advance);\n    return seed;\n}",
+      "notes": "The same argument rules out std::memcmp as the equality predicate. A float member adds its own wrinkle: 0.0f and -0.0f compare equal but have different representations, so a byte-wise hash would also break the hash/equality contract for a type with no padding at all. If a canonical byte image is genuinely wanted, define one explicitly with no implicit padding rather than borrowing the ABI layout."
     },
     {
       "id": "c16-w02",
       "section": "Size, alignment, and padding",
       "minutes": 8,
-      "prompt": "Given `struct Fill { char side; double price; int quantity; short venue; };`, write a reordered version with the same members that minimises padding, and pin both layouts with static_asserts on sizeof and alignof. State the size you removed per element.",
+      "prompt": "A particle system stores `struct Particle { bool alive; double x; float mass; std::uint16_t sprite; double y; };` in an array of 100000. Declare `struct ParticleCompact` with the same five members and the same names, reordered so the type is as small as the ABI allows, and pin the result with static_asserts on the size, the alignment, and every member offset. Do not use packing pragmas or attributes.",
       "checklist": [
-        "The reordered struct declares members in decreasing alignment order",
-        "static_assert pins sizeof and alignof for the compact version",
-        "static_assert also pins the original size, documenting the saving",
-        "No alignas or packing attribute is used — reordering alone",
-        "A comment states the per-element saving"
+        "All five members are present with unchanged types and names",
+        "Members are ordered by non-increasing alignment",
+        "static_assert pins sizeof and alignof",
+        "static_assert pins offsetof for each of the five members",
+        "sizeof(ParticleCompact) is 24, down from 40"
       ],
-      "solution": "#include <cstddef>\n\nstruct Fill {\n    char side;      // 0        (+7 padding)\n    double price;   // 8 - 15\n    int quantity;   // 16 - 19\n    short venue;    // 20 - 21  (+2 tail padding)\n};\n\nstatic_assert(alignof(Fill) == 8);\nstatic_assert(sizeof(Fill) == 24);\n\nstruct FillCompact {\n    double price;   // 0 - 7\n    int quantity;   // 8 - 11\n    short venue;    // 12 - 13\n    char side;      // 14      (+1 tail padding)\n};\n\nstatic_assert(alignof(FillCompact) == 8);\nstatic_assert(sizeof(FillCompact) == 16);\n\n// 8 bytes saved per element: an array of 1,000,000 fills shrinks by 8 MB,\n// and each 64-byte cache line now holds 4 fills instead of 2.",
-      "notes": "Decreasing alignment order is a first pass, not a law — ABI compatibility with an existing binary interface, or keeping semantically related fields adjacent, can justify keeping the padding. The static_asserts are what make that a decision rather than an accident, because a later edit that reintroduces a gap fails the build."
+      "starter": "#include <cstddef>\n#include <cstdint>\n\nstruct Particle {          // 40 bytes on a common 64-bit ABI\n    bool alive;\n    double x;\n    float mass;\n    std::uint16_t sprite;\n    double y;\n};\n\n// TODO: struct ParticleCompact with the same members, minimal size,\n// plus static_asserts pinning size, alignment and every offset.",
+      "solution": "#include <cstddef>\n#include <cstdint>\n\nstruct ParticleCompact {\n    double x;\n    double y;\n    float mass;\n    std::uint16_t sprite;\n    bool alive;\n};\n\nstatic_assert(alignof(ParticleCompact) == 8);\nstatic_assert(sizeof(ParticleCompact) == 24);\nstatic_assert(offsetof(ParticleCompact, x) == 0);\nstatic_assert(offsetof(ParticleCompact, y) == 8);\nstatic_assert(offsetof(ParticleCompact, mass) == 16);\nstatic_assert(offsetof(ParticleCompact, sprite) == 20);\nstatic_assert(offsetof(ParticleCompact, alive) == 22);",
+      "notes": "The original wastes 16 bytes per particle, 1.6 MB across the array, purely on interior padding. Sorting members by decreasing alignment is a first pass, not a law: ABI compatibility, semantic grouping, or splitting hot from cold fields can outrank it. Pinning offsets rather than only sizeof matters because a later edit can preserve the total while moving a field."
     },
     {
       "id": "c16-w03",
       "section": "Empty members cost nothing (if you ask)",
       "minutes": 7,
-      "prompt": "Write a `SortedBook<Compare>` class template that stores a comparator and a `double best_price`, arranged so that a stateless comparator costs nothing. Pin the result with a static_assert, and add a comment noting what happens if the comparator later gains state.",
+      "prompt": "Write `template <class Compare> class ScoreTable` holding a comparator and a `std::uint32_t count_`. Contract: the comparator must be a member, not a base class; the class must expose `prefers(a, b)` that calls the comparator and `size()`; and `sizeof(ScoreTable<C>)` must be 4 when C is empty and 8 when C carries a `std::uint32_t`. Prove both with static_asserts.",
       "checklist": [
-        "The comparator is a member marked [[no_unique_address]], not a base class",
-        "A static_assert pins sizeof for a stateless comparator",
-        "The comparator is still usable — it is invoked, not just stored",
-        "A comment notes that adding state to the comparator enlarges every enclosing object",
-        "No packing attribute or alignas is used"
+        "The comparator is a data member marked [[no_unique_address]]",
+        "No inheritance from Compare appears",
+        "prefers forwards to the stored comparator; size returns count_",
+        "static_assert shows sizeof is 4 for an empty comparator",
+        "static_assert shows sizeof is 8 for a comparator holding a std::uint32_t"
       ],
-      "solution": "#include <cstddef>\n#include <functional>\n\ntemplate<class Compare>\nclass SortedBook {\npublic:\n    SortedBook() = default;\n\n    bool improves(double candidate) const {\n        return compare_(candidate, best_price_);\n    }\n\n    void set_best(double price) { best_price_ = price; }\n\nprivate:\n    [[no_unique_address]] Compare compare_{};\n    double best_price_ = 0.0;\n};\n\nstruct Less {\n    bool operator()(double a, double b) const { return a < b; }\n};\n\n// A stateless comparator is allowed to overlap best_price_, so the wrapper\n// costs exactly what the payload costs. Give Compare a data member and every\n// SortedBook in every array grows -- keep this assertion beside the class.\nstatic_assert(sizeof(SortedBook<Less>) == sizeof(double));\nstatic_assert(sizeof(SortedBook<std::less<double>>) == sizeof(double));",
-      "notes": "Standard-library containers traditionally achieved this with the empty-base optimisation, which forces the policy into the inheritance hierarchy even though it is conceptually a member. [[no_unique_address]] expresses the same storage saving without that distortion, and it still works when the empty class is marked final, which EBO cannot."
+      "solution": "#include <cstdint>\n\ntemplate <class Compare>\nclass ScoreTable {\npublic:\n    explicit ScoreTable(Compare compare = Compare{}) : compare_(compare) {}\n\n    bool prefers(std::uint32_t left, std::uint32_t right) const {\n        return compare_(left, right);\n    }\n\n    std::uint32_t size() const noexcept { return count_; }\n\nprivate:\n    [[no_unique_address]] Compare compare_;\n    std::uint32_t count_{};\n};\n\nstruct HigherScore {\n    bool operator()(std::uint32_t left, std::uint32_t right) const {\n        return left > right;\n    }\n};\n\nstruct AboveFloor {\n    std::uint32_t floor_value;\n    bool operator()(std::uint32_t left, std::uint32_t right) const {\n        return (left > floor_value) && (left > right);\n    }\n};\n\nstatic_assert(sizeof(ScoreTable<HigherScore>) == 4);\nstatic_assert(sizeof(ScoreTable<AboveFloor>) == 8);",
+      "notes": "Without the attribute the empty comparator occupies a byte and drags three more bytes of padding in front of count_, doubling the object. The empty-base optimization would achieve the same saving, at the cost of expressing a storage trick as an is-a relationship and of failing outright if the comparator is marked final. Keep the size assertion next to the class: it turns a future stateful comparator into a visible decision instead of a silent growth."
     },
     {
       "id": "c16-w04",
       "section": "The type property ladder",
       "minutes": 8,
-      "prompt": "Define a `Tick` value type suitable for native byte copying and C interop, and write the full set of static_asserts that turn a future ownership or access-control edit into a build failure. Add a comment for each assertion naming the operation it licenses.",
+      "prompt": "`SpriteFrame` is uploaded to a GPU buffer by copying its bytes. Define the type and a tripwire block that fails the build if any future edit breaks the upload: it must assert the exact property the byte copy relies on, assert C-like layout so offsets stay usable, and assert that the record contains no implicit padding by comparing `sizeof` with the sum of member sizes. Then write `void upload(std::span<std::byte> destination, const SpriteFrame& frame)` that copies the record and asserts the destination is large enough.",
       "checklist": [
-        "Type is an aggregate of fixed-width scalars with uniform access control",
-        "static_assert on std::is_trivially_copyable_v, with a comment naming memcpy",
-        "static_assert on std::is_standard_layout_v, with a comment naming offsetof or C interop",
-        "sizeof and alignof are also asserted",
-        "No claim is made that the type is portable across ABIs or wire formats"
+        "static_assert(std::is_trivially_copyable_v<SpriteFrame>) is present",
+        "static_assert(std::is_standard_layout_v<SpriteFrame>) is present",
+        "A static_assert compares sizeof(SpriteFrame) with the sum of the member sizes",
+        "upload uses std::memcpy, not a reinterpret_cast of the destination",
+        "upload checks destination.size() before copying"
       ],
-      "solution": "#include <cstddef>\n#include <cstdint>\n#include <type_traits>\n\nstruct Tick {\n    std::int64_t timestamp;\n    double price;\n    std::int32_t quantity;\n    std::int32_t venue;\n};\n\n// Licenses std::memcpy between live Ticks and a byte-buffer round trip.\nstatic_assert(std::is_trivially_copyable_v<Tick>);\n\n// Licenses offsetof and the common-initial-sequence and C-interop rules.\nstatic_assert(std::is_standard_layout_v<Tick>);\n\n// Licenses Tick tick{} costing nothing beyond the stores you asked for.\nstatic_assert(std::is_trivial_v<Tick>);\n\n// Pins the layout this translation target agreed to.\nstatic_assert(sizeof(Tick) == 24);\nstatic_assert(alignof(Tick) == 8);\nstatic_assert(offsetof(Tick, price) == 8);\nstatic_assert(offsetof(Tick, quantity) == 16);\nstatic_assert(offsetof(Tick, venue) == 20);\n\n// These assertions describe a native object copy, not a portable wire format:\n// padding, byte order and floating-point encoding are still ABI-specific.",
-      "notes": "Adding a std::string member breaks the first assertion; moving one member behind `private:` breaks the second; inserting a short breaks the offsets. That is the whole value of the block — the failure lands on the type definition instead of on a decoder that silently misreads every later field."
+      "solution": "#include <cstddef>\n#include <cstdint>\n#include <cstring>\n#include <span>\n#include <stdexcept>\n#include <type_traits>\n\nstruct SpriteFrame {\n    std::uint32_t atlas_index;\n    std::uint16_t left;\n    std::uint16_t top;\n    std::uint16_t width;\n    std::uint16_t height;\n};\n\nstatic_assert(std::is_trivially_copyable_v<SpriteFrame>);\nstatic_assert(std::is_standard_layout_v<SpriteFrame>);\nstatic_assert(sizeof(SpriteFrame) ==\n              sizeof(std::uint32_t) + 4 * sizeof(std::uint16_t));\n\nvoid upload(std::span<std::byte> destination, const SpriteFrame& frame) {\n    if (destination.size() < sizeof(SpriteFrame)) {\n        throw std::invalid_argument{\"upload buffer too small\"};\n    }\n    std::memcpy(destination.data(), &frame, sizeof(frame));\n}",
+      "notes": "Trivial copyability is the property that licenses the byte copy; standard layout is what keeps offsetof and cross-language field agreement meaningful. The sum-of-sizes assertion is the one that catches a reordering edit: inserting a std::uint8_t between two 16-bit fields would keep both traits true while silently adding a padding byte the GPU side does not expect. None of this makes the record portable across machines — endianness and floating-point format are separate protocol decisions."
     },
     {
       "id": "c16-w05",
       "section": "Lifetime, storage reuse, and unions",
       "minutes": 10,
-      "prompt": "Write a tagged C-compatible message union with `Add` and `Cancel` alternatives that share an `int kind` first member, plus an `inspect_kind` that reads the tag through either alternative. Add comments marking exactly which reads are permitted and which would be undefined behaviour.",
+      "prompt": "A tile map cell holds either an integer atlas index or a float blend weight. A colleague implemented it as a bare union and reads whichever member the caller asks for. Write `class Cell` that keeps the same storage but makes the active member explicit: a `Kind` enum, `set_index` and `set_weight` that record the new active member, and `index()`/`weight()` that throw `std::logic_error` when the requested member is not active. Add a comment saying why the common-initial-sequence rule does not rescue the original design.",
       "checklist": [
-        "Both alternatives are standard-layout structs whose first member is an identically typed kind field",
-        "inspect_kind reads only the common initial sequence member",
-        "A comment states that reading a non-common member of the inactive alternative is undefined behaviour",
-        "A static_assert confirms both alternatives are standard-layout",
-        "A comment names std::variant as the safer default when C compatibility is not required"
+        "A union of the two alternatives plus a separate Kind tag member",
+        "Each setter assigns its member and updates the tag",
+        "Each getter checks the tag and throws when it does not match",
+        "A comment explains that reading an inactive member is undefined behaviour",
+        "The comment notes that the common-initial-sequence exception applies only to standard-layout struct members with a matching prefix"
       ],
-      "solution": "#include <cstdint>\n#include <type_traits>\n\nstruct Add {\n    int kind;\n    int quantity;\n};\n\nstruct Cancel {\n    int kind;\n    std::uint64_t order_id;\n};\n\nstatic_assert(std::is_standard_layout_v<Add>);\nstatic_assert(std::is_standard_layout_v<Cancel>);\n\nunion Message {\n    Add add;\n    Cancel cancel;\n};\n\n// The common initial sequence is exactly `kind`: corresponding initial members\n// with layout-compatible types. Reading it through either alternative is\n// permitted no matter which one is active.\nint inspect_kind(const Message& message) {\n    return message.cancel.kind;\n}\n\nint quantity_of(const Message& message) {\n    // Precondition: add is the active alternative. Reading message.cancel\n    // .order_id here would be undefined behaviour -- order_id is past the\n    // end of the common initial sequence.\n    return message.add.quantity;\n}\n\n// Without a C ABI requirement, std::variant<Add, Cancel> tracks the active\n// alternative for you and turns the mistake above into a checked access.",
-      "notes": "The common-initial-sequence exception exists to support this exact tagged-record shape; it is not a general licence to pun. Note that the caller of quantity_of still has to know which alternative is active — the union tracks nothing, which is precisely the burden std::variant removes."
+      "solution": "#include <cstdint>\n#include <stdexcept>\n\nclass Cell {\npublic:\n    enum class Kind { index, weight };\n\n    Cell() noexcept : index_(0), kind_(Kind::index) {}\n\n    void set_index(std::uint32_t value) noexcept {\n        index_ = value;               // begins index_'s lifetime\n        kind_ = Kind::index;\n    }\n\n    void set_weight(float value) noexcept {\n        weight_ = value;              // begins weight_'s lifetime\n        kind_ = Kind::weight;\n    }\n\n    std::uint32_t index() const {\n        if (kind_ != Kind::index) {\n            throw std::logic_error{\"cell does not hold an index\"};\n        }\n        return index_;\n    }\n\n    float weight() const {\n        if (kind_ != Kind::weight) {\n            throw std::logic_error{\"cell does not hold a weight\"};\n        }\n        return weight_;\n    }\n\nprivate:\n    // Reading the inactive member is undefined behaviour in C++, even though\n    // the bytes exist and one compiler may return the expected bit pattern.\n    // The common-initial-sequence exception covers only union members that are\n    // standard-layout structs sharing a matching leading run of members, so a\n    // union of a plain uint32_t and a plain float gets nothing from it.\n    union {\n        std::uint32_t index_;\n        float weight_;\n    };\n    Kind kind_;\n};",
+      "notes": "The tag is the whole point: the union supplies storage, and the class supplies the lifetime bookkeeping the language will not do for a bare union. If the goal were reinterpreting the bits of one member as the other, the tool is std::bit_cast, not a union read. std::variant (Chapter 14) is the standard version of this class when the alternatives need non-trivial construction."
     },
     {
       "id": "c16-w06",
       "section": "Punning done right",
       "minutes": 7,
-      "prompt": "Write two functions that extract a float's 32-bit representation — one with std::memcpy and one with std::bit_cast — plus the inverse using bit_cast. Add a static_assert justifying each, and a comment explaining why `*reinterpret_cast<std::uint32_t*>(&value)` is not an option.",
+      "prompt": "An audio filter needs a sign test that is exact for negative zero, which `value < 0.0f` misses. Write `constexpr bool has_sign_bit(float value)` and `constexpr float with_sign_bit_cleared(float value)`, each inspecting the representation. Contract: both must be usable in a constant expression — prove it with static_asserts including `has_sign_bit(-0.0f)` — and neither may use a union or a `reinterpret_cast`.",
       "checklist": [
-        "The memcpy version copies into an existing std::uint32_t object with sizeof(result)",
-        "A static_assert confirms the two types have equal size",
-        "The bit_cast version is a single expression and is marked constexpr where possible",
-        "An inverse function reconstructs the float from the integer image",
-        "A comment states that the reinterpret_cast version is undefined behaviour at the dereference, not at the cast"
+        "Both functions are constexpr and use std::bit_cast in both directions",
+        "No union member read and no reinterpret_cast appears",
+        "static_assert(has_sign_bit(-0.0f)) is present and passes",
+        "A static_assert shows that with_sign_bit_cleared(-2.5f) is 2.5f",
+        "A static_assert or comment records that the code assumes a 32-bit IEEE-754 float"
       ],
-      "solution": "#include <bit>\n#include <cstdint>\n#include <cstring>\n#include <type_traits>\n\nstatic_assert(sizeof(float) == sizeof(std::uint32_t));\nstatic_assert(std::is_trivially_copyable_v<float>);\n\nstd::uint32_t bits_with_memcpy(float value) {\n    std::uint32_t result;\n    std::memcpy(&result, &value, sizeof(result));\n    return result;\n}\n\nconstexpr std::uint32_t bits_with_bit_cast(float value) {\n    return std::bit_cast<std::uint32_t>(value);\n}\n\nconstexpr float float_from_bits(std::uint32_t image) {\n    return std::bit_cast<float>(image);\n}\n\nstatic_assert(float_from_bits(bits_with_bit_cast(1.0F)) == 1.0F);\n\n// *reinterpret_cast<std::uint32_t*>(&value) is undefined behaviour at the\n// dereference, not at the cast: the float object is being accessed through a\n// type outside its permitted alias set. It usually works at -O0 and changes\n// once alias analysis and inlining run at -O2.",
-      "notes": "Both defined spellings normally compile to a single register-transfer instruction, so the undefined version buys nothing. bit_cast is the default for equal-size values; keep memcpy for dynamic sizes or when writing into storage you already own."
+      "solution": "#include <bit>\n#include <cstdint>\n\nstatic_assert(sizeof(float) == sizeof(std::uint32_t));\n\nconstexpr bool has_sign_bit(float value) {\n    return (std::bit_cast<std::uint32_t>(value) >> 31) != 0U;\n}\n\nconstexpr float with_sign_bit_cleared(float value) {\n    return std::bit_cast<float>(std::bit_cast<std::uint32_t>(value) &\n                                0x7FFFFFFFU);\n}\n\nstatic_assert(has_sign_bit(-0.0f));\nstatic_assert(!has_sign_bit(0.0f));\nstatic_assert(with_sign_bit_cleared(-2.5f) == 2.5f);",
+      "notes": "std::bit_cast is constexpr when both types are trivially copyable and the result holds no indeterminate bits, which is why the same code works at compile time and at run time; std::memcpy would compile but would not be usable in the static_asserts. The remaining assumption is the representation itself: the sign bit is bit 31 only for IEEE-754 binary32, so keep the size assertion beside the functions."
     },
     {
       "id": "c16-w07",
       "section": "Byte order",
       "minutes": 9,
-      "prompt": "Write `read_be32(std::span<const std::byte, 4>)` returning a std::uint32_t, and `read_be_float(std::span<const std::byte, 4>)` returning a float. Handle both native byte orders without a runtime branch, and add a comment explaining why the float is not byteswapped directly.",
+      "prompt": "A telemetry frame carries a 48-bit unsigned timestamp in six big-endian bytes. Write `write_be48(std::span<std::byte, 6>, std::uint64_t)` and `std::uint64_t read_be48(std::span<const std::byte, 6>)`. Contract: the encoder must produce identical bytes on a big-endian and a little-endian host, must touch exactly six bytes, and the pair must round-trip; state what happens to a value that does not fit in 48 bits.",
       "checklist": [
-        "Bytes are loaded with std::memcpy into a std::uint32_t, not by a reinterpret_cast dereference",
-        "The swap decision uses if constexpr on std::endian::native, so no runtime branch remains",
-        "std::byteswap is applied to the integer, never to the float",
-        "read_be_float recovers the float with std::bit_cast from the corrected integer",
-        "A comment states that endianness conversion cannot bridge different floating-point formats"
+        "Both functions work a byte at a time with shifts and masks",
+        "Neither calls std::byteswap nor branches on std::endian",
+        "Exactly six bytes are written and six read",
+        "The most significant byte of the value lands at index 0",
+        "The out-of-range case is rejected or documented"
       ],
-      "solution": "#include <bit>\n#include <cstddef>\n#include <cstdint>\n#include <cstring>\n#include <span>\n\nstatic_assert(std::endian::native == std::endian::little ||\n              std::endian::native == std::endian::big);\n\nstd::uint32_t read_be32(std::span<const std::byte, 4> bytes) {\n    std::uint32_t value;\n    std::memcpy(&value, bytes.data(), sizeof(value));\n    if constexpr (std::endian::native == std::endian::little) {\n        value = std::byteswap(value);\n    }\n    return value;\n}\n\n// std::byteswap is defined for integers only, and \"reversing a float\" is not a\n// meaningful numeric operation. Correct the representation as an integer of the\n// same size, then reinterpret the corrected bits. This still assumes both ends\n// use IEEE-754 binary32: byte order cannot bridge different numeric formats.\nfloat read_be_float(std::span<const std::byte, 4> bytes) {\n    return std::bit_cast<float>(read_be32(bytes));\n}",
-      "notes": "The memcpy matters as much as the swap: the incoming buffer need not be 4-byte aligned, so obtaining a std::uint32_t* into it and dereferencing would be undefined on two counts. if constexpr discards the unused branch entirely, and compilers map std::byteswap to a native byte-reversal instruction, so the whole function is typically a load and one instruction."
+      "solution": "#include <cstddef>\n#include <cstdint>\n#include <span>\n#include <stdexcept>\n\n// Shifting the value itself is host-order independent: the arithmetic works on\n// the value, not on its stored bytes, so no endian test is needed.\nvoid write_be48(std::span<std::byte, 6> bytes, std::uint64_t value) {\n    if (value >= (std::uint64_t{1} << 48)) {\n        throw std::out_of_range{\"timestamp does not fit in 48 bits\"};\n    }\n    for (std::size_t i = 0; i < 6; ++i) {\n        const unsigned shift = static_cast<unsigned>(8 * (5 - i));\n        bytes[i] = static_cast<std::byte>((value >> shift) & 0xFFU);\n    }\n}\n\nstd::uint64_t read_be48(std::span<const std::byte, 6> bytes) {\n    std::uint64_t value = 0;\n    for (std::size_t i = 0; i < 6; ++i) {\n        value = (value << 8) | std::to_integer<std::uint64_t>(bytes[i]);\n    }\n    return value;\n}",
+      "notes": "std::byteswap is no help here: it reverses all eight bytes of a std::uint64_t, and a 48-bit field is not a whole scalar. Doing the work with shifts on the value keeps the function independent of the host order, which is why no std::endian test appears. The range check matters because a silently truncated timestamp decodes as a plausible wrong time rather than as a failure."
     },
     {
       "id": "c16-w08",
       "section": "Pinning layout: offsetof and the wire flagship",
-      "minutes": 14,
-      "prompt": "Define a 16-byte wire record `MdTrade` with a uint64 sequence, uint32 price, uint16 quantity, one std::byte side and one reserved byte, laid out with no implicit padding. Assert its properties, size, alignment and every member offset, then write a `parse_trade(std::span<const std::byte>)` that bounds-checks, memcpys, and byteswaps the multi-byte fields.",
+      "minutes": 13,
+      "prompt": "A map-streaming protocol sends a 24-byte chunk header: chunk id (u64), tile count (u32), checksum (u32), layer (u16), compression (1 byte), flags (1 byte), payload length (u32); all multi-byte fields are big-endian. Define the record so no implicit padding exists, pin size, alignment and every offset with static_asserts, and write `ChunkHeader parse_chunk(std::span<const std::byte>)` that rejects a short buffer and converts every multi-byte field. Do not obtain the record by casting the buffer pointer.",
       "checklist": [
-        "static_asserts cover is_trivially_copyable_v, is_standard_layout_v, sizeof, alignof and every member offset",
-        "The record uses explicit reserved bytes so no implicit padding exists",
-        "parse_trade checks buffer.size() against sizeof before any pointer arithmetic that is dereferenced",
-        "The bytes reach the record via std::memcpy into a local object, never a reinterpret_cast of buffer.data()",
-        "Multi-byte fields are byteswapped under if constexpr on std::endian::native",
-        "Single-byte fields (side, reserved) are not byteswapped"
+        "Members are ordered so every field is naturally aligned with no implicit padding",
+        "static_asserts pin trivial copyability, standard layout, sizeof, alignof and all seven offsets",
+        "parse_chunk checks buffer.size() before touching the bytes",
+        "The record is filled with std::memcpy, never a reinterpret_cast of buffer.data()",
+        "Every multi-byte field is byteswapped only on a little-endian host"
       ],
-      "solution": "#include <bit>\n#include <cstddef>\n#include <cstdint>\n#include <cstring>\n#include <span>\n#include <stdexcept>\n#include <type_traits>\n\nstruct MdTrade {\n    std::uint64_t sequence;\n    std::uint32_t price;\n    std::uint16_t quantity;\n    std::byte side;\n    std::byte reserved;\n};\n\nstatic_assert(std::is_trivially_copyable_v<MdTrade>);\nstatic_assert(std::is_standard_layout_v<MdTrade>);\nstatic_assert(sizeof(MdTrade) == 16);\nstatic_assert(alignof(MdTrade) == 8);\nstatic_assert(offsetof(MdTrade, sequence) == 0);\nstatic_assert(offsetof(MdTrade, price) == 8);\nstatic_assert(offsetof(MdTrade, quantity) == 12);\nstatic_assert(offsetof(MdTrade, side) == 14);\nstatic_assert(offsetof(MdTrade, reserved) == 15);\n\nMdTrade parse_trade(std::span<const std::byte> buffer) {\n    if (buffer.size() < sizeof(MdTrade)) {\n        throw std::invalid_argument{\"short trade message\"};\n    }\n\n    // memcpy into a real, correctly aligned MdTrade. The buffer holds byte\n    // objects, not a live MdTrade, and its address need not be 8-byte aligned.\n    MdTrade message;\n    std::memcpy(&message, buffer.data(), sizeof(message));\n\n    if constexpr (std::endian::native == std::endian::little) {\n        message.sequence = std::byteswap(message.sequence);\n        message.price = std::byteswap(message.price);\n        message.quantity = std::byteswap(message.quantity);\n        // side and reserved are single bytes: byte order does not apply.\n    }\n    return message;\n}",
-      "notes": "The explicit reserved byte is what removes the tail padding: without it the record would still be 16 bytes, but the last byte would be padding the protocol cannot use and the offset assertions could not prove the map is complete. Fixed-width types fix the field width, not the byte order — the swap is a separate, deliberate step, and every offset assertion is what makes an incompatible target fail at build time instead of in the feed handler."
+      "solution": "#include <bit>\n#include <cstddef>\n#include <cstdint>\n#include <cstring>\n#include <span>\n#include <stdexcept>\n#include <type_traits>\n\nstruct ChunkHeader {\n    std::uint64_t chunk_id;\n    std::uint32_t tile_count;\n    std::uint32_t checksum;\n    std::uint16_t layer;\n    std::byte compression;\n    std::byte flags;\n    std::uint32_t payload_length;\n};\n\nstatic_assert(std::is_trivially_copyable_v<ChunkHeader>);\nstatic_assert(std::is_standard_layout_v<ChunkHeader>);\nstatic_assert(sizeof(ChunkHeader) == 24);\nstatic_assert(alignof(ChunkHeader) == 8);\nstatic_assert(offsetof(ChunkHeader, chunk_id) == 0);\nstatic_assert(offsetof(ChunkHeader, tile_count) == 8);\nstatic_assert(offsetof(ChunkHeader, checksum) == 12);\nstatic_assert(offsetof(ChunkHeader, layer) == 16);\nstatic_assert(offsetof(ChunkHeader, compression) == 18);\nstatic_assert(offsetof(ChunkHeader, flags) == 19);\nstatic_assert(offsetof(ChunkHeader, payload_length) == 20);\n\nChunkHeader parse_chunk(std::span<const std::byte> buffer) {\n    if (buffer.size() < sizeof(ChunkHeader)) {\n        throw std::invalid_argument{\"short chunk header\"};\n    }\n\n    ChunkHeader header;\n    std::memcpy(&header, buffer.data(), sizeof(header));\n\n    if constexpr (std::endian::native == std::endian::little) {\n        header.chunk_id = std::byteswap(header.chunk_id);\n        header.tile_count = std::byteswap(header.tile_count);\n        header.checksum = std::byteswap(header.checksum);\n        header.layer = std::byteswap(header.layer);\n        header.payload_length = std::byteswap(header.payload_length);\n    }\n    return header;\n}",
+      "notes": "The single-byte compression and flags fields need no conversion, and placing them at offsets 18 and 19 is what keeps payload_length naturally aligned at 20 without an implicit gap. Copying into the local record is the load-bearing step: buffer.data() may be misaligned and its bytes are std::byte objects, not a live ChunkHeader, so a cast-and-dereference would be undefined behaviour even where the hardware would tolerate the load. Compilers normally turn the fixed-size memcpy into the same instructions the cast would have produced."
     }
   ]
 }

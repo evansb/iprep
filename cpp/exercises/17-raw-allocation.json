@@ -355,204 +355,206 @@
   "reading": [
     {
       "id": "c17-r01",
-      "section": "Three separate events",
-      "prompt": "What does this print?",
-      "code": "#include <iostream>\n#include <memory>\n#include <new>\n\nstruct Order {\n    int id;\n    double price;\n\n    Order(int order_id, double order_price)\n        : id(order_id), price(order_price) {}\n};\n\nint main() {\n    void* storage = ::operator new(sizeof(Order));\n\n    Order* first = std::construct_at(static_cast<Order*>(storage), 42, 101.25);\n    std::cout << first->id << ' ' << first->price << '\\n';\n    std::destroy_at(first);\n\n    Order* second = std::construct_at(static_cast<Order*>(storage), 43, 101.5);\n    std::cout << second->id << ' ' << second->price << '\\n';\n    std::destroy_at(second);\n\n    ::operator delete(storage);\n}\n",
+      "section": "Placement new, `launder`, and the explicit-lifetime API",
+      "prompt": "A JSON parser builds tokens in a scratch buffer. What does this print?",
+      "code": "#include <cstddef>\n#include <iostream>\n#include <memory>\n#include <stdexcept>\n\nstruct Token {\n    static inline int live = 0;\n    int id;\n\n    explicit Token(int value) : id(value) {\n        if (value == 3) {\n            throw std::runtime_error{\"unterminated string\"};\n        }\n        ++live;\n    }\n    ~Token() { --live; }\n};\n\nint main() {\n    alignas(Token) std::byte scratch[3 * sizeof(Token)];\n    auto* base = reinterpret_cast<Token*>(scratch);\n\n    int built = 0;\n    try {\n        for (int value = 1; value <= 3; ++value) {\n            std::construct_at(base + built, value);\n            ++built;\n        }\n    } catch (const std::runtime_error&) {\n        std::destroy_n(base, built);\n    }\n\n    std::cout << built << ' ' << Token::live << '\\n';\n}",
       "kind": "value",
       "accept": [
-        "42 101.25 43 101.5",
-        "42 101.25\n43 101.5"
+        "2 0"
       ],
-      "explain": "One allocation serves two object lifetimes. ::operator new obtains bytes; each construct_at starts a lifetime and initialises it; each destroy_at ends one. The tempting wrong reading is that the second construct_at needs its own allocation or leaks the first Order — it does neither, because the first lifetime had already ended and the storage was free to reuse."
+      "explain": "Two tokens are fully constructed; the third throws before it increments live, so its lifetime never begins and built stays at 2. The handler destroys exactly the two that exist, bringing live back to 0. The tempting answers are 3 0 (assuming the loop counter reflects the object count) and 2 2 (assuming placement new cleans up like a new-expression). It does not: placement new has no matching placement delete-expression and no automatic unwinding, so the caller must track how many constructions succeeded and must never destroy the object whose constructor threw."
     },
     {
       "id": "c17-r02",
       "section": "`new`, `delete`, and what they expand to",
-      "prompt": "What does this print?",
-      "code": "#include <iostream>\n\nint main() {\n    int* zero = new int{};\n    int* seven = new int(7);\n\n    std::cout << *zero << ' ' << *seven << '\\n';\n\n    delete zero;\n    delete seven;\n}\n",
+      "prompt": "A plugin host registers five entries at once. What does this print?",
+      "code": "#include <iostream>\n#include <stdexcept>\n\nstruct Entry {\n    static inline int constructed = 0;\n    static inline int destroyed = 0;\n    int slot;\n\n    Entry() : slot(++constructed) {\n        if (slot == 3) {\n            throw std::runtime_error{\"plugin refused to register\"};\n        }\n    }\n    ~Entry() { ++destroyed; }\n};\n\nint main() {\n    try {\n        Entry* table = new Entry[5];\n        delete[] table;\n    } catch (const std::runtime_error&) {\n    }\n\n    std::cout << Entry::constructed << ' ' << Entry::destroyed << '\\n';\n}",
       "kind": "value",
       "accept": [
-        "0 7"
+        "3 2"
       ],
-      "explain": "new int{} value-initialises a scalar to 0; new int(7) initialises it to 7. Allocation succeeded in both cases and both lifetimes began — only the initialisation form differs. The third form the chapter shows, plain new int, also begins a lifetime, but its value is indeterminate and printing it would be the error."
+      "explain": "Three constructors start, the third throws, and the array new-expression destroys the two elements already constructed and releases the whole block before propagating. So the counters read 3 and 2, and the object whose constructor threw is not destroyed. The tempting answers are 3 3 (destroying the failed element as well) and 5 0 (assuming construction of the remaining elements continues, or that nothing is cleaned up because delete[] never ran). This automatic partial cleanup is one of the reasons to use the array form rather than hand-rolling the element loop over raw storage."
     },
     {
       "id": "c17-r03",
       "section": "The C allocation family and interop",
-      "prompt": "What happens when this is compiled and run?",
-      "code": "#include <cstdint>\n#include <cstdlib>\n#include <iostream>\n\nstruct Tick {\n    std::uint64_t sequence;\n};\n\nint main() {\n    Tick* tick = static_cast<Tick*>(std::malloc(sizeof(Tick)));\n    if (tick == nullptr) {\n        return 1;\n    }\n\n    tick->sequence = 9001;\n    std::free(tick);\n\n    std::cout << tick->sequence << '\\n';\n}\n",
+      "prompt": "A symbol table caches a pointer to its first entry before growing. What happens when this is compiled and run?",
+      "code": "#include <cstdint>\n#include <cstdlib>\n#include <iostream>\n\nstruct Symbol {\n    std::uint32_t hash;\n    std::uint32_t length;\n};\n\nint main() {\n    auto* table = static_cast<Symbol*>(std::malloc(4 * sizeof(Symbol)));\n    if (table == nullptr) {\n        return 1;\n    }\n    table[0] = Symbol{0xABCDu, 5u};\n    Symbol* first = table;  // cached for the fast lookup path\n\n    auto* grown = static_cast<Symbol*>(\n        std::realloc(table, 4096 * sizeof(Symbol)));\n    if (grown != nullptr) {\n        table = grown;\n    }\n\n    std::cout << first->hash << ' ' << table[0].hash << '\\n';\n    std::free(table);\n}",
       "kind": "ub",
-      "explain": "std::free ends the storage's lifetime; the pointer is dangling from that moment. Reading through it is undefined behaviour, and AddressSanitizer reports heap-use-after-free. The tempting reading is that the bytes 'are still there' because nothing overwrote them — retained bit patterns are not a licence to read, and an allocator is free to reuse or unmap the block at any point after the release."
+      "explain": "A successful realloc invalidates the pointer that was passed to it, whether or not the block moved. first therefore dangles, and reading through it is a use of released storage that the sanitizer reports. table[0] is fine because the value bytes were preserved by the copy. The tempting reading is that the code checks grown for null and only then reassigns, so it is careful enough — the null check protects against losing the old block on failure, not against reusing the stale pointer on success. Every pointer, reference, iterator, and interior pointer into the old block has to be re-derived from the returned address."
     },
     {
       "id": "c17-r04",
-      "section": "The C allocation family and interop",
-      "prompt": "What happens when this is compiled and run?",
-      "code": "#include <cstdlib>\n#include <iostream>\n\nstruct Tick {\n    int sequence;\n};\n\nint main() {\n    Tick* tick = std::malloc(sizeof(Tick));\n    if (tick == nullptr) {\n        return 1;\n    }\n\n    tick->sequence = 9001;\n    std::cout << tick->sequence << '\\n';\n    std::free(tick);\n}\n",
+      "section": "Alignment on demand",
+      "prompt": "An audio engine wants each block of samples on its own boundary. What happens when this is compiled and run?",
+      "code": "#include <cstddef>\n#include <iostream>\n#include <new>\n\nstruct Sample {\n    double left;\n    double right;\n    float gain;\n};\n\n// One block per boundary, so align the block to the size of a sample.\nstruct alignas(sizeof(Sample)) SampleBlock {\n    Sample samples[4];\n};\n\nint main() {\n    SampleBlock* block = new SampleBlock{};\n    std::cout << sizeof(Sample) << ' ' << alignof(SampleBlock) << '\\n';\n    delete block;\n}",
       "kind": "no-compile",
-      "explain": "std::malloc returns void*, and C++ has no implicit conversion from void* to Tick* — the initialisation is ill-formed. This is one of the places C and C++ genuinely differ: the same line compiles as C. Writing static_cast<Tick*>(std::malloc(...)) fixes it, and for an implicit-lifetime type such as Tick the typed access that follows is well defined. The cast is not a licence for every type, though: it would not construct a std::string."
+      "explain": "An alignment must be a power of two, and sizeof(Sample) is 24 on this ABI: two doubles, a float, and four bytes of tail padding. The alignas declaration is therefore ill-formed and the error appears at the type definition, not at the new-expression. The tempting reading is that sizeof is always a usable alignment because it is a multiple of alignof — the multiple relationship holds, but it does not make the result a power of two. Spell the intended boundary out (alignas(32), or std::hardware_destructive_interference_size for cache-line separation) instead of deriving it from a size."
     },
     {
       "id": "c17-r05",
-      "section": "The C allocation family and interop",
-      "prompt": "What does this print?",
-      "code": "#include <cstdint>\n#include <cstdlib>\n#include <iostream>\n\nint main() {\n    auto* values = static_cast<std::int32_t*>(std::malloc(2 * sizeof(std::int32_t)));\n    if (values == nullptr) {\n        return 1;\n    }\n    values[0] = 11;\n    values[1] = 22;\n\n    void* grown = std::realloc(values, 4 * sizeof(std::int32_t));\n    if (grown == nullptr) {\n        std::free(values);\n        return 1;\n    }\n    values = static_cast<std::int32_t*>(grown);\n    values[2] = 33;\n\n    std::cout << values[0] + values[1] + values[2] << '\\n';\n    std::free(values);\n}\n",
+      "section": "Alignment on demand",
+      "prompt": "A vector-math type is over-aligned for SIMD loads. What does this print?",
+      "code": "#include <cstdint>\n#include <iostream>\n#include <new>\n\nstruct alignas(32) Lane {\n    float x;\n    float y;\n    float z;\n};\n\nint main() {\n    Lane* lanes = new Lane[2]{};\n    const auto first = reinterpret_cast<std::uintptr_t>(lanes);\n    const auto second = reinterpret_cast<std::uintptr_t>(lanes + 1);\n\n    std::cout << sizeof(Lane) << ' ' << (second - first) << ' '\n              << (first % 32 == 0) << '\\n';\n    delete[] lanes;\n}",
       "kind": "value",
       "accept": [
-        "66"
+        "32 32 1"
       ],
-      "explain": "realloc preserves the existing bytes up to the smaller of the old and new sizes, so 11 and 22 survive whether or not the block moved, and 11 + 22 + 33 is 66. What does not survive is the old pointer: it is invalid after a successful realloc even if the returned address happens to compare equal, which is why the result is captured in `grown` and only then assigned back."
+      "explain": "Over-alignment is part of the type, so sizeof is rounded up from the 12 bytes of payload to 32: array elements are contiguous, and only a size that is a multiple of the alignment keeps every element aligned. The array stride is therefore 32 as well. Because alignof(Lane) exceeds the default new alignment, the new-expression selects the aligned allocation function automatically and the base address is a multiple of 32; delete[] carries the same alignment back. The tempting answer is 12 12 1, which forgets that the padding to 32 is charged to every element — 62% of this array is padding, which is the real cost to weigh."
     },
     {
       "id": "c17-r06",
-      "section": "Placement new, `launder`, and the explicit-lifetime API",
-      "prompt": "What happens when this is compiled and run?",
-      "code": "#include <iostream>\n#include <memory>\n#include <new>\n#include <string>\n\nint main() {\n    void* raw = ::operator new(sizeof(std::string));\n\n    auto* symbol = std::construct_at(\n        static_cast<std::string*>(raw),\n        \"a symbol name far too long for any small-string buffer\");\n\n    std::cout << symbol->size() << '\\n';\n\n    std::destroy_at(symbol);\n    std::destroy_at(symbol);\n\n    ::operator delete(raw);\n}\n",
-      "kind": "ub",
-      "explain": "The first destroy_at ends the string's lifetime and releases the character buffer it owned. The second one runs the destructor again on an object that no longer exists, so the buffer is released twice — AddressSanitizer reports an attempted double-free. It is tempting to think a second destructor call is harmless because 'the bytes are already dead', but a destructor is ordinary code with side effects, and running it twice repeats them."
+      "section": "The custom-allocator gallery",
+      "prompt": "A compiler front end bumps nodes out of a scratch block. What does this print?",
+      "code": "#include <cstddef>\n#include <cstdint>\n#include <iostream>\n\nclass BumpArena {\npublic:\n    BumpArena(std::byte* data, std::size_t capacity) noexcept\n        : data_(data), capacity_(capacity) {}\n\n    void* take(std::size_t bytes, std::size_t alignment) noexcept {\n        const std::size_t start = (used_ + alignment - 1) & ~(alignment - 1);\n        if (start + bytes > capacity_) {\n            return nullptr;\n        }\n        used_ = start + bytes;\n        return data_ + start;\n    }\n\n    std::size_t used() const noexcept { return used_; }\n\nprivate:\n    std::byte* data_;\n    std::size_t capacity_;\n    std::size_t used_{};\n};\n\nstruct AstNode {\n    std::uint64_t payload;\n};\n\nint main() {\n    alignas(8) std::byte block[128];\n    BumpArena arena{block, sizeof(block)};\n\n    arena.take(1, 1);  // a one-byte node tag\n    void* node = arena.take(sizeof(AstNode), alignof(AstNode));\n    arena.take(2, 2);  // a two-byte source offset\n\n    std::cout << arena.used() << ' '\n              << (reinterpret_cast<std::uintptr_t>(node) % alignof(AstNode) == 0)\n              << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "18 1"
+      ],
+      "explain": "The tag leaves the cursor at 1; the node request rounds that up to 8 and consumes eight bytes, leaving 16; the two-byte request is already 2-aligned, so the cursor ends at 18. Eleven of those bytes carry payload and seven are alignment padding, which is the arena's only form of waste. The tempting answer is 11, adding the request sizes and ignoring the rounding. The address check is 1 only because the block itself is declared alignas(8): the arithmetic aligns an offset, so the guarantee is no stronger than the alignment of the base pointer — an arena handed a byte-aligned buffer would return misaligned nodes while its own arithmetic looked correct."
     },
     {
       "id": "c17-r07",
-      "section": "Alignment on demand",
-      "prompt": "What does this print?",
-      "code": "#include <cstdint>\n#include <iostream>\n#include <new>\n\nstruct alignas(64) HotCounter {\n    std::uint64_t value{};\n};\n\nint main() {\n    HotCounter* counter = new HotCounter{};\n    auto address = reinterpret_cast<std::uintptr_t>(counter);\n\n    std::cout << sizeof(HotCounter) << ' '\n              << alignof(HotCounter) << ' '\n              << address % 64 << '\\n';\n\n    delete counter;\n}\n",
-      "kind": "value",
-      "accept": [
-        "64 64 0"
-      ],
-      "explain": "alignas(64) raises the type's alignment to 64, and sizeof is padded up to 64 so that adjacent array elements stay aligned — over-alignment normally costs size. Because the alignment is part of the type, the new-expression selects the aligned allocation overload, so the address is a multiple of 64 and the remainder is 0. Expecting sizeof to stay 8 is the common wrong answer."
+      "section": "Placement new, `launder`, and the explicit-lifetime API",
+      "prompt": "A font cache reuses one slot of storage. What happens when this is compiled and run?",
+      "code": "#include <cstddef>\n#include <iostream>\n#include <memory>\n#include <string>\n\nstruct CacheSlot {\n    std::string family;\n    int pixel_size;\n};\n\nint main() {\n    alignas(CacheSlot) std::byte storage[sizeof(CacheSlot)];\n\n    CacheSlot* slot = std::construct_at(\n        reinterpret_cast<CacheSlot*>(storage),\n        std::string(64, 'a'), 12);\n    std::cout << slot->family.size() << '\\n';\n\n    std::destroy_at(slot);\n    std::cout << slot->family[0] << '\\n';  // the bytes are still there\n}",
+      "kind": "ub",
+      "explain": "Destruction ends the object's lifetime; it does not blank the storage, and the destructor of the string member has already released the character buffer that family pointed at. The second read therefore touches freed memory and the sanitizer reports it. The tempting reading is that the slot bytes are unchanged, so the old value can still be inspected until something else is constructed there — the bytes may look intact while the resources they describe are gone. Construct the replacement first and use the pointer that construct_at returns."
     },
     {
       "id": "c17-r08",
-      "section": "The custom-allocator gallery",
-      "prompt": "What does this print?",
-      "code": "#include <cstddef>\n#include <iostream>\n#include <memory>\n#include <new>\n\nclass Arena {\npublic:\n    Arena(std::byte* data, std::size_t capacity)\n        : begin_(data), capacity_(capacity) {}\n\n    void* allocate(std::size_t bytes, std::size_t alignment) {\n        void* candidate = begin_ + used_;\n        std::size_t space = capacity_ - used_;\n        void* aligned = std::align(alignment, bytes, candidate, space);\n        if (aligned == nullptr) {\n            throw std::bad_alloc{};\n        }\n        used_ = static_cast<std::byte*>(aligned) - begin_ + bytes;\n        return aligned;\n    }\n\n    std::size_t used() const noexcept { return used_; }\n    void reset() noexcept { used_ = 0; }\n\nprivate:\n    std::byte* begin_;\n    std::size_t capacity_;\n    std::size_t used_{};\n};\n\nint main() {\n    alignas(64) std::byte scratch[256];\n    Arena arena{scratch, sizeof(scratch)};\n\n    arena.allocate(1, 1);\n    std::cout << arena.used() << ' ';\n\n    arena.allocate(8, 8);\n    std::cout << arena.used() << ' ';\n\n    arena.reset();\n    std::cout << arena.used() << '\\n';\n}\n",
+      "section": "Hooking the allocator: overloaded allocation functions",
+      "prompt": "A scene graph gives its node base class a private allocation path. What does this print?",
+      "code": "#include <cstddef>\n#include <cstdint>\n#include <cstdlib>\n#include <iostream>\n\nstruct SceneNode {\n    static inline std::size_t last_request = 0;\n    std::uint64_t id;\n\n    static void* operator new(std::size_t bytes) {\n        last_request = bytes;\n        return std::malloc(bytes);\n    }\n\n    static void operator delete(void* block) noexcept { std::free(block); }\n};\n\nstruct SpriteNode : SceneNode {\n    double x;\n    double y;\n};\n\nint main() {\n    SpriteNode* sprite = new SpriteNode{};\n\n    std::cout << sizeof(SceneNode) << ' ' << sizeof(SpriteNode) << ' '\n              << SceneNode::last_request << '\\n';\n    delete sprite;\n}",
       "kind": "value",
       "accept": [
-        "1 16 0"
+        "8 24 24"
       ],
-      "explain": "The first request needs one byte at alignment 1, so the cursor lands at 1. The second needs alignment 8: std::align skips the cursor forward from offset 1 to offset 8 — seven bytes of padding no one will ever reclaim separately — and then eight bytes of payload put the cursor at 16. reset drops it to 0 in one step. Answering 9 for the second line is the trap: it ignores the alignment padding that a bump allocator has to insert."
+      "explain": "A derived class inherits its base's allocation functions, so new SpriteNode routes through SceneNode::operator new — but the size passed is sizeof(SpriteNode), 24, not the base's 8. The tempting answer is 8 24 8, from assuming the member function was written for its own class and therefore always sees that size. A class-scope allocator backed by a fixed-size pool must either check the requested size and reject or divert oversized requests, or be kept out of reach of derived classes; silently handing back a base-sized block is how this pattern corrupts memory."
     }
   ],
   "writing": [
     {
       "id": "c17-w01",
       "section": "Three separate events",
-      "minutes": 9,
-      "prompt": "Write `run_once(int id, double price)` that performs the chapter's four events separately for an Order that has no default constructor: obtain raw storage with ::operator new, begin the object's lifetime with std::construct_at, print a member, end the lifetime with std::destroy_at, and release the storage. Make it correct if the constructor throws, and comment each step with the event it performs.",
+      "minutes": 10,
+      "prompt": "Write `template <class T> T* fill_raw(std::span<std::byte> storage, std::size_t count, const T& value)` that creates `count` copies of `value` at the start of the caller-supplied bytes and returns a pointer to the first. Contract: it must allocate nothing; it must refuse storage that is too small or not suitably aligned for T; and if a copy constructor throws part way through, every object already created must be destroyed before the exception leaves.",
       "checklist": [
-        "Storage comes from ::operator new(sizeof(Order)) and goes back through ::operator delete",
-        "std::construct_at (or placement new) starts the lifetime; std::destroy_at ends it",
-        "A constructor exception releases the storage and rethrows, with no destroy_at on an object that was never constructed",
-        "The pointer returned by construct_at is the one used, not a re-cast of the raw storage",
-        "Comments name allocation, construction, destruction and deallocation separately"
+        "The byte capacity is checked against count * sizeof(T) before anything is constructed",
+        "The alignment of storage.data() is checked against alignof(T)",
+        "Objects are created with std::construct_at or placement new, one at a time",
+        "A catch handler destroys exactly the objects already constructed and rethrows",
+        "No new-expression, malloc, or container appears in the body"
       ],
-      "solution": "#include <iostream>\n#include <memory>\n#include <new>\n\nstruct Order {\n    int id;\n    double price;\n\n    Order(int order_id, double order_price)\n        : id(order_id), price(order_price) {}\n};\n\nvoid run_once(int id, double price) {\n    void* storage = ::operator new(sizeof(Order));  // allocation only\n\n    Order* order = nullptr;\n    try {\n        // construction + initialization\n        order = std::construct_at(static_cast<Order*>(storage), id, price);\n    } catch (...) {\n        ::operator delete(storage);  // no object was created; return the bytes\n        throw;\n    }\n\n    std::cout << order->id << ' ' << order->price << '\\n';\n\n    std::destroy_at(order);      // lifetime ends; the bytes remain\n    ::operator delete(storage);  // deallocation\n}\n",
-      "notes": "This is the hand-written expansion of `new Order{id, price}` followed by `delete`. The try/catch is the part the new-expression performs for you; forgetting it is how a constructor exception turns into a leak in hand-rolled allocation code."
+      "solution": "#include <cstddef>\n#include <cstdint>\n#include <memory>\n#include <span>\n#include <stdexcept>\n\ntemplate <class T>\nT* fill_raw(std::span<std::byte> storage, std::size_t count, const T& value) {\n    if (count > storage.size() / sizeof(T)) {\n        throw std::length_error{\"scratch buffer too small\"};\n    }\n    if (reinterpret_cast<std::uintptr_t>(storage.data()) % alignof(T) != 0) {\n        throw std::invalid_argument{\"scratch buffer is misaligned for T\"};\n    }\n\n    T* first = reinterpret_cast<T*>(storage.data());\n    std::size_t built = 0;\n    try {\n        for (; built < count; ++built) {\n            std::construct_at(first + built, value);\n        }\n    } catch (...) {\n        std::destroy_n(first, built);  // the failed element is not one of them\n        throw;\n    }\n    return first;\n}",
+      "notes": "The division form of the capacity check avoids the overflow that count * sizeof(T) can produce for a large count. Note which of the three events this function performs: it starts lifetimes and initializes, but the caller owns the storage, so the caller also owns the matching std::destroy_n call. A caller that forgets it leaks whatever the elements own even though no allocator was involved."
     },
     {
       "id": "c17-w02",
       "section": "`new`, `delete`, and what they expand to",
-      "minutes": 7,
-      "prompt": "Write `make_batch(std::size_t count)` returning a value-initialised array of Orders created with an array new-expression, and `release_batch(Order*)` that releases it. Add a comment listing the three rows of the chapter's allocation/deallocation table that are undefined behaviour, and state why release_batch needs no null check.",
+      "minutes": 8,
+      "prompt": "A tile editor obtains storage three different ways: a value-initialised `int` grid, one `Tile` object, and a byte buffer from a C image library that documents `std::free` as its release function. Write the three factory functions returning owning smart pointers so that each block is released by the function that matches how it was obtained, and no `delete`, `delete[]`, or `free` call appears outside a deleter.",
       "checklist": [
-        "Uses new Order[count]{} and delete[] — the matching pair",
-        "Comment names new T / std::free, std::malloc / delete, and new T[n] / delete as UB",
-        "Comment states that delete[] nullptr is a valid no-op",
-        "Order is a type that can be value-initialised by the array form (no user-provided constructor requiring arguments)"
+        "The grid factory returns std::unique_ptr<int[]> and value-initialises the elements",
+        "The single-object factory returns std::unique_ptr<Tile>",
+        "The C buffer factory uses a deleter that calls std::free",
+        "The C buffer factory reports allocation failure rather than returning a null pointer silently",
+        "No raw delete, delete[], or free statement appears in ordinary code"
       ],
-      "solution": "#include <cstddef>\n\nstruct Order {\n    int id{};\n    double price{};\n};\n\nOrder* make_batch(std::size_t count) {\n    // Array new-expression: one allocation, `count` element lifetimes begun.\n    return new Order[count]{};\n}\n\nvoid release_batch(Order* batch) noexcept {\n    // Must be delete[], not delete: the scalar form may read the wrong\n    // metadata or run the wrong number of destructors.\n    //\n    // Undefined behaviour from the chapter's table:\n    //   new T      released with std::free\n    //   std::malloc released with delete\n    //   new T[n]   released with delete\n    //\n    // No null check is needed: delete[] nullptr is a valid no-op.\n    delete[] batch;\n}\n",
-      "notes": "An implementation may reserve a hidden array cookie next to the allocation to record the element count. That cookie is exactly what plain delete does not know about, and why the mismatch is undefined rather than merely wasteful."
+      "solution": "#include <cstddef>\n#include <cstdlib>\n#include <memory>\n#include <new>\n\nstruct Tile {\n    int atlas_index;\n    float weight;\n};\n\nstd::unique_ptr<int[]> make_grid(std::size_t rows, std::size_t columns) {\n    return std::make_unique<int[]>(rows * columns);  // value-initialised\n}\n\nstd::unique_ptr<Tile> make_tile(int atlas_index, float weight) {\n    return std::make_unique<Tile>(atlas_index, weight);\n}\n\nstruct FreeDeleter {\n    void operator()(void* block) const noexcept { std::free(block); }\n};\n\nstd::unique_ptr<std::byte, FreeDeleter> adopt_image_bytes(std::size_t bytes) {\n    auto* block = static_cast<std::byte*>(std::malloc(bytes));\n    if (block == nullptr) {\n        throw std::bad_alloc{};\n    }\n    return std::unique_ptr<std::byte, FreeDeleter>{block};\n}",
+      "notes": "std::make_unique<int[]>(n) value-initialises, while std::make_unique_for_overwrite<int[]>(n) leaves the elements indeterminate and is the right choice when every element is about to be overwritten. The third factory is the interesting one: the default deleter of std::unique_ptr calls delete, so handing it a malloc result without the custom deleter would automate undefined behaviour rather than prevent it. The same discipline applies to any C API with its own documented release function."
     },
     {
       "id": "c17-w03",
       "section": "The C allocation family and interop",
       "minutes": 11,
-      "prompt": "Write `bool grow(Tick*& ticks, std::size_t& capacity, std::size_t new_capacity)` that grows a malloc-allocated Tick array with std::realloc. Return false without losing the existing block if the request cannot be satisfied, and check the byte-count multiplication before performing it.",
+      "prompt": "A glyph atlas keeps its rows in one `std::malloc` block of trivially copyable `AtlasRow` records. Write `class RowStore` owning that block: a constructor taking an initial capacity, a destructor, move construction and move assignment, `data()`, `capacity()`, and `bool reserve(std::size_t rows)`. Contract for `reserve`: it must use `std::realloc`; it must leave the old block intact and usable when the request fails; it must reject a capacity whose byte count would overflow; and the class must never be copyable.",
       "checklist": [
-        "Checks new_capacity against SIZE_MAX / sizeof(Tick) before multiplying",
-        "Captures the realloc result in a temporary and only assigns back on success",
-        "On failure, leaves `ticks` and `capacity` unchanged so the old block is still owned",
-        "Updates both `ticks` and `capacity` together on success",
-        "A comment notes that the old pointer, and any interior pointer, is invalid after a successful realloc"
+        "The realloc result is captured in a temporary and only assigned back on success",
+        "A failed reserve returns false with the old pointer and capacity unchanged",
+        "The row count is checked against SIZE_MAX / sizeof(AtlasRow) before multiplying",
+        "The destructor calls std::free and the moved-from object is left with a null pointer",
+        "Copy construction and copy assignment are deleted"
       ],
-      "solution": "#include <cstddef>\n#include <cstdint>\n#include <cstdlib>\n#include <limits>\n\nstruct Tick {\n    std::uint64_t sequence;\n    std::int64_t price_ticks;\n};\n\nbool grow(Tick*& ticks, std::size_t& capacity, std::size_t new_capacity) {\n    if (new_capacity <= capacity) {\n        return true;\n    }\n    // std::size_t arithmetic wraps, so check before multiplying.\n    if (new_capacity > std::numeric_limits<std::size_t>::max() / sizeof(Tick)) {\n        return false;\n    }\n\n    // Keep the old pointer until success is known: a failing realloc returns\n    // nullptr and leaves the original block allocated and still ours.\n    void* grown = std::realloc(ticks, new_capacity * sizeof(Tick));\n    if (grown == nullptr) {\n        return false;\n    }\n\n    // On success the old pointer is invalid even if the address compares\n    // equal; every interior pointer, reference and iterator is invalidated.\n    ticks = static_cast<Tick*>(grown);\n    capacity = new_capacity;\n    return true;\n}\n",
-      "notes": "This only works because Tick is trivially copyable. Never realloc a live non-trivially-copyable C++ object: moving bytes does not run move constructors, repair self-referential pointers, or end the old objects' lifetimes."
+      "solution": "#include <cstddef>\n#include <cstdint>\n#include <cstdlib>\n#include <limits>\n#include <new>\n#include <utility>\n\nstruct AtlasRow {\n    std::uint32_t top;\n    std::uint32_t height;\n};\n\nclass RowStore {\npublic:\n    explicit RowStore(std::size_t rows) {\n        if (!reserve(rows)) {\n            throw std::bad_alloc{};\n        }\n    }\n\n    RowStore(const RowStore&) = delete;\n    RowStore& operator=(const RowStore&) = delete;\n\n    RowStore(RowStore&& other) noexcept\n        : rows_(std::exchange(other.rows_, nullptr)),\n          capacity_(std::exchange(other.capacity_, 0)) {}\n\n    RowStore& operator=(RowStore&& other) noexcept {\n        if (this != &other) {\n            std::free(rows_);\n            rows_ = std::exchange(other.rows_, nullptr);\n            capacity_ = std::exchange(other.capacity_, 0);\n        }\n        return *this;\n    }\n\n    ~RowStore() { std::free(rows_); }\n\n    AtlasRow* data() noexcept { return rows_; }\n    std::size_t capacity() const noexcept { return capacity_; }\n\n    bool reserve(std::size_t rows) {\n        if (rows <= capacity_) {\n            return true;\n        }\n        if (rows > std::numeric_limits<std::size_t>::max() / sizeof(AtlasRow)) {\n            return false;\n        }\n\n        void* grown = std::realloc(rows_, rows * sizeof(AtlasRow));\n        if (grown == nullptr) {\n            return false;  // the old block is still allocated and still ours\n        }\n        rows_ = static_cast<AtlasRow*>(grown);\n        capacity_ = rows;\n        return true;\n    }\n\nprivate:\n    AtlasRow* rows_ = nullptr;\n    std::size_t capacity_ = 0;\n};",
+      "notes": "Assigning the realloc result straight back into rows_ would lose the old block on failure, which is the classic one-line leak. The temporary is what makes the failure path recoverable. This design is only sound because AtlasRow is trivially copyable: realloc relocates bytes, so a type with a move constructor, an internal self-pointer, or a non-trivial destructor must be grown the way std::vector does it, by constructing into new storage and destroying the old elements."
     },
     {
       "id": "c17-w04",
       "section": "When allocation fails",
       "minutes": 8,
-      "prompt": "Write two functions that create an Order and report failure differently: `acquire_or_null` using the std::nothrow form, and `acquire_or_throw` using the ordinary form with a catch site. Each must release the Order it created. Add a comment saying what std::nothrow does and does not change.",
+      "prompt": "A telemetry writer must never enter the allocator once a session is live. Write `class EventSink` with a fixed array of `Event` slots decided at construction, `Event* acquire() noexcept` returning `nullptr` when all slots are in use, and `void release(Event*) noexcept`. Then write `bool preallocate(EventSink*& sink, std::size_t slots) noexcept` that creates the sink with the `std::nothrow` form of `new` and reports failure through its return value rather than an exception. Document the exhaustion policy in a comment.",
       "checklist": [
-        "acquire_or_null uses new (std::nothrow) and checks the result before dereferencing it",
-        "acquire_or_throw catches std::bad_alloc specifically, not (...)",
-        "Both paths release the Order with the matching delete",
-        "Comment states that std::nothrow changes allocation failure reporting only, and that a constructor exception still propagates",
-        "Includes <new> for std::nothrow and std::bad_alloc"
+        "acquire returns nullptr on exhaustion and is marked noexcept",
+        "release returns a slot for reuse without touching the allocator",
+        "preallocate uses new (std::nothrow) and checks the result for null",
+        "preallocate is noexcept and returns false instead of throwing",
+        "A comment states the exhaustion policy explicitly"
       ],
-      "solution": "#include <iostream>\n#include <new>\n\nstruct Order {\n    int id;\n    double price;\n\n    Order(int order_id, double order_price)\n        : id(order_id), price(order_price) {}\n};\n\n// std::nothrow replaces the std::bad_alloc path with a nullable result.\n// It does not remove failure handling, and it does not stop a constructor\n// exception from propagating out of the new-expression.\nbool acquire_or_null(int id, double price) {\n    Order* order = new (std::nothrow) Order{id, price};\n    if (order == nullptr) {\n        return false;\n    }\n\n    std::cout << order->id << '\\n';\n    delete order;\n    return true;\n}\n\nbool acquire_or_throw(int id, double price) {\n    try {\n        Order* order = new Order{id, price};\n        std::cout << order->id << '\\n';\n        delete order;\n        return true;\n    } catch (const std::bad_alloc&) {\n        return false;\n    }\n}\n",
-      "notes": "Neither policy is universally right. A nullable low-level API suits a bounded subsystem with an explicit exhaustion path; ordinary RAII code is easier to keep correct with the exception. What a latency-sensitive process really wants is neither: reserve the bounded working set at startup so the failure surfaces before the session begins."
+      "solution": "#include <cstddef>\n#include <cstdint>\n#include <new>\n#include <vector>\n\nstruct Event {\n    std::uint64_t timestamp;\n    std::uint32_t code;\n};\n\nclass EventSink {\npublic:\n    explicit EventSink(std::size_t slots) : slots_(slots), free_(slots) {\n        for (std::size_t i = 0; i < slots; ++i) {\n            free_[i] = i;\n        }\n    }\n\n    // Exhaustion policy: acquire reports failure by returning nullptr. The\n    // caller drops the event and increments a counter; it must not fall back\n    // to the global allocator while the session is live.\n    Event* acquire() noexcept {\n        if (free_count_ == 0) {\n            return nullptr;\n        }\n        return &slots_[free_[--free_count_]];\n    }\n\n    void release(Event* event) noexcept {\n        free_[free_count_++] = static_cast<std::size_t>(event - slots_.data());\n    }\n\nprivate:\n    std::vector<Event> slots_;\n    std::vector<std::size_t> free_;\n    std::size_t free_count_ = 0;\n};\n\nbool preallocate(EventSink*& sink, std::size_t slots) noexcept {\n    sink = new (std::nothrow) EventSink{slots};\n    return sink != nullptr;\n}",
+      "notes": "The nothrow form changes only how allocation failure is reported: if the EventSink constructor itself threw, that exception would still propagate, which is why a noexcept wrapper around a throwing constructor needs care. Note also what the two policies suit — a nullable low-level API for the bounded pool, and startup-time failure for the sink itself, so the session either begins with its memory or does not begin at all."
     },
     {
       "id": "c17-w05",
       "section": "Placement new, `launder`, and the explicit-lifetime API",
       "minutes": 12,
-      "prompt": "Write a class template `Deferred<T>` that holds correctly aligned raw storage for one T and constructs it on demand: `emplace(Args&&...)`, `get()`, `reset()`, and a destructor that destroys a live object. Track whether an object is currently alive.",
+      "prompt": "Write `template <class T> class ScratchCell`: correctly aligned storage for one T that is constructed on demand. Required behaviour: `emplace(Args&&...)` returns `T&` and destroys any object already present first; if the constructor throws, the cell must be left empty rather than half-built; `reset()` destroys any live object; the destructor must not leak; the cell is neither copyable nor movable. Provide `bool engaged()` and `T& get()`.",
       "checklist": [
-        "Storage is an alignas(T) std::byte array of sizeof(T), not a T member",
-        "emplace uses std::construct_at (or placement new) and records that the object is alive",
-        "reset calls std::destroy_at only when an object is alive, and clears the flag",
-        "The destructor calls reset so a live object is not abandoned",
-        "get returns the pointer that construction produced, or the laundered/reinterpreted storage pointer, and is only valid while alive"
+        "Storage is a byte array declared with alignas(T) and sizeof(T)",
+        "emplace destroys an existing object before constructing the new one",
+        "The engaged flag is cleared before construction and set only after it succeeds",
+        "reset and the destructor destroy the object exactly once when engaged",
+        "Copy and move operations are deleted",
+        "emplace returns the pointer produced by construct_at rather than a fresh cast"
       ],
-      "solution": "#include <cstddef>\n#include <memory>\n#include <new>\n#include <utility>\n\ntemplate<class T>\nclass Deferred {\npublic:\n    Deferred() = default;\n    ~Deferred() { reset(); }\n\n    Deferred(const Deferred&) = delete;\n    Deferred& operator=(const Deferred&) = delete;\n\n    template<class... Args>\n    T* emplace(Args&&... args) {\n        reset();\n        object_ = std::construct_at(\n            reinterpret_cast<T*>(storage_), std::forward<Args>(args)...);\n        return object_;\n    }\n\n    T* get() noexcept { return object_; }          // null while not alive\n    bool alive() const noexcept { return object_ != nullptr; }\n\n    void reset() noexcept {\n        if (object_ != nullptr) {\n            std::destroy_at(object_);\n            object_ = nullptr;\n        }\n    }\n\nprivate:\n    alignas(T) std::byte storage_[sizeof(T)];\n    T* object_ = nullptr;\n};\n",
-      "notes": "alignas(T) is the load-bearing part: a plain std::byte array is only byte-aligned, and constructing a T at a misaligned address is undefined behaviour. Keeping the pointer construct_at returned, rather than re-deriving one from storage_, also sidesteps every std::launder question."
+      "solution": "#include <cstddef>\n#include <memory>\n#include <stdexcept>\n#include <utility>\n\ntemplate <class T>\nclass ScratchCell {\npublic:\n    ScratchCell() = default;\n    ScratchCell(const ScratchCell&) = delete;\n    ScratchCell& operator=(const ScratchCell&) = delete;\n    ~ScratchCell() { reset(); }\n\n    template <class... Args>\n    T& emplace(Args&&... args) {\n        reset();\n        // engaged_ is already false here, so a throwing constructor leaves the\n        // cell empty and the destructor will not run on a nonexistent object.\n        T* object = std::construct_at(pointer(), std::forward<Args>(args)...);\n        engaged_ = true;\n        return *object;\n    }\n\n    void reset() noexcept {\n        if (engaged_) {\n            std::destroy_at(pointer());\n            engaged_ = false;\n        }\n    }\n\n    bool engaged() const noexcept { return engaged_; }\n\n    T& get() {\n        if (!engaged_) {\n            throw std::logic_error{\"scratch cell is empty\"};\n        }\n        return *pointer();\n    }\n\nprivate:\n    T* pointer() noexcept { return reinterpret_cast<T*>(storage_); }\n\n    alignas(T) std::byte storage_[sizeof(T)];\n    bool engaged_ = false;\n};",
+      "notes": "The alignas is load-bearing: a plain std::byte array is only byte-aligned, and constructing a T at a misaligned address is undefined behaviour rather than a slow path. Clearing the flag before constructing is what makes the throwing case safe, and returning the pointer construct_at produced avoids the question of whether an older pointer to the same address still designates the new object — the case where std::launder would otherwise be needed."
     },
     {
       "id": "c17-w06",
       "section": "Hooking the allocator: overloaded allocation functions",
       "minutes": 10,
-      "prompt": "Give a struct PooledOrder class-scope allocation functions that route through a small memory facade, covering both the scalar and the array forms. Count allocations, and handle a requested size larger than sizeof(PooledOrder) deliberately rather than assuming it cannot happen.",
+      "prompt": "Route every `new` and `delete` for a `struct MeshChunk` through a `ChunkMemory` facade with `allocate(bytes)` and `deallocate(void*, bytes)`. Contract: the scalar and array forms must both be covered, a sized `operator delete` must be provided alongside the unsized one, and the allocation function must handle a request whose size is larger than `sizeof(MeshChunk)` instead of assuming the two are equal. Say in a comment where an oversized request comes from.",
       "checklist": [
-        "Declares static operator new / operator delete and operator new[] / operator delete[]",
-        "The scalar operator new does not assume bytes == sizeof(PooledOrder); it either serves or rejects a larger request explicitly",
-        "Deallocation functions are noexcept",
-        "Allocation failure throws std::bad_alloc (or the function is documented as nothrow)",
-        "A comment notes that a derived class inheriting these functions can request more than sizeof(PooledOrder)"
+        "operator new and operator delete are declared as class members",
+        "operator new[] and operator delete[] are also provided",
+        "Both a sized and an unsized operator delete are present",
+        "The allocation function uses the bytes argument rather than sizeof(MeshChunk)",
+        "A comment explains that a derived class inherits the allocation function and asks for its own larger size"
       ],
-      "solution": "#include <cstddef>\n#include <cstdlib>\n#include <new>\n\nstd::size_t pooled_allocations = 0;\n\nclass OrderMemory {\npublic:\n    static void* allocate(std::size_t bytes) {\n        ++pooled_allocations;\n        if (void* pointer = std::malloc(bytes)) {\n            return pointer;\n        }\n        throw std::bad_alloc{};\n    }\n\n    static void deallocate(void* pointer) noexcept { std::free(pointer); }\n};\n\nstruct PooledOrder {\n    int id;\n    double price;\n\n    // `bytes` can exceed sizeof(PooledOrder): a derived class inherits these\n    // functions and a derived object is generally larger. Serve the request\n    // as given rather than assuming a fixed size.\n    static void* operator new(std::size_t bytes) {\n        return OrderMemory::allocate(bytes);\n    }\n\n    static void operator delete(void* pointer) noexcept {\n        OrderMemory::deallocate(pointer);\n    }\n\n    // Array allocation is a separate name and needs its own pair.\n    static void* operator new[](std::size_t bytes) {\n        return OrderMemory::allocate(bytes);\n    }\n\n    static void operator delete[](void* pointer) noexcept {\n        OrderMemory::deallocate(pointer);\n    }\n};\n",
-      "notes": "Defining operator new without the matching operator delete breaks the new-expression's cleanup path when a constructor throws. Note also that declaring class-local forms hides the global candidates, including the aligned std::align_val_t overloads — an over-aligned class that customises allocation must supply those signatures too."
+      "solution": "#include <cstddef>\n#include <cstdlib>\n#include <new>\n\nclass ChunkMemory {\npublic:\n    static void* allocate(std::size_t bytes) {\n        if (void* block = std::malloc(bytes)) {\n            return block;\n        }\n        throw std::bad_alloc{};\n    }\n\n    static void deallocate(void* block, std::size_t) noexcept {\n        std::free(block);\n    }\n};\n\nstruct MeshChunk {\n    float bounds[6];\n\n    // bytes is not always sizeof(MeshChunk): a derived class inherits this\n    // allocation function, and new Derived asks for sizeof(Derived).\n    static void* operator new(std::size_t bytes) {\n        return ChunkMemory::allocate(bytes);\n    }\n    static void* operator new[](std::size_t bytes) {\n        return ChunkMemory::allocate(bytes);\n    }\n\n    static void operator delete(void* block) noexcept {\n        ChunkMemory::deallocate(block, 0);\n    }\n    static void operator delete(void* block, std::size_t bytes) noexcept {\n        ChunkMemory::deallocate(block, bytes);\n    }\n    static void operator delete[](void* block) noexcept {\n        ChunkMemory::deallocate(block, 0);\n    }\n    static void operator delete[](void* block, std::size_t bytes) noexcept {\n        ChunkMemory::deallocate(block, bytes);\n    }\n};",
+      "notes": "The array forms are separate names, so declaring only the scalar pair leaves new MeshChunk[n] on the global allocator while delete[] tries the class member, or the reverse — a mismatched pair rather than a compile error. The unsized delete must stay even when the sized one is present, because an implementation is not required to call the sized overload at every site. If the facade were a fixed-size pool rather than malloc, the size argument would have to be validated instead of forwarded."
     },
     {
       "id": "c17-w07",
       "section": "Alignment on demand",
       "minutes": 9,
-      "prompt": "Write `void* aligned_block(std::size_t alignment, std::size_t bytes)` over std::aligned_alloc that satisfies the function's contract: reject an alignment that is not a power of two, round the size up to a multiple of the alignment, and return nullptr on failure. Add `release_block`.",
+      "prompt": "An FFT scratch buffer must start on a 64-byte boundary. Write `template <class T> T* allocate_over_aligned(std::size_t count, std::size_t alignment)` and the matching `template <class T> void release_over_aligned(T* block, std::size_t count, std::size_t alignment) noexcept`, both going through the aligned global allocation functions. Contract: reject an alignment that is not a power of two, reject a count whose byte size would overflow, throw `std::bad_alloc` on failure, and pass the same alignment to the release path that was used to allocate.",
       "checklist": [
-        "Rejects alignment == 0 and any alignment that is not a power of two",
-        "Rounds `bytes` up to a multiple of `alignment` before calling std::aligned_alloc",
-        "Detects overflow of the rounding arithmetic and returns nullptr",
-        "Checks the std::aligned_alloc result for nullptr",
-        "release_block uses std::free, matching the C family"
+        "The aligned overloads of ::operator new and ::operator delete are used with std::align_val_t",
+        "The release function passes the same alignment value it was given",
+        "A non-power-of-two or zero alignment is rejected",
+        "count is checked against SIZE_MAX / sizeof(T) before multiplying",
+        "The functions deal in raw storage only; no object is constructed or destroyed"
       ],
-      "solution": "#include <cstddef>\n#include <cstdlib>\n#include <limits>\n\nstatic bool is_power_of_two(std::size_t value) noexcept {\n    return value != 0 && (value & (value - 1)) == 0;\n}\n\nvoid* aligned_block(std::size_t alignment, std::size_t bytes) noexcept {\n    if (!is_power_of_two(alignment)) {\n        return nullptr;\n    }\n    if (bytes > std::numeric_limits<std::size_t>::max() - (alignment - 1)) {\n        return nullptr;  // rounding would wrap\n    }\n\n    // std::aligned_alloc requires the size to be a multiple of the alignment.\n    std::size_t rounded = (bytes + alignment - 1) & ~(alignment - 1);\n\n    return std::aligned_alloc(alignment, rounded);  // nullptr on failure\n}\n\nvoid release_block(void* pointer) noexcept {\n    std::free(pointer);  // C family in, C family out\n}\n",
-      "notes": "The masking trick only works because allocator alignments are powers of two, which is why the validation comes first: an untrusted alignment must be checked before it reaches the arithmetic. Do not assume plain std::malloc would have given 64-byte alignment — it promises only what ordinary fundamental types require."
+      "solution": "#include <cstddef>\n#include <limits>\n#include <new>\n#include <stdexcept>\n\ntemplate <class T>\nT* allocate_over_aligned(std::size_t count, std::size_t alignment) {\n    if (alignment == 0 || (alignment & (alignment - 1)) != 0) {\n        throw std::invalid_argument{\"alignment must be a power of two\"};\n    }\n    if (count > std::numeric_limits<std::size_t>::max() / sizeof(T)) {\n        throw std::bad_alloc{};\n    }\n\n    void* storage = ::operator new(count * sizeof(T),\n                                   std::align_val_t{alignment});\n    return static_cast<T*>(storage);\n}\n\ntemplate <class T>\nvoid release_over_aligned(T* block, std::size_t count,\n                          std::size_t alignment) noexcept {\n    ::operator delete(block, count * sizeof(T),\n                      std::align_val_t{alignment});\n}",
+      "notes": "The aligned deallocation function has to receive the same alignment: an implementation may store its bookkeeping at a different offset for over-aligned blocks, so releasing through the ordinary ::operator delete is undefined behaviour rather than a lost optimisation. std::aligned_alloc is the C-family alternative and adds its own rule — the size must be a multiple of the alignment — and its result must go to std::free. Neither function here starts an object lifetime; that is still the caller's std::construct_at."
     },
     {
       "id": "c17-w08",
       "section": "The custom-allocator gallery",
       "minutes": 12,
-      "prompt": "Write a StackAllocator over a caller-supplied byte buffer: `allocate(bytes, alignment)` using std::align, `marker()` returning the current offset, and `rewind(marker)`. Document the contract that rewind cannot enforce.",
+      "prompt": "Write `class SlotRecycler`: a free-list over a caller-supplied `std::span<std::byte>` for equal-sized blocks, taking the block size and block alignment as constructor arguments. Contract: the first block must start at a correctly aligned address inside the span even if the span itself is not aligned; a block size smaller than `sizeof(void*)` must be rejected; `allocate()` and `deallocate()` must each be a constant number of operations and must not touch the global allocator; `allocate()` returns `nullptr` when the recycler is empty; `capacity()` reports how many blocks actually fit. Store the free-list links in the blocks themselves without declaring a union.",
       "checklist": [
-        "allocate uses std::align so alignment padding is accounted for",
-        "Exhaustion is signalled deliberately (throws std::bad_alloc or returns nullptr), not by overrunning the buffer",
-        "marker() returns the current offset and rewind restores it",
-        "rewind is noexcept and runs no destructors",
-        "A comment states that live objects above the marker must be destroyed first and that markers are not interchangeable between allocators"
+        "The constructor rejects a block size below sizeof(void*) and a non-power-of-two alignment",
+        "The first usable block address is rounded up to the requested alignment inside the span",
+        "capacity() is computed from the bytes remaining after that rounding",
+        "The next-block link is written into the free block itself, via std::memcpy rather than a union",
+        "allocate pops the head and deallocate pushes it back, each in constant time",
+        "allocate returns nullptr rather than throwing when the free list is empty"
       ],
-      "solution": "#include <cstddef>\n#include <memory>\n#include <new>\n\nclass StackAllocator {\npublic:\n    StackAllocator(std::byte* data, std::size_t capacity) noexcept\n        : begin_(data), capacity_(capacity) {}\n\n    std::size_t marker() const noexcept { return used_; }\n\n    void* allocate(std::size_t bytes, std::size_t alignment) {\n        void* candidate = begin_ + used_;\n        std::size_t space = capacity_ - used_;\n\n        void* aligned = std::align(alignment, bytes, candidate, space);\n        if (aligned == nullptr) {\n            throw std::bad_alloc{};  // explicit exhaustion policy\n        }\n\n        used_ = static_cast<std::byte*>(aligned) - begin_ + bytes;\n        return aligned;\n    }\n\n    // Runs no destructors and checks nothing. The caller must have destroyed\n    // every live object allocated above `marker`, and the marker must have\n    // come from this allocator: rewinding forward, in non-LIFO order, or with\n    // another allocator's offset all fit in a std::size_t and are all\n    // contract violations.\n    void rewind(std::size_t marker) noexcept { used_ = marker; }\n\nprivate:\n    std::byte* begin_;\n    std::size_t capacity_;\n    std::size_t used_{};\n};\n",
-      "notes": "The only difference from the arena is that the reclaim point is a saved offset instead of zero, which buys nested scratch regions at the cost of a strict LIFO discipline. Neither allocator remembers object boundaries — that omission is where the speed comes from."
+      "solution": "#include <cstddef>\n#include <cstdint>\n#include <cstring>\n#include <span>\n#include <stdexcept>\n\nclass SlotRecycler {\npublic:\n    SlotRecycler(std::span<std::byte> storage, std::size_t block_size,\n                 std::size_t block_alignment)\n        : block_size_(block_size) {\n        if (block_size < sizeof(std::byte*)) {\n            throw std::invalid_argument{\"block cannot hold a free-list link\"};\n        }\n        if (block_alignment == 0 ||\n            (block_alignment & (block_alignment - 1)) != 0) {\n            throw std::invalid_argument{\"alignment must be a power of two\"};\n        }\n\n        const auto base = reinterpret_cast<std::uintptr_t>(storage.data());\n        const std::uintptr_t mask = block_alignment - 1;\n        const std::size_t skipped =\n            static_cast<std::size_t>(((base + mask) & ~mask) - base);\n        if (skipped >= storage.size()) {\n            return;  // nothing usable; capacity stays zero\n        }\n\n        std::byte* first = storage.data() + skipped;\n        capacity_ = (storage.size() - skipped) / block_size;\n        for (std::size_t i = capacity_; i-- > 0;) {\n            std::byte* block = first + i * block_size;\n            std::memcpy(block, &head_, sizeof(head_));  // link, no union\n            head_ = block;\n        }\n    }\n\n    void* allocate() noexcept {\n        if (head_ == nullptr) {\n            return nullptr;\n        }\n        std::byte* block = head_;\n        std::memcpy(&head_, block, sizeof(head_));\n        return block;\n    }\n\n    void deallocate(void* block) noexcept {\n        auto* slot = static_cast<std::byte*>(block);\n        std::memcpy(slot, &head_, sizeof(head_));\n        head_ = slot;\n    }\n\n    std::size_t capacity() const noexcept { return capacity_; }\n\nprivate:\n    std::size_t block_size_;\n    std::size_t capacity_ = 0;\n    std::byte* head_ = nullptr;\n};",
+      "notes": "Reusing the free block to store its own link is what makes the metadata free, and it is exactly why the block size has to cover a pointer: a smaller block would have the link overrun into the next one. Neither entry point validates ownership, so returning a block from a different recycler, or an interior pointer, corrupts the chain and fails later at an unrelated call. The recycler hands out storage only; the caller still constructs and destroys the objects that live in it."
     }
   ]
 }

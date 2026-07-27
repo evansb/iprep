@@ -426,199 +426,197 @@
     {
       "id": "c02-r01",
       "section": "Promotions and the usual arithmetic conversions",
-      "prompt": "What does this print?",
-      "code": "#include <cstdint>\n#include <iostream>\n\nint main() {\n    std::uint8_t bid = 200;\n    std::uint8_t ask = 100;\n    std::uint8_t stored = bid + ask;\n    std::cout << static_cast<int>(stored) << '\\n';\n}",
+      "prompt": "A permission byte has its low nibble cleared. What does this print?",
+      "code": "#include <cstdint>\n#include <iostream>\n\nint main() {\n    std::uint8_t perms = 0b1011'0110;\n    std::uint8_t low_nibble = 0x0F;\n\n    std::uint8_t cleared = perms & ~low_nibble;\n\n    std::cout << std::boolalpha\n              << (~low_nibble == 0xF0) << ' '\n              << static_cast<int>(cleared) << '\\n';\n}",
       "kind": "value",
       "accept": [
-        "44"
+        "false 176"
       ],
-      "explain": "Both operands promote to int, so the sum 300 is computed correctly in int. Storing it back into a uint8_t converts modulo 256: 300 - 256 = 44. The narrow type saved storage, not arithmetic width."
+      "explain": "`~low_nibble` promotes its operand to `int` before complementing, so it is `~15`, that is `-16` — the bit pattern 0xFFFFFFF0, not the eight-bit 0xF0. Comparing it with the `int` literal 240 is therefore false. The tempting reading is that a `std::uint8_t` operand keeps eight-bit arithmetic and both lines agree. The masking still produces the intended 0b1011_0000 = 176, because the extra one-bits above bit 7 are cut away when the `int` result converts back to `std::uint8_t` — the bug is only visible when the intermediate value is compared instead of stored."
     },
     {
       "id": "c02-r02",
-      "section": "Promotions and the usual arithmetic conversions",
-      "prompt": "What does this print?",
-      "code": "#include <iostream>\n\nint main() {\n    std::cout << std::boolalpha << (-1 > 0u) << '\\n';\n}",
+      "section": "Signed, unsigned, and overflow",
+      "prompt": "A sliding window reports how many more samples it can take. What does this print?",
+      "code": "#include <iostream>\n#include <vector>\n\nint headroom(const std::vector<int>& window, int capacity) {\n    return capacity - window.size();\n}\n\nint main() {\n    std::vector<int> window(10);\n    int capacity = 4;\n\n    std::cout << std::boolalpha\n              << (capacity - window.size() > 0) << ' '\n              << headroom(window, capacity) << '\\n';\n}",
       "kind": "value",
       "accept": [
-        "true"
+        "true -6"
       ],
-      "explain": "Both operands have the rank of int and one is unsigned, so the signed operand converts to unsigned int. -1 becomes UINT_MAX, which is greater than 0. Well-defined, and almost never what the author meant."
+      "explain": "`window.size()` is `std::size_t`, whose rank is at least that of `int` on this platform, so the usual arithmetic conversions convert `capacity` to `std::size_t`. `4 - 10` is then computed modulo 2^64 and yields a huge positive value, which is greater than zero: the guard says there is room. The tempting reading is that both lines must agree because both spell the same subtraction. In `headroom` that same huge value is converted back to `int` on return, which since C++20 is the value congruent modulo 2^32 — a well-defined -6. One expression is a wrapped unsigned comparison, the other a wrapped-then-narrowed signed result."
     },
     {
       "id": "c02-r03",
       "section": "IEEE 754 floating point",
-      "prompt": "What does this print?",
-      "code": "#include <iostream>\n\nint main() {\n    double large = 1e16;\n    double small = 1.0;\n    double recovered = (large + small) - large;\n    std::cout << recovered << '\\n';\n}",
+      "prompt": "Three tenths of a second are accumulated one tick at a time. What does this print?",
+      "code": "#include <iomanip>\n#include <iostream>\n\nint main() {\n    double elapsed = 0.0;\n    for (int tick = 0; tick < 3; ++tick) {\n        elapsed += 0.1;\n    }\n\n    std::cout << std::boolalpha\n              << (elapsed == 0.3) << ' '\n              << (elapsed > 0.3) << ' '\n              << std::setprecision(1) << elapsed << '\\n';\n}",
       "kind": "value",
       "accept": [
-        "0"
+        "false true 0.3"
       ],
-      "explain": "At magnitude 1e16 the gap between adjacent doubles exceeds 1, so large + small rounds back to large and the subtraction yields exactly zero. This is catastrophic cancellation: the small contribution was destroyed by rounding before the subtraction ever ran."
+      "explain": "Neither `0.1` nor `0.3` is representable in binary64; each is stored as the nearest representable value. Summing the stored `0.1` three times under round-to-nearest lands one ULP above the stored `0.3`, so the equality is false and the ordered comparison is true. The tempting reading comes from the printed value: at one significant digit the sum formats as `0.3`, so the number *looks* equal to the constant it is being compared with. Printing is a rounding of the value, not the value."
     },
     {
       "id": "c02-r04",
       "section": "Enumerations",
-      "prompt": "What happens when this is compiled and run?",
-      "code": "#include <cstdint>\n#include <iostream>\n\nenum class Side : std::uint8_t {\n    Buy = 1,\n    Sell = 2\n};\n\nint main() {\n    int next = Side::Buy + 1;\n    std::cout << next << '\\n';\n}",
+      "prompt": "Exactly one of the three numbered lines is ill-formed. Which one, and why do the other two survive?",
+      "code": "#include <cstdint>\n#include <utility>\n\nenum class LogFlag : std::uint8_t {\n    Trace = 1,\n    Debug = 2,\n    Warn = 4\n};\n\nstd::uint8_t verbose_mask() {\n    std::uint8_t mask = std::to_underlying(LogFlag::Trace);  // (1)\n    mask |= static_cast<std::uint8_t>(LogFlag::Debug);       // (2)\n    return mask | LogFlag::Warn;                             // (3)\n}",
       "kind": "no-compile",
-      "explain": "A scoped enumeration does not implicitly convert to an integer, and there is no operator+ for Side and int. That refusal is the point of enum class. Write std::to_underlying(Side::Buy) + 1 if the arithmetic is genuinely intended."
+      "explain": "Line (3) is ill-formed: a scoped enumeration has no implicit conversion to an integer, and there is no built-in `operator|` taking `std::uint8_t` and `LogFlag`. Lines (1) and (2) compile because both name the conversion explicitly — `std::to_underlying` in one case and a `static_cast` in the other. The tempting reading is that the fixed underlying type `std::uint8_t` makes the enumeration interchangeable with that type; it fixes the *representation*, not the conversion rules. That is the whole point of `enum class`: bitmask arithmetic must be requested, either by converting at the boundary or by giving the type its own operators."
     },
     {
       "id": "c02-r05",
       "section": "Signed, unsigned, and overflow",
-      "prompt": "What happens when this is compiled and run?",
-      "code": "#include <climits>\n#include <iostream>\n\nint main() {\n    int value = INT_MAX;\n    std::cout << value + 1 << '\\n';\n}",
+      "prompt": "A latency histogram builds a table of power-of-two bucket edges. Where does this program leave the language, and what does the standard say about the result?",
+      "code": "#include <cstdio>\n\nint main() {\n    int edges[32];\n    int edge = 1;\n\n    for (int i = 0; i < 32; ++i) {\n        edges[i] = edge;\n        edge *= 2;\n    }\n\n    std::printf(\"%d %d\\n\", edges[0], edges[31]);\n}",
       "kind": "ub",
-      "explain": "Signed integer overflow is undefined behaviour. It usually appears to print INT_MIN, but the compiler is entitled to assume it never happens — UBSan reports 'signed integer overflow: 2147483647 + 1 cannot be represented in type int'."
+      "explain": "At `i == 30` the multiplication computes 2^31, which is not representable in a 32-bit `int`. Signed overflow is undefined behaviour, so the program has no defined result at all — UBSan reports `signed integer overflow: 1073741824 * 2 cannot be represented in type 'int'`. The tempting reading is that the multiplication \"wraps to INT_MIN\" and the last edge simply prints as -2147483648; that is a description of one machine, not of the language, and an optimiser is entitled to assume the loop never reaches an overflowing iteration. Declaring `edge` as `unsigned` makes the wrap defined, and `std::int64_t` makes all 32 edges representable."
     },
     {
       "id": "c02-r06",
       "section": "Implicit conversions",
-      "prompt": "What happens when this is compiled and run?",
-      "code": "#include <cstdint>\n#include <iostream>\n\nint main() {\n    std::int64_t wide = 5'000'000'000;\n    std::int32_t narrow{wide};\n    std::cout << narrow << '\\n';\n}",
+      "prompt": "Only one of these two functions compiles. Which one fails, and why does the other survive with the same-looking arithmetic?",
+      "code": "#include <cstdint>\n\nstruct Date {\n    std::uint16_t year;\n    std::uint8_t month;\n    std::uint8_t day;\n};\n\nDate next_day(Date d) {\n    return Date{d.year, d.month, static_cast<std::uint8_t>(d.day + 1)};\n}\n\nDate first_of_next_month(Date d) {\n    return Date{d.year, d.month + 1, 1};\n}",
       "kind": "no-compile",
-      "explain": "Brace initialisation rejects narrowing conversions. With `std::int32_t narrow = wide;` this would compile and quietly print 705032704. Use braces exactly where a narrowing conversion would be a bug."
+      "explain": "`first_of_next_month` is ill-formed. `d.month + 1` promotes `d.month` to `int`, and converting an `int` *expression* back to `std::uint8_t` inside braces is a narrowing conversion, which brace initialization rejects. The literal `1` in the same braces is fine: it is a constant expression whose value the compiler can prove fits in `std::uint8_t`, and constant expressions that fit are exempt. `next_day` compiles because the `static_cast` states the narrowing explicitly. The tempting reading is that the compiler rejects the line because month 13 is out of range — it has no idea what a month is; it is objecting to the *type* of `d.month + 1`, and would object identically if the sum were provably 2."
     },
     {
       "id": "c02-r07",
       "section": "References",
-      "prompt": "What does this print?",
-      "code": "#include <iostream>\n\nint main() {\n    int bid = 100;\n    int ask = 105;\n    int& price = bid;\n\n    price = 101;\n    price = ask;\n\n    std::cout << bid << ' ' << ask << '\\n';\n}",
+      "prompt": "A stock-keeping routine tops up the emptier of two bins. What does this print?",
+      "code": "#include <iostream>\n\nint main() {\n    int bin_a = 7;\n    int bin_b = 3;\n\n    int& emptiest = bin_a;\n    if (bin_b < emptiest) {\n        emptiest = bin_b;  // \"point at bin_b instead\"\n    }\n\n    emptiest += 1;  // restock the emptier bin\n\n    std::cout << bin_a << ' ' << bin_b << '\\n';\n}",
       "kind": "value",
       "accept": [
-        "105 105"
+        "4 3"
       ],
-      "explain": "price aliases bid permanently. `price = ask;` assigns ask's value into bid; it does not reseat the reference. Both names now read 105, and ask was never touched."
+      "explain": "A reference cannot be reseated. `emptiest = bin_b` is not a rebind; it is an assignment *through* the reference, so it writes 3 into `bin_a`. `emptiest` still names `bin_a`, and `+= 1` makes it 4, while `bin_b` is untouched at 3. The tempting reading — \"`emptiest` now refers to `bin_b`, so the output is 7 4\" — is exactly the Java/Python model of a name. To select an object at runtime you need a pointer (`int* emptiest = &bin_a; ... emptiest = &bin_b;`), or you must bind the reference in its initializer with a conditional expression."
     },
     {
       "id": "c02-r08",
       "section": "`auto` and `decltype`",
-      "prompt": "What does this print?",
-      "code": "#include <iostream>\n#include <string>\n\nint main() {\n    std::string symbol = \"EURUSD\";\n    const std::string& view = symbol;\n\n    auto copy = view;\n    copy[0] = 'X';\n\n    std::cout << symbol << '\\n';\n}",
+      "prompt": "A ring buffer hands out slots two ways. What does this print?",
+      "code": "#include <cstddef>\n#include <iostream>\n#include <vector>\n\ndecltype(auto) slot(std::vector<int>& ring, std::size_t i) {\n    return ring[i % ring.size()];\n}\n\nauto slot_copy(std::vector<int>& ring, std::size_t i) {\n    return ring[i % ring.size()];\n}\n\nint main() {\n    std::vector<int> ring(4, 0);\n\n    slot(ring, 6) = 42;\n\n    auto taken = slot(ring, 2);\n    taken = 7;\n\n    std::cout << ring[2] << ' ' << taken << ' ' << slot_copy(ring, 6) << '\\n';\n}",
       "kind": "value",
       "accept": [
-        "EURUSD"
+        "42 7 42"
       ],
-      "explain": "Plain auto strips the reference and the const, so copy is an independent std::string. Mutating it leaves symbol untouched. Had this been `auto& copy = view;` the deduced type would be const std::string& and the assignment would not compile."
+      "explain": "`ring[i % ring.size()]` is an lvalue of type `int`, so `decltype(auto)` deduces `int&` and `slot` returns a reference into the vector: `slot(ring, 6)` names slot 2 and the assignment stores 42 there. Plain `auto` on the same expression drops the reference, so `slot_copy` returns a copy — and `auto taken = slot(...)` likewise copies, which is why writing 7 into `taken` leaves `ring[2]` at 42. The tempting reading is that `taken` aliases the slot because the function it was initialized from returns a reference; the declaration form of the *variable*, not the value category of its initializer, decides that."
     }
   ],
   "writing": [
     {
       "id": "c02-w01",
       "section": "Const and volatile",
-      "minutes": 6,
-      "prompt": "Declare three pointers to an existing `int bid`: one through which the int cannot be modified, one that cannot be repointed, and one with both restrictions. Add a one-line comment to each naming what it is.",
+      "minutes": 7,
+      "prompt": "A log line arrives as `char line[64]`. Write `count_commas` twice: a two-pointer form `count_commas(begin, end)` in which the walking cursor may be advanced but never used to write, and the end pointer may never be advanced or used to write; and a one-argument overload taking the buffer itself that does not lose the bound to array-to-pointer decay. Neither overload may copy the buffer or use a C-style cast.",
       "checklist": [
-        "const int* — pointer to const int (pointee read-only, pointer reseatable)",
-        "int* const — const pointer to int (pointee writable, pointer fixed)",
-        "const int* const — both",
-        "Each declaration is initialised at the point of declaration"
+        "The walking cursor is declared `const char*` — reseatable, read-only pointee",
+        "The end parameter is declared `const char* const` — both the pointer and the pointee are const",
+        "The one-argument overload takes `const char (&line)[64]`, a reference to the array, not `const char line[64]`",
+        "That overload derives its end pointer from the bound rather than from a repeated literal 64 in the body",
+        "No `const_cast` or C-style cast appears"
       ],
-      "solution": "int bid = 100;\n\nconst int* observed = &bid;      // pointer to const int\nint* const fixed = &bid;         // const pointer to int\nconst int* const stable = &bid;  // const pointer to const int",
-      "notes": "Read the declaration from the identifier outward. `int const* observed` is the same type as `const int* observed`; the const-on-the-right spelling makes the outward reading rule uniform."
+      "solution": "#include <cstddef>\n\nstd::size_t count_commas(const char* begin, const char* const end) {\n    std::size_t commas = 0;\n    for (const char* cursor = begin; cursor != end; ++cursor) {\n        if (*cursor == ',') {\n            ++commas;\n        }\n    }\n    return commas;\n}\n\nstd::size_t count_commas(const char (&line)[64]) {\n    return count_commas(line, line + sizeof(line));\n}",
+      "notes": "Read the declaration outward from the identifier: `cursor` is a pointer to const char, `end` is a const pointer to const char. A parameter written `const char line[64]` is adjusted to `const char*` and the 64 enforces nothing, which is why the second overload binds a reference to the array instead — the bound is part of the array type and survives."
     },
     {
       "id": "c02-w02",
       "section": "Enumerations",
-      "minutes": 10,
-      "prompt": "Define a wire-facing scoped enumeration Side with a fixed 8-bit underlying type and values Buy = 1, Sell = 2. Write `to_wire` converting a Side to its underlying type, and `from_wire` returning std::optional<Side> that rejects any value which is not an enumerator.",
+      "minutes": 8,
+      "prompt": "A tokenizer tags each token with a one-byte kind on the wire. Write a scoped enumeration `TokenKind` with a fixed underlying type covering Word, Number and Punct plus an Invalid state, and the pair of boundary functions `to_wire(TokenKind) -> std::uint8_t` and `from_wire(std::uint8_t) -> TokenKind`. `from_wire` must map every byte outside the declared set to `TokenKind::Invalid`; it must never produce a `TokenKind` value that no enumerator names.",
       "checklist": [
-        "enum class with an explicit underlying type (std::uint8_t)",
-        "to_wire uses std::to_underlying (or a static_cast to the underlying type)",
-        "from_wire validates the incoming value before casting",
-        "from_wire returns std::nullopt for an unrecognised value",
-        "static_cast, not reinterpret_cast, for the inbound conversion"
+        "`enum class TokenKind : std::uint8_t` — scoped, with an explicit underlying type",
+        "`to_wire` uses `std::to_underlying` (or a `static_cast`) rather than an implicit conversion",
+        "`from_wire` validates the incoming byte before producing an enumerator, and has a default/else path returning `Invalid`",
+        "No unchecked `static_cast<TokenKind>(byte)` on unvalidated input"
       ],
-      "solution": "#include <cstdint>\n#include <optional>\n#include <utility>\n\nenum class Side : std::uint8_t {\n    Buy = 1,\n    Sell = 2\n};\n\nstd::uint8_t to_wire(Side side) {\n    return std::to_underlying(side);\n}\n\nstd::optional<Side> from_wire(std::uint8_t value) {\n    switch (value) {\n        case 1: return Side::Buy;\n        case 2: return Side::Sell;\n        default: return std::nullopt;\n    }\n}",
-      "notes": "Because the underlying type is fixed, static_cast<Side>(7) is well-defined and gives you a Side holding 7 — which is exactly why from_wire has to validate. A fixed underlying type fixes layout, not domain."
+      "solution": "#include <cstdint>\n#include <utility>\n\nenum class TokenKind : std::uint8_t {\n    Invalid = 0,\n    Word = 1,\n    Number = 2,\n    Punct = 3\n};\n\nstd::uint8_t to_wire(TokenKind kind) {\n    return std::to_underlying(kind);\n}\n\nTokenKind from_wire(std::uint8_t byte) {\n    switch (byte) {\n        case 1:\n            return TokenKind::Word;\n        case 2:\n            return TokenKind::Number;\n        case 3:\n            return TokenKind::Punct;\n        default:\n            return TokenKind::Invalid;\n    }\n}",
+      "notes": "A fixed underlying type means `static_cast<TokenKind>(200)` is a valid *value* of the type rather than undefined behaviour — it is still not a token kind your switch statements handle. The fixed type buys layout, not domain validation; the `default` arm buys the domain."
     },
     {
       "id": "c02-w03",
       "section": "Signed, unsigned, and overflow",
       "minutes": 6,
-      "prompt": "Write a function that prints the elements of a `const std::vector<int>&` in reverse order. It must be correct for an empty vector and must not rely on an unsigned value becoming negative. Write both idioms from the chapter.",
+      "prompt": "Write `bool fits(std::size_t used, std::size_t capacity, std::size_t incoming)`, answering whether `incoming` more bytes fit in the buffer. The function must never evaluate an unsigned subtraction whose result could wrap, and must answer `false` rather than `true` when the caller passes a `used` that already exceeds `capacity`.",
       "checklist": [
-        "Uses std::ssize (signed size) or the `i-- > 0` idiom",
-        "Correct for an empty vector — no wraparound to SIZE_MAX",
-        "Termination does not depend on an unsigned comparing < 0",
-        "Any signed index is cast to std::size_t before subscripting"
+        "The over-capacity case is handled before any subtraction is performed",
+        "Exactly one subtraction appears, and it is guarded so that its left operand is not smaller than its right",
+        "The comparison is written against `capacity - used`, not as `used + incoming <= capacity` (which can overflow the sum)",
+        "The function has no signed/unsigned mixed comparison"
       ],
-      "solution": "#include <iostream>\n#include <iterator>\n#include <vector>\n\nvoid print_reverse(const std::vector<int>& values) {\n    // Signed index: std::ssize gives -1 for an empty vector, so the loop\n    // simply never runs.\n    for (auto i = std::ssize(values) - 1; i >= 0; --i) {\n        std::cout << values[static_cast<std::size_t>(i)] << '\\n';\n    }\n\n    // Unsigned, post-decrement: tests the old value, then uses the new one.\n    for (auto i = values.size(); i-- > 0;) {\n        std::cout << values[i] << '\\n';\n    }\n}",
-      "notes": "The second idiom is worth memorising: `i-- > 0` compares the pre-decrement value against 0 and leaves the decremented value for the body, so it stops cleanly at index 0 without ever going negative."
+      "solution": "#include <cstddef>\n\nbool fits(std::size_t used, std::size_t capacity, std::size_t incoming) {\n    if (used > capacity) {\n        return false;  // broken invariant: never subtract into a wrap\n    }\n    return incoming <= capacity - used;\n}",
+      "notes": "The naive `used + incoming <= capacity` is wrong in the other direction: the sum can wrap past zero and make an enormous request look small. Subtraction is safe once you have proved the left operand is the larger; that proof is the `if`."
     },
     {
       "id": "c02-w04",
       "section": "IEEE 754 floating point",
       "minutes": 8,
-      "prompt": "Write `almost_equal(double lhs, double rhs, double relative_tolerance, double absolute_tolerance)` that combines a relative tolerance for ordinary magnitudes with an absolute tolerance near zero.",
+      "prompt": "A thermometer driver hands you a `double` in Celsius. Write `is_valid_reading(double)`, accepting only finite values in the closed range -60 to 85, and `to_decidegrees(double)`, converting a validated reading to tenths of a degree rounded to nearest (half away from zero), not truncated. Explain in a comment why a range check written only as `if (celsius > 85.0) return false;` is not sufficient.",
       "checklist": [
-        "Computes the absolute difference with std::abs",
-        "Scales the relative tolerance by the larger of the two magnitudes",
-        "Takes the max of the absolute and scaled relative tolerance",
-        "Uses <= so that an exact match passes",
-        "Includes <cmath> and <algorithm>"
+        "Finiteness is tested with `std::isfinite` (or equivalent) *before* the range comparisons",
+        "Both ends of the range are checked, and the range test is inclusive",
+        "`to_decidegrees` rounds via `std::lround`/`std::round` rather than a bare `static_cast<int>`",
+        "A comment states that every ordered comparison with NaN is false, so a NaN passes an inverted check"
       ],
-      "solution": "#include <algorithm>\n#include <cmath>\n\nbool almost_equal(double lhs, double rhs,\n                  double relative_tolerance,\n                  double absolute_tolerance) {\n    double difference = std::abs(lhs - rhs);\n    double scale = std::max(std::abs(lhs), std::abs(rhs));\n    return difference <=\n           std::max(absolute_tolerance, relative_tolerance * scale);\n}",
-      "notes": "The tolerances come from the domain's acceptable error. Machine epsilon is not a universal tolerance — it is the gap between 1.0 and the next double, and the gap grows with magnitude."
+      "solution": "#include <cmath>\n\n// An ordered comparison with NaN is false, so a lone \"if (c > 85.0) return\n// false;\" lets a NaN through as in-range. Test finiteness first.\nbool is_valid_reading(double celsius) {\n    if (!std::isfinite(celsius)) {\n        return false;\n    }\n    return celsius >= -60.0 && celsius <= 85.0;\n}\n\nint to_decidegrees(double celsius) {\n    return static_cast<int>(std::lround(celsius * 10.0));\n}",
+      "notes": "`static_cast<int>(celsius * 10.0)` truncates toward zero, so 20.49 and 20.99 both become 204 — and a value the driver reports as 20.5 may be stored as 20.499999999999996. Rounding is a separate decision from converting."
     },
     {
       "id": "c02-w05",
-      "section": "IEEE 754 floating point",
+      "section": "Subnormals and fast math",
       "minutes": 7,
-      "prompt": "Write `accept_price(double price, double maximum)` that returns true only for a price that is finite and not above maximum. Explain in a comment why an ordered comparison alone is not enough.",
+      "prompt": "A decaying activity score is updated on every event. Write `double decay(double level, double factor)` that returns the decayed value, except that any result whose magnitude has fallen below the smallest positive *normal* double is returned as exactly `0.0`, so the loop can never enter the subnormal range. Add a compile-time check that the target actually uses IEEE 754 doubles.",
       "checklist": [
-        "Checks std::isfinite(price) before the range comparison",
-        "Rejects NaN and both infinities",
-        "Range check is only reached for a finite price",
-        "Comment names the NaN-comparison-is-false rule"
+        "`static_assert(std::numeric_limits<double>::is_iec559)` (or equivalent) appears at namespace scope",
+        "The threshold is `std::numeric_limits<double>::min()`, the smallest positive normal — not `::epsilon()` and not `::denorm_min()`",
+        "The magnitude is compared, so negative levels are handled too",
+        "The clamped return is a literal `0.0` rather than the tiny product"
       ],
-      "solution": "#include <cmath>\n\nbool accept_price(double price, double maximum) {\n    // Every ordered comparison with NaN is false, so `price > maximum`\n    // is false for a NaN price and an inverted check would accept it.\n    if (!std::isfinite(price)) {\n        return false;\n    }\n    return price <= maximum;\n}",
-      "notes": "Validate finiteness at ingress rather than at each comparison site. NaN also breaks the strict-weak-ordering requirement of ordered containers, so a NaN that reaches a std::map key is a second, quieter bug."
+      "solution": "#include <cmath>\n#include <limits>\n\nstatic_assert(std::numeric_limits<double>::is_iec559);\n\ndouble decay(double level, double factor) {\n    double next = level * factor;\n    if (std::abs(next) < std::numeric_limits<double>::min()) {\n        return 0.0;  // flush subnormal results; keeps the update off the assist path\n    }\n    return next;\n}",
+      "notes": "`numeric_limits<double>::min()` is the smallest positive normal value, not the smallest positive value — that is `denorm_min()`. Clamping here is a deliberate change to the numerical contract, chosen in one place, which is very different from switching on FTZ/DAZ or `-ffast-math` for a whole translation unit."
     },
     {
       "id": "c02-w06",
       "section": "Pointers, arrays, and decay",
       "minutes": 6,
-      "prompt": "Write two overloads of `sum`: one taking a `const std::vector<int>&`, and one taking a raw pointer and an element count — with a comment explaining why `int values[10]` as a parameter would not do the job.",
+      "prompt": "Write a `constexpr` table of the twelve month lengths of a non-leap year, and `int day_of_year(int month, int day)` taking a 1-based month. The element count must be checked at compile time from the array itself rather than written as a literal in a second place, and the function must never index the table out of range for a month in 1..12.",
       "checklist": [
-        "Pointer overload takes an explicit length parameter",
-        "Comment states that int values[10] is adjusted to int* and the bound enforces nothing",
-        "Vector overload iterates without indices going out of range",
-        "Length parameter is a size type, not int"
+        "The array is declared with a deduced bound (`constexpr int kMonthLength[] = {...}`)",
+        "A `static_assert` derives the count with `sizeof(table) / sizeof(table[0])` (or `std::size`) and checks it is 12",
+        "The 1-based month is converted to a 0-based index exactly once",
+        "The accumulation loop stops before the current month rather than including it"
       ],
-      "solution": "#include <cstddef>\n#include <vector>\n\nlong sum(const std::vector<int>& values) {\n    long total = 0;\n    for (int v : values) {\n        total += v;\n    }\n    return total;\n}\n\n// A parameter written `int values[10]` is adjusted to `int*`: the bound is\n// documentation the compiler discards, so the length has to be passed.\nlong sum(const int* values, std::size_t count) {\n    long total = 0;\n    for (std::size_t i = 0; i < count; ++i) {\n        total += values[i];\n    }\n    return total;\n}",
-      "notes": "std::span (Chapter 12) exists precisely to bundle the pointer and the count into one parameter, which is what you should reach for once it is available to you."
+      "solution": "#include <cstddef>\n\nconstexpr int kMonthLength[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};\nstatic_assert(sizeof(kMonthLength) / sizeof(kMonthLength[0]) == 12);\n\nint day_of_year(int month, int day) {  // month is 1-based\n    int total = day;\n    for (int m = 1; m < month; ++m) {\n        total += kMonthLength[m - 1];\n    }\n    return total;\n}",
+      "notes": "The `sizeof` idiom works only while the array type is in scope. Pass `kMonthLength` to a function declared `int f(int months[12])` and the parameter is a plain `int*`: `sizeof` then reports the pointer size and the compile-time count is gone."
     },
     {
       "id": "c02-w07",
       "section": "Explicit C++ casts",
       "minutes": 8,
-      "prompt": "Write `price_to_ticks(double price, double tick_size)` returning std::optional<std::int64_t>. Reject non-finite input, round to the nearest tick rather than truncating, and reject a result that will not fit in an int64.",
+      "prompt": "A C logging library calls back with `void* payload, std::size_t len`, and wants a `void* context` that you can only supply as a `const Config*`. Write the forwarding function using the narrowest named cast for each conversion — the payload viewed as `const char*`, the config passed as the context, and the payload address recorded as a `std::uintptr_t` identifier. One comment per cast naming the permission it requests. Then state, in a final comment, which cast becomes undefined behaviour depending on how the pointed-to object was created.",
       "checklist": [
-        "Rejects non-finite input up front",
-        "Uses std::llround or std::round rather than relying on the cast to truncate",
-        "Range-checks against std::numeric_limits<std::int64_t> before converting",
-        "Uses static_cast, and a comment notes the cast adds no range checking",
-        "Returns std::nullopt on every rejection path"
+        "`static_cast` is used for `void*` to `const char*` (no `reinterpret_cast` there)",
+        "`const_cast` is used only to drop the `const` on the config pointer",
+        "`reinterpret_cast` is used only for the pointer-to-integer conversion",
+        "No C-style cast appears anywhere",
+        "A comment states that writing through the de-const-ed pointer is undefined if the `Config` object was itself created `const`"
       ],
-      "solution": "#include <cmath>\n#include <cstdint>\n#include <limits>\n#include <optional>\n\nstd::optional<std::int64_t> price_to_ticks(double price, double tick_size) {\n    if (!std::isfinite(price) || !std::isfinite(tick_size) || tick_size <= 0.0) {\n        return std::nullopt;\n    }\n\n    double ticks = std::round(price / tick_size);\n\n    // static_cast documents intent but adds no range check: converting an\n    // out-of-range double to an integer type is undefined behaviour.\n    constexpr double limit = static_cast<double>(std::numeric_limits<std::int64_t>::max());\n    if (ticks < -limit || ticks > limit) {\n        return std::nullopt;\n    }\n\n    return static_cast<std::int64_t>(ticks);\n}",
-      "notes": "The chapter's rule is that executable prices should not be doubles at all. When a double must be converted at an ingress boundary, this is the shape of the conversion: validate, round deliberately, range-check, then cast."
+      "solution": "#include <cstddef>\n#include <cstdint>\n\nstruct Config {\n    int level;\n};\n\nextern \"C\" void legacy_log(void* context, const char* text, std::size_t len);\n\nvoid forward(void* payload, std::size_t len, const Config* config) {\n    // void* to an object pointer type: a plain type-system conversion.\n    const char* text = static_cast<const char*>(payload);\n\n    // Changes cv-qualification only; the address and value are untouched.\n    void* context = const_cast<Config*>(config);\n\n    // Reinterprets the pointer's representation as an integer.\n    std::uintptr_t id = reinterpret_cast<std::uintptr_t>(payload);\n    (void)id;\n\n    legacy_log(context, text, len);\n\n    // The const_cast is legal here, but if legacy_log writes through the\n    // context and the underlying Config was defined const, that write is\n    // undefined behaviour — removing const does not make the object writable.\n}",
+      "notes": "Each named cast advertises exactly one power, which is why they are greppable review points. A single `(char*)payload` would have performed the `static_cast` and quietly stood ready to strip `const` as well."
     },
     {
       "id": "c02-w08",
       "section": "`auto` and `decltype`",
       "minutes": 5,
-      "prompt": "Given `std::string symbol; const std::string& view = symbol;`, write five declarations using auto that deduce, respectively: a copy, a read-only alias (two ways), a forwarding reference, and a pointer. Comment each with the deduced type.",
+      "prompt": "Write two loops over a `std::vector<int>` used as a ring buffer: one that doubles every slot in place, and one that prints every slot without copying it. Add a commented-out third loop showing the spelling that compiles, runs, and silently changes nothing — with a comment naming the deduction rule responsible.",
       "checklist": [
-        "auto value = view;  deduces std::string (a copy)",
-        "auto& and const auto& both deduce const std::string&",
-        "auto&& deduces const std::string& when bound to this lvalue",
-        "auto* requires a pointer initialiser and deduces const std::string*",
-        "Comments state the deduced type, not just the intent"
+        "The mutating loop declares the variable `auto&`",
+        "The observing loop declares the variable `const auto&`",
+        "The commented-out loop uses plain `auto` and the comment says plain `auto` drops the reference and produces a copy",
+        "Neither live loop takes an index or calls `size()`"
       ],
-      "solution": "#include <string>\n\nvoid deduction_forms(const std::string& view) {\n    auto value = view;         // std::string — copies\n    auto& alias = view;        // const std::string& — aliases, read-only\n    const auto& ref = view;    // const std::string& — aliases, read-only\n    auto&& fwd = view;         // const std::string& — binds to this lvalue\n    auto* ptr = &view;         // const std::string* — needs a pointer initialiser\n\n    (void)value; (void)alias; (void)ref; (void)fwd; (void)ptr;\n}",
-      "notes": "auto&& in a deduction context is a forwarding reference: it binds to lvalues and temporaries alike, collapsing to an lvalue reference here. Chapter 20 develops why that matters."
+      "solution": "#include <iostream>\n#include <vector>\n\nvoid double_in_place(std::vector<int>& ring) {\n    for (auto& slot : ring) {  // auto& aliases the element\n        slot *= 2;\n    }\n}\n\nvoid print_all(const std::vector<int>& ring) {\n    for (const auto& slot : ring) {  // observes without copying\n        std::cout << slot << ' ';\n    }\n    std::cout << '\\n';\n\n    // for (auto slot : ring) { slot *= 2; }\n    // Plain auto drops the reference: slot is a copy of the element, so the\n    // multiplication updates the copy and the container is unchanged.\n}",
+      "notes": "For an `int` the copy costs nothing and only the semantics differ, but the same rule applied to `std::vector<std::string>` turns an observing loop into a per-element allocation. Choose the declaration form deliberately even when the element is cheap."
     }
   ]
 }

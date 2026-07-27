@@ -285,63 +285,63 @@
   "reading": [
     {
       "id": "c10-r01",
-      "section": "Growth, capacity, and `reserve`",
+      "section": "`std::vector` — the default",
       "prompt": "What does this print?",
-      "code": "#include <iostream>\n#include <vector>\n\nint main() {\n    std::vector<int> values;\n    values.reserve(5);\n\n    const int* first = values.data();\n    for (int i = 0; i < 5; ++i) {\n        values.push_back(i);\n    }\n\n    std::cout << std::boolalpha\n              << (values.data() == first) << ' '\n              << values.size() << ' '\n              << (values.capacity() >= 5) << '\\n';\n}",
+      "code": "#include <iostream>\n#include <string>\n#include <vector>\n\nstd::vector<std::string> split(const std::string& line, char sep) {\n    std::vector<std::string> fields;\n    std::string current;\n    for (char c : line) {\n        if (c == sep) {\n            fields.push_back(current);\n            current.clear();\n        } else {\n            current += c;\n        }\n    }\n    fields.push_back(current);\n    return fields;\n}\n\nint main() {\n    const std::vector<std::string> fields = split(\",a,,b,\", ',');\n    std::cout << fields.size();\n    for (const std::string& field : fields) {\n        std::cout << \" [\" << field << ']';\n    }\n    std::cout << '\\n';\n}",
       "kind": "value",
       "accept": [
-        "true 5 true"
+        "5 [] [a] [] [b] []"
       ],
-      "explain": "`reserve(5)` guarantees that insertion cannot reallocate until the size exceeds 5, so the storage address is unchanged after all five `push_back`s and the saved pointer is still valid. `reserve` does not change `size()`, which only reaches 5 through the insertions. The exact `capacity()` is an implementation detail; the guarantee is that it is at least the reserved amount."
+      "explain": "The loop pushes a field at every separator and the tail push after the loop supplies the last one, so a string with `n` separators always yields `n + 1` fields — here four commas give five. The tempting answer is 3, from reading the function as \"collect the non-empty pieces\": nothing in it skips an empty `current`, so a leading separator, a doubled separator and a trailing separator each contribute an empty field. That is usually the behaviour you want for CSV, and the unconditional final `push_back` is what makes an empty input line produce one empty field rather than none."
     },
     {
       "id": "c10-r02",
       "section": "Iterator invalidation — the centerpiece",
       "prompt": "What happens when this is compiled and run?",
-      "code": "#include <iostream>\n#include <vector>\n\nint main() {\n    std::vector<int> prices{100, 101};\n    const int* first = prices.data();\n\n    prices.push_back(102);\n\n    std::cout << *first << '\\n';\n}",
+      "code": "#include <iostream>\n#include <string>\n#include <vector>\n\nstruct Entry {\n    std::string word;\n    int count;\n};\n\nint& tally(std::vector<Entry>& table, const std::string& word) {\n    for (Entry& entry : table) {\n        if (entry.word == word) {\n            return entry.count;\n        }\n    }\n    table.push_back(Entry{word, 0});\n    return table.back().count;\n}\n\nint main() {\n    std::vector<Entry> table;\n    table.reserve(2);\n\n    int& the = tally(table, \"the\");\n    ++the;\n    ++tally(table, \"mat\");\n    ++tally(table, \"sat\");\n\n    the += 10;\n    std::cout << table.front().count << '\\n';\n}",
       "kind": "ub",
-      "explain": "The vector was constructed with exactly two elements and no spare capacity, so the `push_back` reallocates: a larger block is obtained, the elements are relocated, and the old block is freed. `first` still points into that freed block, so the read is undefined behaviour — AddressSanitizer reports a heap-use-after-free. Saving `data()` does not exempt you from the invalidation rules; reserve first, then take addresses."
+      "explain": "`tally` hands out a reference *into the vector's buffer*, and `main` keeps one alive across further calls. `reserve(2)` guarantees no reallocation only while the size stays within 2; the third distinct word makes the vector grow, which frees the old block, so `the += 10` writes through a dangling reference — AddressSanitizer reports heap-use-after-free. The tempting reading is that `reserve` made the buffer stable, or that a reference is safer than an iterator: neither is true. Reallocation invalidates every iterator, pointer *and* reference alike, and `reserve(n)` only pushes the reallocation out to the point where the size exceeds `n`. A function that returns a reference into a container it also grows is the shape to distrust; returning an index, or reserving the full distinct-word bound up front, removes the hazard."
     },
     {
       "id": "c10-r03",
-      "section": "`std::list` and `std::forward_list` — the cache poison",
+      "section": "Container adaptors: restricting an underlying sequence",
       "prompt": "What happens when this is compiled and run?",
-      "code": "#include <algorithm>\n#include <iostream>\n#include <list>\n\nint main() {\n    std::list<int> prices{103, 101, 102};\n    std::sort(prices.begin(), prices.end());\n\n    for (int price : prices) {\n        std::cout << price << ' ';\n    }\n    std::cout << '\\n';\n}",
+      "code": "#include <iostream>\n#include <stack>\n#include <string>\n\nint main() {\n    std::stack<std::string> segments;\n    segments.push(\"api\");\n    segments.push(\"v2\");\n    segments.push(\"orders\");\n\n    std::string path;\n    for (const std::string& segment : segments) {\n        path += '/';\n        path += segment;\n    }\n    std::cout << path << ' ' << segments.size() << '\\n';\n}",
       "kind": "no-compile",
-      "explain": "`std::sort` requires random-access iterators — internally it computes distances such as `__last - __first` — and a list supplies only bidirectional iterators, which have no subtraction. The diagnostic points deep inside the algorithm header because that is where the requirement is used; the fix is `prices.sort()`, the member function a list provides precisely because `std::sort` cannot work on it."
+      "explain": "It does not compile: the range-for needs `begin`/`end`, and a container adaptor exposes neither. Clang says \"invalid range expression … no viable 'begin' function available\". The trap is that `size()` and `empty()` *are* available, so the type looks container-like enough to iterate. Hiding iterators is the adaptor's purpose, not an omission — the type is a claim that only the LIFO end is ever touched. Code that needs to walk the elements should hold the underlying `std::deque` or `std::vector` directly; draining the stack with `top()`/`pop()` would also work but destroys it, and it would visit the segments in reverse."
     },
     {
       "id": "c10-r04",
       "section": "Iterator invalidation — the centerpiece",
       "prompt": "What does this print?",
-      "code": "#include <iostream>\n#include <vector>\n\nstruct Order {\n    int id;\n    bool filled;\n};\n\nint main() {\n    std::vector<Order> orders{{1, false}, {2, true}, {3, false}, {4, true}};\n\n    std::erase_if(orders, [](const Order& order) { return order.filled; });\n\n    std::cout << orders.size() << ':';\n    for (const Order& order : orders) {\n        std::cout << ' ' << order.id;\n    }\n    std::cout << '\\n';\n}",
+      "code": "#include <algorithm>\n#include <iostream>\n#include <vector>\n\nint main() {\n    std::vector<int> ids{4, 7, 4, 9, 7, 4};\n\n    const auto tail = std::remove(ids.begin(), ids.end(), 4);\n    std::cout << ids.size() << ' ' << (tail - ids.begin()) << ' ';\n\n    ids.erase(tail, ids.end());\n    std::cout << ids.size() << ':';\n    for (int id : ids) {\n        std::cout << ' ' << id;\n    }\n    std::cout << '\\n';\n}",
       "kind": "value",
       "accept": [
-        "2: 1 3"
+        "6 3 3: 7 9 7"
       ],
-      "explain": "`std::erase_if` (C++20) compacts the retained elements and erases the tail in one well-defined pass, preserving the relative order of the survivors. Writing the same thing as `erase(it)` inside a `++it` loop would be undefined behaviour, because erasing invalidates that iterator and the loop immediately increments and compares it."
+      "explain": "`std::remove` is not a container operation and cannot be: it only shuffles values through the range and returns the new logical end. So the size is still 6 after it runs, and the three surviving values sit in the first three slots — `tail - begin()` is 3. Only `erase(tail, end())` actually shrinks the container, which is why the idiom is spelled as one expression: forgetting the `erase` half leaves a vector of the original length whose tail holds unspecified leftovers. The tempting answer is `3 3 3`, from assuming `remove` removes."
     },
     {
       "id": "c10-r05",
       "section": "`std::list` and `std::forward_list` — the cache poison",
       "prompt": "What does this print?",
-      "code": "#include <iostream>\n#include <list>\n\nint main() {\n    std::list<int> active{1, 2};\n    std::list<int> pending{3, 4};\n\n    active.splice(active.begin(), pending);\n\n    for (int value : active) {\n        std::cout << value << ' ';\n    }\n    std::cout << '|' << ' ' << pending.size() << '\\n';\n}",
+      "code": "#include <iostream>\n#include <iterator>\n#include <list>\n#include <string>\n\nint main() {\n    std::list<std::string> recent{\"alpha\", \"beta\", \"gamma\", \"delta\"};\n\n    const auto hit = std::next(recent.begin(), 2);\n    recent.splice(recent.begin(), recent, hit);\n\n    std::cout << *hit << ' ' << recent.size();\n    for (const std::string& key : recent) {\n        std::cout << ' ' << key;\n    }\n    std::cout << '\\n';\n}",
       "kind": "value",
       "accept": [
-        "3 4 1 2 | 0"
+        "gamma 4 gamma alpha beta delta"
       ],
-      "explain": "`splice` relinks nodes between compatible lists: the whole of `pending` is inserted before `active.begin()` in O(1) with no element moved or copied, and `pending` is left empty. This is one of the few things a list does that a `vector` genuinely cannot — and note that iterators into the spliced nodes remain valid, since the nodes themselves never moved."
+      "explain": "This is the promote-on-hit move at the heart of an LRU index. The three-argument `splice` transfers one element within the same list, so it relinks a single node in O(1): the size is unchanged at 4, no string is moved or copied, and — the point of the exercise — `hit` still denotes that node afterwards, so `*hit` is `gamma`. The tempting answers are that `hit` is dangling (it would be, in a vector, where the equivalent rotation shifts elements) or that the size grows to 5 because an element was inserted. Splicing within one list moves the node rather than duplicating it; this handle stability across arbitrary relinking is the one thing that justifies paying for `list`'s pointer chasing."
     },
     {
       "id": "c10-r06",
-      "section": "Container adaptors: restricting an underlying sequence",
+      "section": "`std::vector` — the default",
       "prompt": "What does this print?",
-      "code": "#include <iostream>\n#include <queue>\n#include <vector>\n\nstruct Event {\n    long deadline_ns;\n};\n\nstruct EarlierDeadline {\n    bool operator()(const Event& left, const Event& right) const {\n        return left.deadline_ns > right.deadline_ns;\n    }\n};\n\nint main() {\n    std::priority_queue<Event, std::vector<Event>, EarlierDeadline> events;\n    events.push(Event{300});\n    events.push(Event{100});\n    events.push(Event{200});\n\n    while (!events.empty()) {\n        std::cout << events.top().deadline_ns << ' ';\n        events.pop();\n    }\n    std::cout << '\\n';\n}",
+      "code": "#include <iostream>\n#include <vector>\n\nint main() {\n    std::vector<bool> bits(4, false);\n    std::vector<char> bytes(4, 0);\n\n    auto bit = bits[1];\n    auto byte = bytes[1];\n\n    bits[1] = true;\n    bytes[1] = 1;\n\n    std::cout << std::boolalpha\n              << static_cast<bool>(bit) << ' '\n              << (byte != 0) << ' '\n              << bits.size() << '\\n';\n}",
       "kind": "value",
       "accept": [
-        "100 200 300"
+        "true false 4"
       ],
-      "explain": "`priority_queue` is a max-heap under the supplied comparison, so reversing the comparison to `>` makes the *smallest* deadline compare as greatest and surface at `top()` — the standard min-heap idiom. Note also that `pop()` returns void: the value must be read from `top()` before removal, and since `top()` is a `const T&` extracting it normally copies."
+      "explain": "`bytes[1]` returns `char&`, so `auto byte` deduces `char` and copies the value 0; the later write does not touch it, and `byte != 0` is false. `bits[1]` returns `std::vector<bool>`'s *proxy*, so `auto bit` deduces that proxy type and copies the word-plus-mask that names the bit — not the bit's value. Setting `bits[1]` afterwards changes the bit the proxy refers to, and converting the proxy to `bool` then reads `true`. The tempting answer is `false false 4`, from assuming the two lines are the same code with a different element type. `size()` is 4 either way: the specialisation packs bits into words, but it still reports elements, not words. This is why the chapter says to reach for `std::vector<char>` when ordinary element semantics matter — `auto`, `T&` binding and `data()` all behave differently on the specialisation."
     }
   ],
   "writing": [
@@ -349,93 +349,92 @@
       "id": "c10-w01",
       "section": "Growth, capacity, and `reserve`",
       "minutes": 8,
-      "prompt": "Write a function that fills a `std::vector<int>` with `n` values without any reallocation, and a second that produces `n` default-constructed elements ready to be indexed. Add comments contrasting what `reserve` and `resize` each change.",
+      "prompt": "Write `std::vector<int> flatten(const std::vector<std::vector<int>>& chunks)` that concatenates every chunk in order. Contract: the returned vector must be built with **exactly one** allocation regardless of how many chunks there are, and the function must be able to *prove* it — assert that neither the capacity nor the buffer address changes across the whole appending loop. Do not use `resize` and do not index past `size()`.",
       "checklist": [
-        "The appending version calls `reserve(n)` once before the loop",
-        "The indexing version calls `resize(n)` and then subscripts",
-        "A comment states that `reserve` changes capacity only and constructs nothing",
-        "A comment states that indexing beyond `size()` after `reserve` is undefined behaviour",
-        "Neither function indexes past `size()`"
+        "A first pass sums the chunk sizes before any element is appended",
+        "`reserve` is called exactly once, with that total, before the appending loop",
+        "The capacity and `data()` pointer are captured after the reserve and asserted unchanged after the loop",
+        "Elements are appended with `push_back`/`emplace_back`, never by subscripting unreserved storage",
+        "A comment states that `reserve` changes capacity only and constructs no elements"
       ],
-      "solution": "#include <cstddef>\n#include <vector>\n\n// reserve: one allocation up front, capacity only. size() is unchanged\n// and no element is constructed, so values[i] here would be UB.\nstd::vector<int> appended(std::size_t n) {\n    std::vector<int> values;\n    values.reserve(n);\n    for (std::size_t i = 0; i < n; ++i) {\n        values.push_back(static_cast<int>(i));\n    }\n    return values;\n}\n\n// resize: changes size() and constructs the elements, so subscripting\n// below size() is valid immediately.\nstd::vector<int> sized(std::size_t n) {\n    std::vector<int> values;\n    values.resize(n);\n    for (std::size_t i = 0; i < n; ++i) {\n        values[i] = static_cast<int>(i);\n    }\n    return values;\n}",
-      "notes": "Capacity is raw storage, not a collection of live objects — that one sentence covers the whole trap. `reserve` is the hot-path tool: it converts n growth events into one allocation and guarantees no reallocation until the size exceeds n, which also means saved pointers and iterators stay valid across those insertions."
+      "solution": "#include <cassert>\n#include <cstddef>\n#include <vector>\n\n// Exactly one allocation: measure first, reserve once, then append.\nstd::vector<int> flatten(const std::vector<std::vector<int>>& chunks) {\n    std::size_t total = 0;\n    for (const std::vector<int>& chunk : chunks) {\n        total += chunk.size();\n    }\n\n    std::vector<int> out;\n    out.reserve(total);  // capacity only: size() is still 0 and no int\n                         // has been constructed, so out[0] here would be UB.\n\n    // reserve(n) guarantees no reallocation until size() exceeds n, so both\n    // the block address and the capacity survive every push_back below.\n    const std::size_t reserved = out.capacity();\n    const int* const base = out.data();\n\n    for (const std::vector<int>& chunk : chunks) {\n        for (int value : chunk) {\n            out.push_back(value);\n        }\n    }\n\n    assert(out.size() == total);\n    assert(out.capacity() == reserved);  // no growth event occurred\n    assert(out.data() == base);          // so no handle was invalidated\n    return out;\n}",
+      "notes": "The measure-then-reserve shape costs one extra cheap pass over the outer vector and removes every growth spike from the inner one. Note what the two assertions are and are not saying: `capacity()` is at least the reserved amount, never an exact number the standard fixes, so the check compares it against itself rather than against a literal. The address check is the interesting one — it is the same guarantee that makes it safe to take pointers into `out` after the reserve. Do not reach for `resize(total)` here: it would default-construct `total` ints and then have them overwritten."
     },
     {
       "id": "c10-w02",
       "section": "Iterator invalidation — the centerpiece",
       "minutes": 10,
-      "prompt": "Given a `std::vector<Order>` where each `Order` has a `filled` flag, write three correct ways to remove every filled order: a hand-written loop using `erase`'s return value, the erase-remove idiom, and `std::erase_if`. Comment the loop with what makes the naive version undefined behaviour.",
+      "prompt": "A session table holds `struct Session { int id; long expires_ns; int hits; };`. Write `expire(sessions, now_ns)` that removes every session whose deadline has passed and returns how many it removed. Contract: callers hold raw `Session*` to sessions that survive the call, and those pointers must still be usable afterwards. Choose the container that makes this contract satisfiable, justify the choice in a comment, and never advance an iterator that an erase has invalidated.",
       "checklist": [
-        "The hand-written loop assigns `it = orders.erase(it)` and only increments on the non-erased branch",
-        "A comment states that erasing invalidates the iterator, so incrementing it afterwards is undefined behaviour",
-        "The erase-remove version passes `std::remove_if`'s result and `orders.end()` to `erase`",
-        "The `std::erase_if` version is a single call",
-        "All three preserve the relative order of the surviving elements"
+        "`std::list<Session>` (or `forward_list`) is used, and a comment explains that a vector erase invalidates handles at and after the erased position",
+        "The loop assigns `it = sessions.erase(it)` and only increments on the branch that keeps the element",
+        "The loop condition re-reads `sessions.end()` and the increment is not in the `for` header",
+        "A count of removed elements is returned",
+        "A comment names what `erase` returns and why `erase(it); ++it;` would be undefined behaviour"
       ],
-      "solution": "#include <algorithm>\n#include <vector>\n\nstruct Order {\n    int id;\n    bool filled;\n};\n\n// 1. Hand-written: erase returns the iterator to the next element.\n// The naive version -- calling erase(it) inside a ++it loop -- is UB:\n// erase invalidates it, and the loop then increments and compares it.\nvoid remove_filled_loop(std::vector<Order>& orders) {\n    for (auto it = orders.begin(); it != orders.end();) {\n        if (it->filled) {\n            it = orders.erase(it);\n        } else {\n            ++it;\n        }\n    }\n}\n\n// 2. Erase-remove: compact the survivors, then erase the tail.\nvoid remove_filled_erase_remove(std::vector<Order>& orders) {\n    orders.erase(\n        std::remove_if(orders.begin(), orders.end(),\n                       [](const Order& order) { return order.filled; }),\n        orders.end());\n}\n\n// 3. C++20: the direct expression of the intent.\nvoid remove_filled_erase_if(std::vector<Order>& orders) {\n    std::erase_if(orders, [](const Order& order) { return order.filled; });\n}",
-      "notes": "Version 1 is O(n) erases each shifting the tail, so it is O(n²) for a vector; versions 2 and 3 are one pass. Prefer `std::erase_if` when it applies. The general rule behind all of this: after any structural operation, prove that every retained iterator, pointer and reference survives according to that container's invalidation rules."
+      "solution": "#include <cstddef>\n#include <list>\n\nstruct Session {\n    int id;\n    long expires_ns;\n    int hits;\n};\n\n// Contract: the caller holds Session* to sessions that survive the call.\n// std::vector is disqualified -- erasing shifts every later element, so\n// handles at and after the erased position go stale, and a later erase\n// can also reallocate nothing but still move the survivors. Erasing a\n// list node invalidates handles to that node only; every other Session*\n// keeps working, because the surviving nodes never move.\nstd::size_t expire(std::list<Session>& sessions, long now_ns) {\n    std::size_t removed = 0;\n    for (auto it = sessions.begin(); it != sessions.end();) {\n        if (it->expires_ns <= now_ns) {\n            // erase returns the position after the erased node. Writing\n            // erase(it) and then ++it would increment a dead iterator.\n            it = sessions.erase(it);\n            ++removed;\n        } else {\n            ++it;\n        }\n    }\n    return removed;\n}",
+      "notes": "The stated contract, not a complexity table, is what disqualifies `vector` — this is the one requirement in the chapter's list that a contiguous container cannot meet at any price. If the callers held indices or ids instead of pointers, the right answer would flip back to a `vector` plus `std::erase_if`, which is one pass with far better locality. Note that the erase-and-reassign loop is correct for `vector` too; what it cannot do there is keep the *caller's* handles alive."
     },
     {
       "id": "c10-w03",
       "section": "`std::array` — fixed size, zero overhead",
       "minutes": 7,
-      "prompt": "Write a fixed 64-level depth ladder using `std::array<int, 64>`: a zero-initialised construction, a `clear_depths` that takes it by reference, and a `static_assert` proving it carries no overhead. Add a comment on the default-initialisation trap.",
+      "prompt": "Write a byte-frequency table for a tokenizer: an alias `Histogram` over 256 counters, a `byte_histogram(text)` that builds one, and a `distinct_bytes(counts)` that reports how many byte values occurred at least once. Contract: no heap allocation anywhere, every counter starts at zero without a loop that writes them, no 256-element copy at the call boundary, and a compile-time check that the table carries no bookkeeping beyond the counters themselves.",
       "checklist": [
-        "The good array is declared with `{}` to zero its elements",
-        "A comment states that default initialisation leaves local scalar elements indeterminate",
-        "`clear_depths` takes `std::array<int, 64>&`, avoiding a 64-element copy",
-        "`static_assert` shows `sizeof` equals `64 * sizeof(int)`",
-        "The function uses `fill` or an equivalent container operation rather than a raw loop over a pointer"
+        "`Histogram` is `std::array<std::size_t, 256>` and the counters are zeroed with `{}`",
+        "A comment states that a default-initialised local `std::array` leaves scalar elements indeterminate",
+        "`distinct_bytes` takes the table by `const&` rather than by value",
+        "The index is an `unsigned char` (or equivalent) so a negative `char` cannot index out of range",
+        "`static_assert` shows `sizeof(Histogram) == 256 * sizeof(std::size_t)`"
       ],
-      "solution": "#include <array>\n\nvoid clear_depths(std::array<int, 64>& depths) {\n    depths.fill(0);  // no decay: the array knows its own length\n}\n\nstatic_assert(sizeof(std::array<int, 64>) == 64 * sizeof(int));\n\nvoid prepare_depths() {\n    // Default initialisation does NOT zero the scalar elements of a local\n    // std::array; reading one before assigning it is undefined behaviour.\n    //   std::array<int, 64> bad;\n\n    std::array<int, 64> good{};  // value-initialised: all zero\n    clear_depths(good);          // by reference: no 64-element copy\n}",
-      "notes": "`std::array` is a built-in array wrapped in a class, which is why the initialisation rule is inherited unchanged and why `sizeof` shows no bookkeeping. What it adds over `int[64]` is that it does not decay: the parameter type carries the length, so `clear_depths` cannot be handed an array of the wrong size or a bare pointer."
+      "solution": "#include <array>\n#include <cstddef>\n#include <string>\n\nusing Histogram = std::array<std::size_t, 256>;\n\n// The braces value-initialise all 256 counters. A bare `Histogram counts;`\n// local would leave every scalar element indeterminate, and ++counts[byte]\n// would read one of them -- undefined behaviour.\nHistogram byte_histogram(const std::string& text) {\n    Histogram counts{};\n    for (unsigned char byte : text) {  // plain char may be signed: a byte\n        ++counts[byte];                // above 127 would index negatively\n    }\n    return counts;\n}\n\n// By reference: no 256-element copy, and unlike a built-in array parameter\n// the type still carries the length, so no size has to be passed alongside.\nstd::size_t distinct_bytes(const Histogram& counts) {\n    std::size_t distinct = 0;\n    for (std::size_t count : counts) {\n        if (count != 0) {\n            ++distinct;\n        }\n    }\n    return distinct;\n}\n\n// No allocation and no bookkeeping: the storage is the object.\nstatic_assert(sizeof(Histogram) == 256 * sizeof(std::size_t));",
+      "notes": "Two separate traps meet in one small function. The initialisation one is inherited from the built-in array `std::array` wraps: `{}` is the whole fix. The signedness one is inherited from `char`, whose signedness is implementation-defined — iterating as `char` and using it as an index is a real out-of-bounds read on any platform where plain `char` is signed. What `std::array` adds over `unsigned char[256]` is that it does not decay, so `distinct_bytes` cannot be handed a pointer or a table of the wrong length, and the by-reference parameter still knows there are 256 of them."
     },
     {
       "id": "c10-w04",
       "section": "`std::deque` — chunked, stable ends",
-      "minutes": 8,
-      "prompt": "Write a rolling window of the last `limit` trades over a `std::deque<Trade>`: a `record` that appends and drops from the front when the window is full, and an accessor returning the oldest trade. Comment on what a `push_back` does to iterators versus references, and on when a reserved `vector` plus an index would be the better choice.",
+      "minutes": 10,
+      "prompt": "Write an `UndoHistory` class for a text editor that keeps at most `bound` recent edits. `record(edit)` appends and silently discards the oldest edit once the bound is exceeded; `undo()` removes and returns the newest edit, or reports that there is none. Contract: the editor holds a raw pointer to a retained edit across `record` calls and that pointer must stay valid, and neither operation may be O(n) in the number of retained edits. Comment on what end insertion does to iterators as opposed to references.",
       "checklist": [
-        "`record` pushes at the back and pops from the front only when over the limit",
-        "The accessor handles the empty case rather than reading `front()` unconditionally",
-        "A comment states that end insertion invalidates iterators but leaves references and pointers to existing elements valid",
-        "A comment names the alternative: a reserved `vector` with an index when the bound is known",
-        "The limit parameter uses a size type"
+        "`std::deque` is the member container, and both `record` and `undo` use only end operations",
+        "`record` pops the front only when the size exceeds the bound",
+        "`undo` handles the empty case instead of reading `back()` unconditionally",
+        "The newest edit is read or moved out before the `pop_back` that destroys it",
+        "A comment states that end insertion invalidates all iterators but leaves references and pointers to existing elements valid"
       ],
-      "solution": "#include <cstddef>\n#include <deque>\n#include <optional>\n\nstruct Trade {\n    int price;\n    int quantity;\n};\n\n// push_back/pop_front are O(1) and never relocate existing elements:\n// iterators are invalidated, but references and pointers to elements\n// that are still present remain valid.\nvoid record(std::deque<Trade>& window, Trade trade, std::size_t limit) {\n    window.push_back(trade);\n    if (window.size() > limit) {\n        window.pop_front();\n    }\n}\n\nstd::optional<Trade> oldest(const std::deque<Trade>& window) {\n    if (window.empty()) {\n        return std::nullopt;  // front() on an empty deque is UB\n    }\n    return window.front();\n}\n\n// When `limit` is a known, modest bound, a reserved std::vector plus a\n// head index is usually faster: contiguous scans, one allocation, and\n// no page-map indirection on every access.",
-      "notes": "Choose `deque` for a genuine double-ended FIFO that is too large or unpredictable to reserve — it is also `std::queue`'s default underlying container. The cost is the page lookup on each access and a scan whose stride breaks at page boundaries; lock-free ring buffers, in Chapter 26, are where this pattern usually ends up on a hot path."
+      "solution": "#include <cstddef>\n#include <deque>\n#include <optional>\n#include <string>\n#include <utility>\n\nstruct Edit {\n    std::size_t offset;\n    std::string removed;\n};\n\nclass UndoHistory {\npublic:\n    explicit UndoHistory(std::size_t bound) : bound_{bound} {}\n\n    // push_back and pop_front are O(1) and relocate nothing. End insertion\n    // invalidates every iterator, but references and pointers to elements\n    // that are still present stay valid -- that is what lets the editor\n    // keep an Edit* to a retained entry across a record() call.\n    void record(Edit edit) {\n        edits_.push_back(std::move(edit));\n        if (edits_.size() > bound_) {\n            edits_.pop_front();\n        }\n    }\n\n    std::optional<Edit> undo() {\n        if (edits_.empty()) {\n            return std::nullopt;  // back() on an empty deque is UB\n        }\n        Edit last = std::move(edits_.back());  // move out before destroying\n        edits_.pop_back();\n        return last;\n    }\n\n    std::size_t size() const { return edits_.size(); }\n\nprivate:\n    std::deque<Edit> edits_;\n    std::size_t bound_;\n};",
+      "notes": "A reserved `vector` would give better locality but cannot drop the oldest entry in O(1), and any growth would invalidate the editor's pointer; a `list` would keep the pointers but pays a node allocation per edit. `deque` is the container whose invalidation row actually splits — stable elements, unstable iterators — which is exactly the guarantee this contract asks for. Note the `pop_back` shape: `pop` returns `void`, so the value has to be taken first, and moving from `back()` before popping avoids copying the `std::string`. If the bound were small and fixed at compile time, a fixed-capacity ring over `std::array` would beat all three."
     },
     {
       "id": "c10-w05",
       "section": "Container adaptors: restricting an underlying sequence",
-      "minutes": 10,
-      "prompt": "Build a deadline scheduler on `std::priority_queue` whose earliest deadline is at `top()`. Supply the comparator, an alias for the queue type, and a `run_due(queue, now_ns)` that dispatches every event whose deadline has passed. Comment on why `pop()` cannot return the element.",
+      "minutes": 8,
+      "prompt": "Write `bool brackets_balanced(const std::string& text)` that checks `()`, `[]` and `{}` nesting, ignoring all other characters. Contract: use a container adaptor rather than the underlying container, never call an accessor on an empty adaptor, and justify in a comment both why the adaptor is the right interface here and what requirement would rule it out.",
       "checklist": [
-        "The comparator reverses the natural order (`>`), producing a min-heap on deadline",
-        "The queue alias spells all three template arguments, including `std::vector<Event>`",
-        "`run_due` tests `empty()` before `top()` on every iteration",
-        "The element is read or copied from `top()` before `pop()`",
-        "A comment states that `pop()` returns void and destroys the element",
-        "The loop stops at the first event whose deadline is in the future"
+        "`std::stack<char>` is used, not a `std::vector` or `std::deque` directly",
+        "Every `top()` is guarded by an `empty()` check, and a mismatched or unmatched closer returns false",
+        "The value is read from `top()` before the `pop()` that removes it",
+        "The function returns `open.empty()` at the end, so unclosed openers fail",
+        "A comment explains that the adaptor hides iterators deliberately, and names the requirement that would force the underlying container instead"
       ],
-      "solution": "#include <queue>\n#include <string>\n#include <vector>\n\nstruct Event {\n    long deadline_ns;\n    std::string name;\n};\n\n// priority_queue is a max-heap under this comparison, so reversing it\n// makes the earliest deadline compare as greatest and reach top().\nstruct EarlierDeadline {\n    bool operator()(const Event& left, const Event& right) const {\n        return left.deadline_ns > right.deadline_ns;\n    }\n};\n\nusing DeadlineQueue =\n    std::priority_queue<Event, std::vector<Event>, EarlierDeadline>;\n\nvoid dispatch(const Event&);\n\nvoid run_due(DeadlineQueue& events, long now_ns) {\n    // pop() returns void and destroys the element, so the event must be\n    // taken from top() first. top() is a const T&, so this copies.\n    while (!events.empty() && events.top().deadline_ns <= now_ns) {\n        Event event = events.top();\n        events.pop();\n        dispatch(event);\n    }\n}",
-      "notes": "The heap invariant means the loop can stop at the first future deadline: nothing behind `top()` can be earlier. There is no way to cancel a queued event by ID or lower one's priority in place — the adaptor hides iterators on purpose. A cancellation-heavy scheduler keeps a side table and discards cancelled events as they surface, or abandons the adaptor for an indexed heap."
+      "solution": "#include <stack>\n#include <string>\n\n// The adaptor is the right interface: the algorithm only ever needs the\n// most recent unmatched opener. It hides iterators deliberately -- if the\n// caller had to scan the pending openers, report where an unclosed one\n// began, or drop one from the middle, the underlying container would have\n// to be used directly instead.\nbool brackets_balanced(const std::string& text) {\n    std::stack<char> open;\n    for (char c : text) {\n        if (c == '(' || c == '[' || c == '{') {\n            open.push(c);\n        } else if (c == ')' || c == ']' || c == '}') {\n            if (open.empty()) {\n                return false;  // a closer with nothing open; top() would be UB\n            }\n            const char wanted = (c == ')') ? '(' : (c == ']') ? '[' : '{';\n            // pop() returns void and destroys the element, so the value has\n            // to be read from top() first.\n            if (open.top() != wanted) {\n                return false;\n            }\n            open.pop();\n        }\n    }\n    return open.empty();  // anything still open is unbalanced\n}",
+      "notes": "The restricted interface is documentation: the type says the algorithm is LIFO and nothing else, and the compiler enforces it. `std::stack` defaults to `std::deque`, which is a fine choice here — pushes are O(1) with no single giant reallocation — and `std::stack<char, std::vector<char>>` would trade that for contiguity if the depth were reserved up front. The two easy bugs this contract targets are calling `top()` on an empty stack, which is undefined behaviour rather than an error, and forgetting the final `empty()` check, which would happily accept `\"(((\"`."
     },
     {
       "id": "c10-w06",
-      "section": "Choosing a sequence container",
-      "minutes": 9,
-      "prompt": "Write a short annotated selection guide as compilable code: declare one container for each of five stated requirements — default trade history, compile-time-known size, LIFO-only access, FIFO-only access, and stable handles with O(1) transfer between collections — each with a one-line comment naming the reason from the chapter's table.",
+      "section": "Fixed capacity and small-vector: the low-latency workhorses",
+      "minutes": 12,
+      "prompt": "Write `template <typename T, std::size_t N> class RingBuffer` holding the most recent `N` sensor samples. `push(sample)` overwrites the oldest sample once the buffer is full; `size()`, `full()` and `operator[]` are provided, with index 0 naming the oldest retained sample. Contract: the class must never allocate — not at construction, not on any push — its capacity must be part of its type, and no counter or slot may be read before it has been written.",
       "checklist": [
-        "`std::vector` is named as the default, with `reserve` used for the known upper bound",
-        "`std::array` is used where the size is known at compile time",
-        "`std::stack` and `std::queue` adaptors are used for the restricted access disciplines",
-        "`std::list` is chosen only for stable handles or O(1) splice, and the comment says so",
-        "Each declaration carries a comment naming the deciding requirement",
-        "The code compiles as written"
+        "Storage is a `std::array<T, N>` member, so the buffer allocates nothing",
+        "The array member is brace-initialised and the head/size counters have default member initialisers",
+        "`push` overwrites the oldest slot and advances the head only when the buffer is already full",
+        "`operator[]` maps index 0 to the oldest retained sample via the head offset",
+        "A comment states why `std::vector` would not satisfy the no-allocation requirement",
+        "A `static_assert` rejects `N == 0`"
       ],
-      "solution": "#include <array>\n#include <list>\n#include <queue>\n#include <stack>\n#include <vector>\n\nstruct Trade {\n    int price;\n    int quantity;\n};\n\nvoid choose(std::size_t expected_trades) {\n    // Default: contiguous, cheapest scans, amortized growth. Reserve the\n    // session's expected upper bound before the hot path.\n    std::vector<Trade> history;\n    history.reserve(expected_trades);\n\n    // Size known at compile time: zero overhead, no allocation, no decay.\n    std::array<int, 8> book_level{};\n\n    // LIFO only: the adaptor makes the restricted discipline explicit.\n    std::stack<int> undo;\n\n    // FIFO only: hides every operation except the two ends.\n    std::queue<int> inbox;\n\n    // Stable handles across unrelated insertions and erasures, plus O(1)\n    // splice between lists. Chosen for stability, not for \"O(1) insert\".\n    std::list<Trade> pinned;\n    std::list<Trade> settled;\n    settled.splice(settled.begin(), pinned);\n\n    (void)history; (void)book_level; (void)undo; (void)inbox;\n}",
-      "notes": "The order of the table is the order of the argument: start at `vector` and move down only when a requirement names the reason. `list` is the one most often chosen for the wrong reason — its O(1) insertion assumes you already hold the position, and finding it is an O(n) pointer chase with a probable cache miss at every hop."
+      "solution": "#include <array>\n#include <cstddef>\n\n// Fixed capacity, no heap: std::array stores its elements inside the\n// object, so a RingBuffer member allocates nothing and no operation can\n// reallocate or invalidate a handle. A std::vector would allocate on its\n// first push even with reserve() in the constructor -- reserve moves the\n// allocation, it does not remove it. Capacity is part of the type here,\n// exactly like the protocol bound it represents.\ntemplate <typename T, std::size_t N>\nclass RingBuffer {\npublic:\n    static_assert(N > 0, \"a ring buffer needs at least one slot\");\n\n    void push(const T& sample) {\n        slots_[(head_ + size_) % N] = sample;\n        if (size_ == N) {\n            head_ = (head_ + 1) % N;  // full: the oldest slot was overwritten\n        } else {\n            ++size_;\n        }\n    }\n\n    std::size_t size() const { return size_; }\n    bool full() const { return size_ == N; }\n\n    // Index 0 is the oldest retained sample. Precondition: i < size().\n    const T& operator[](std::size_t i) const {\n        return slots_[(head_ + i) % N];\n    }\n\nprivate:\n    // Braces value-initialise; a bare declaration would leave scalar\n    // elements indeterminate until push() wrote over them.\n    std::array<T, N> slots_{};\n    std::size_t head_ = 0;\n    std::size_t size_ = 0;\n};\n\nstatic_assert(sizeof(RingBuffer<int, 8>) >= 8 * sizeof(int));",
+      "notes": "When full, `(head_ + size_) % N` is `head_`, so the write lands on the oldest slot and the head then steps past it — one expression covers both the filling and the overwriting phase. This is the shape the chapter points at when it says a reserved `vector` plus an index often beats a `deque`, taken one step further: with `N` in the type there is no allocation at all and no page-map indirection per access. `std::inplace_vector<T, N>` **(C++26)** is the standard answer for the *bounded but not wrapping* case; a ring differs in that overflow is defined as discarding the oldest rather than as an error. The one cost to keep in mind is that inline storage lands directly in `sizeof`, so a `RingBuffer<Sample, 4096>` should be passed by reference and not casually copied."
     }
   ]
 }

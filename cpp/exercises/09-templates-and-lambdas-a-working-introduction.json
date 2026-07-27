@@ -287,61 +287,61 @@
       "id": "c09-r01",
       "section": "Capture modes",
       "prompt": "What does this print?",
-      "code": "#include <iostream>\n\nint main() {\n    int level = 1;\n\n    auto snapshot = [level] { std::cout << level << ' '; };\n    auto live = [&level] { std::cout << level << '\\n'; };\n\n    level = 2;\n    snapshot();\n    live();\n}",
+      "code": "#include <iostream>\n\nint calls_made = 0;\n\nint next_id() {\n    static int counter = 100;\n    return ++counter;\n}\n\nint main() {\n    int budget = 2;\n\n    auto request = [=] {\n        ++calls_made;\n        return next_id() * budget;\n    };\n\n    budget = 10;\n    calls_made = 5;\n\n    std::cout << request() << ' ' << request() << ' ' << calls_made << '\\n';\n}",
       "kind": "value",
       "accept": [
-        "1 2"
+        "202 204 7"
       ],
-      "explain": "`[level]` copied the value 1 into a member when the closure was created, so the later assignment cannot reach it. `[&level]` stored a reference and reads the current value at call time, printing 2. The distinction is when the value is taken, not when it is used — and the reference form additionally requires `level` to still be alive at the call."
+      "explain": "`[=]` copies only the locals the body odr-uses, and it takes that copy when the closure is created: `budget` is frozen at 2, so the later `budget = 10` is invisible. `calls_made` and `counter` are not locals at all — a global and a static local are reached directly and are never captured — so the closure sees each of them live. `next_id()` therefore yields 101 then 102, giving 202 and 204, and `calls_made` ends at 5 + 2 = 7. The tempting wrong reading is that `[=]` snapshots everything the body touches, which would predict `212 224 5`; the snapshot applies to captures only, and globals and statics are not captures."
     },
     {
       "id": "c09-r02",
       "section": "Deduction: how the compiler picks T",
       "prompt": "What happens when this is compiled and run?",
-      "code": "#include <iostream>\n\ntemplate<class T>\nT larger(T a, T b) {\n    return a < b ? b : a;\n}\n\nint main() {\n    std::cout << larger(1, 2.0) << '\\n';\n}",
+      "code": "#include <cstddef>\n#include <iostream>\n#include <string>\n#include <vector>\n\ntemplate<class T>\nstd::size_t count_matching(const std::vector<T>& values, T target) {\n    std::size_t hits = 0;\n    for (const T& value : values) {\n        if (value == target) ++hits;\n    }\n    return hits;\n}\n\nint main() {\n    std::vector<std::string> words{\"the\", \"cat\", \"the\"};\n    std::cout << count_matching(words, \"the\") << '\\n';\n}",
       "kind": "no-compile",
-      "explain": "The first argument proposes `T = int` and the second proposes `T = double`; deduction requires the proposals to agree and will not insert a conversion to reconcile them. Writing `larger<double>(1, 2.0)` compiles and prints 2, because once `T` is fixed the call has two `double` parameters and ordinary argument conversion applies to the literal 1."
+      "explain": "The first argument proposes `T = std::string` (from `std::vector<std::string>`) and the second proposes `T = const char*`, because a string literal used as a by-value argument decays to a pointer. Deduction requires the proposals to agree and will not insert the `const char*`-to-`std::string` conversion to reconcile them, so no candidate survives. The tempting wrong reading is that the literal simply converts, as it would for a non-template parameter declared `std::string` — but conversions apply only after `T` is fixed. Either write `count_matching<std::string>(words, \"the\")` or give the target its own type parameter."
     },
     {
       "id": "c09-r03",
       "section": "Dangling captures",
       "prompt": "What happens when this is compiled and run?",
-      "code": "#include <iostream>\n#include <memory>\n\nauto make_reader() {\n    auto counter = std::make_unique<int>(7);\n    int& value = *counter;\n    return [&value] { return value; };\n}\n\nint main() {\n    auto reader = make_reader();\n    std::cout << reader() << '\\n';\n}",
+      "code": "#include <iostream>\n#include <string>\n#include <vector>\n\nauto make_formatter() {\n    std::vector<std::string> labels{\"alpha\", \"beta\", \"gamma\"};\n    const std::string& chosen = labels[1];\n    return [&chosen](int n) { return chosen + ':' + std::to_string(n); };\n}\n\nint main() {\n    auto format = make_formatter();\n    std::cout << format(7) << '\\n';\n}",
       "kind": "ub",
-      "explain": "`counter` is destroyed when `make_reader` returns, freeing the int; the closure kept only a reference, which never extends a lifetime. Calling `reader()` therefore reads freed memory — AddressSanitizer reports a heap-use-after-free. Capturing by value (`[value]`, or an init-capture of the copied number) removes the dependency entirely."
+      "explain": "`labels` is destroyed when `make_formatter` returns, freeing the heap array that holds the three `std::string` objects. `chosen` was a reference into that array and the closure captured that reference, which never extends a lifetime, so calling `format` reads freed memory: AddressSanitizer reports a heap-use-after-free. The tempting wrong reading is that `chosen` is const and so must be safe, or that the short literal \"beta\" lives in read-only storage — the small-string buffer lives inside the string object, which lived inside the freed vector. Capturing `[chosen]` by value copies the characters into the closure and removes the dependency."
     },
     {
       "id": "c09-r04",
-      "section": "Generic lambdas and passing lambdas to algorithms",
+      "section": "CTAD: deducing class template arguments",
       "prompt": "What does this print?",
-      "code": "#include <algorithm>\n#include <iomanip>\n#include <iostream>\n#include <vector>\n\nstruct Order {\n    double price;\n    int quantity;\n};\n\nint main() {\n    std::vector<Order> orders{{100.25, 10}, {99.95, 30}, {100.10, 20}};\n\n    auto less_price = [](const auto& left, const auto& right) {\n        return left.price < right.price;\n    };\n\n    std::sort(orders.begin(), orders.end(), less_price);\n\n    std::cout << std::fixed << std::setprecision(2);\n    for (const Order& order : orders) {\n        std::cout << order.price << ' ';\n    }\n    std::cout << '\\n';\n}",
+      "code": "#include <iostream>\n#include <string>\n#include <type_traits>\n#include <utility>\n#include <vector>\n\nint main() {\n    std::vector<std::pair<std::string, int>> table;\n\n    auto add = [&table](auto key, int hits) {\n        table.emplace_back(key, hits);\n        return std::pair{key, hits};\n    };\n\n    auto a = add(\"etc\", 3);\n    auto b = add(std::string{\"etc\"}, 4);\n\n    std::cout << std::boolalpha\n              << std::is_same_v<decltype(a.first), std::string> << ' '\n              << std::is_same_v<decltype(b.first), std::string> << ' '\n              << table.size() << '\\n';\n}",
       "kind": "value",
       "accept": [
-        "99.95 100.10 100.25"
+        "false true 2"
       ],
-      "explain": "The generic lambda's `operator()` is a template; `std::sort` instantiates it with `Order` and orders ascending by price. Because the comparator is passed as its own concrete closure type rather than through a function pointer, its body is visible inside the `std::sort` instantiation and is an ordinary inlining candidate."
+      "explain": "The generic lambda deduces `key` by value, so the first call decays the literal to `const char*` and `std::pair{key, hits}` is then deduced as `std::pair<const char*, int>` — `a.first` is a pointer, not a string. The second call passes a `std::string`, so `b.first` really is one. Both `emplace_back` calls still build `std::pair<std::string, int>` because the vector's element type is spelled out and fixed, which is why `table.size()` is 2 with two usable entries. The tempting wrong reading is that CTAD looks at what the value is going to be used as; it looks only at the constructor arguments' own types, and an array argument passed by value has already decayed."
     },
     {
       "id": "c09-r05",
-      "section": "Function objects and lambda anatomy — the flagship",
+      "section": "Concepts: constraints you can read",
       "prompt": "What does this print?",
-      "code": "#include <iostream>\n#include <type_traits>\n\nint main() {\n    auto first = [](int x) { return x + 1; };\n    auto second = [](int x) { return x + 1; };\n\n    std::cout << std::boolalpha\n              << std::is_same_v<decltype(first), decltype(second)> << ' '\n              << (first(1) == second(1)) << '\\n';\n}",
+      "code": "#include <concepts>\n#include <iostream>\n\nstruct Ticks {\n    int raw;\n    operator int() const { return raw; }\n};\n\ntemplate<std::integral T>\nconst char* route(T) { return \"integral\"; }\n\nconst char* route(double) { return \"double\"; }\n\nint main() {\n    std::cout << route(3) << ' '\n              << route(3.5) << ' '\n              << route(Ticks{7}) << ' '\n              << route('a') << '\\n';\n}",
       "kind": "value",
       "accept": [
-        "false true"
+        "integral double double integral"
       ],
-      "explain": "Every lambda expression generates its own unique unnamed closure type, so identical source text still yields two unrelated types — which is why `auto` is the normal way to hold a closure. The behaviour is of course identical, so the values agree. The tempting wrong reading is that identical bodies imply identical types; the type comes from the expression, not from the text of the body."
+      "explain": "The compiler deduces `T` first and checks the constraint afterwards. `route(3)` deduces `T = int`, satisfies `std::integral`, and wins as an exact match over the conversion the `double` overload would need. `route(3.5)` deduces `T = double`, fails the constraint, and the template is removed from the candidate set, leaving the `double` overload. `route(Ticks{7})` deduces `T = Ticks`, which is not integral no matter that `Ticks` converts to `int`; the template drops out and `Ticks` reaches `route(double)` through its user-defined conversion followed by `int`-to-`double`. `route('a')` picks the template, since `std::integral` accepts character types. The tempting wrong reading is that `Ticks` is \"an integral type in disguise\" — a constraint tests the deduced type itself, never a type it could convert to."
     },
     {
       "id": "c09-r06",
-      "section": "CTAD: deducing class template arguments",
+      "section": "Generic lambdas and passing lambdas to algorithms",
       "prompt": "What does this print?",
-      "code": "#include <iostream>\n#include <vector>\n\nint main() {\n    std::vector ambiguous{3, 5};\n    std::vector<int> filled(3, 5);\n\n    std::cout << ambiguous.size() << ' ' << filled.size() << '\\n';\n}",
+      "code": "#include <algorithm>\n#include <cstddef>\n#include <iostream>\n#include <string>\n#include <vector>\n\nint main() {\n    std::vector<std::string> words{\"pear\", \"fig\", \"banana\", \"kiwis\"};\n    std::vector<std::size_t> order{0, 1, 2, 3};\n\n    auto shorter = [&words](std::size_t left, std::size_t right) {\n        return words[left].size() < words[right].size();\n    };\n\n    std::sort(order.begin(), order.end(), shorter);\n    std::sort(words.begin(), words.end());\n\n    for (std::size_t i : order) std::cout << words[i] << ' ';\n    std::cout << '\\n';\n}",
       "kind": "value",
       "accept": [
-        "2 3"
+        "fig banana pear kiwis"
       ],
-      "explain": "CTAD deduces `std::vector<int>` for both, but it does not change constructor overload resolution: braces strongly prefer the `std::initializer_list` constructor, so `ambiguous` holds the two elements 3 and 5. Parentheses reach the count-and-value constructor, giving three elements each equal to 5. Reading `{3, 5}` as \"three fives\" is the classic misstep."
+      "explain": "The comparator captures `words` by reference, so `order` is genuinely sorted by word length: sizes 4, 3, 6, 5 give `order == {1, 0, 3, 2}`. The second `std::sort` then rearranges `words` into `banana fig kiwis pear`, and the saved indices now name entirely different words, so the loop prints `words[1] words[0] words[3] words[2]` — `fig banana pear kiwis`. The tempting wrong reading is `fig pear kiwis banana`, the length order that was true only until `words` moved. A by-reference capture is not the bug here; the bug is that an index is a reference to a position, and the second sort silently changed what each position means."
     }
   ],
   "writing": [
@@ -349,92 +349,97 @@
       "id": "c09-w01",
       "section": "Deduction: how the compiler picks T",
       "minutes": 8,
-      "prompt": "Write a single-parameter `larger` function template and a two-parameter `less_than` function template. Then, in a `demo()` function, show three call forms: one that deduces successfully, one that needs an explicit template argument because the arguments disagree, and one that would silently compare pointers if written with string literals — with the fix.",
+      "prompt": "A word-frequency tool needs to count how many entries of a range equal a given value. Write two function templates: `count_exact`, which takes a `std::vector<T>` and a `const T&` so that both arguments must agree on one type, and `count_equal`, which gives the sought value its own independent type parameter. Then write a `demo()` that shows, in comments, which call of `count_exact` fails deduction against a `std::vector<std::string>` searched with a string literal, and gives two different fixes — one that converts the argument and one that fixes the template argument — plus the `count_equal` call that needs no fix at all.",
+      "starter": "#include <cstddef>\n#include <string>\n#include <vector>\n\n// TODO: count_equal -- independent type parameters for the range and the needle.\n\n// TODO: count_exact -- one type parameter shared by both arguments.\n\nstd::size_t demo() {\n    std::vector<std::string> words{\"the\", \"cat\", \"the\"};\n    // TODO: name the call that fails deduction, in a comment, and give two fixes.\n    // TODO: add the count_equal call that needs no fix at all.\n    return words.size();\n}",
       "checklist": [
-        "`larger` has one type parameter used for both parameters and the return type",
-        "`less_than` has two independent type parameters",
-        "A comment states that mixed-type arguments make deduction fail rather than convert",
-        "The explicit-argument call is written as `larger<double>(...)`",
-        "The string case constructs `std::string` arguments and a comment names pointer comparison as the defect"
+        "`count_exact` uses a single type parameter for the element type and the sought value",
+        "`count_equal` has two independent type parameters and is callable with a string literal directly",
+        "A comment names the failing call and states that deduction will not convert to reconcile `std::string` and `const char*`",
+        "One fix converts the argument; a second fix supplies the template argument explicitly",
+        "The file compiles as written"
       ],
-      "solution": "#include <string>\n\ntemplate<class T>\nT larger(T a, T b) {\n    return a < b ? b : a;\n}\n\ntemplate<class T, class U>\nbool less_than(T left, U right) {\n    return left < right;\n}\n\nvoid demo() {\n    int high = larger(3, 5);            // T deduced as int\n\n    // larger(1, 2.0) is an error: the arguments propose int and double\n    // for one parameter and deduction will not convert to reconcile them.\n    double mixed = larger<double>(1, 2.0);  // T fixed; 1 converts to 1.0\n\n    bool ordered = less_than(1, 2.0);   // two parameters, T=int U=double\n\n    // larger(\"alpha\", \"beta\") deduces T = const char* and compares\n    // pointer values, not text. Construct strings to compare lexically.\n    std::string text = larger(std::string{\"alpha\"}, std::string{\"beta\"});\n\n    (void)high; (void)mixed; (void)ordered; (void)text;\n}",
-      "notes": "`less_than` is a different interface, not a workaround that makes the one-parameter `larger` infer a compromise type. Note also that the `std::string` call would find `std::max` through argument-dependent lookup if the template were named `max` — one more reason the chapter writes `::max` in its own example."
+      "solution": "#include <cstddef>\n#include <string>\n#include <vector>\n\n// One type parameter per independent argument: the needle never has to be\n// converted at the call site just to make deduction agree.\ntemplate<class Range, class Needle>\nstd::size_t count_equal(const Range& values, const Needle& needle) {\n    std::size_t hits = 0;\n    for (const auto& value : values) {\n        if (value == needle) ++hits;\n    }\n    return hits;\n}\n\n// A single parameter forces both arguments to propose the same type.\ntemplate<class T>\nstd::size_t count_exact(const std::vector<T>& values, const T& needle) {\n    return count_equal(values, needle);\n}\n\nstd::size_t demo() {\n    std::vector<std::string> words{\"the\", \"cat\", \"the\"};\n\n    // Deduction never converts to reconcile proposals, so count_exact(words,\n    // \"the\") is an error: std::string vs const char*. Two forms that work:\n    std::size_t a = count_exact(words, std::string{\"the\"});  // convert the argument\n    std::size_t b = count_exact<std::string>(words, \"the\");  // fix T explicitly\n\n    // count_equal gives the needle its own parameter, so the literal keeps its\n    // own type and std::string's operator==(const char*) does the comparison.\n    std::size_t c = count_equal(words, \"the\");\n\n    return a + b + c;\n}",
+      "notes": "The two designs are different interfaces, not two spellings of one. `count_exact` is the stricter contract: it guarantees that the needle has the element type, which matters when `operator==` is heterogeneous or expensive. `count_equal` pushes the comparison onto whatever `value == needle` means, which is what makes the literal work — `std::string` has an `operator==` taking `const char*`. Neither is a workaround for the other."
     },
     {
       "id": "c09-w02",
       "section": "The four template kinds",
-      "minutes": 9,
-      "prompt": "Write one small example of each of the four template kinds — a function template, a class template, a variable template, and an alias template — followed by a use site for each showing whether the argument is deduced or spelled.",
+      "minutes": 10,
+      "prompt": "Build a small word-frequency facility that uses all four template kinds exactly once. Requirements: an alias template `Counts<Key>` naming the underlying associative container; a variable template giving the zero count for any type; a class template `Histogram<Key>` with `add`, `count` (returning the zero value for an absent key) and read access to its buckets; and a function template `total` that deduces `Key` from its argument. Add a `static_assert` proving the alias names an existing type rather than creating a new one, and a comment marking which use sites deduce their argument and which must spell it.",
+      "starter": "#include <cstddef>\n#include <map>\n#include <string>\n\n// TODO: alias template Counts<Key> naming the underlying map type,\n//       plus a static_assert that it is not a new type.\n\n// TODO: variable template zero<T>.\n\n// TODO: class template Histogram<Key> with add / count / buckets, storing a\n//       Counts<Key> and returning zero<std::size_t> for an absent key.\n\n// TODO: function template total(const Histogram<Key>&) -- Key deduced.",
       "checklist": [
-        "All four kinds appear: function, class, variable, alias",
-        "The function-template use site deduces its argument",
-        "The class-template, variable-template and alias use sites spell their arguments",
-        "A comment states that the alias creates no new type",
-        "The code compiles as written (headers included)"
+        "All four kinds appear: alias template, variable template, class template, function template",
+        "A `static_assert` shows `Counts<Key>` is the same type as the container it aliases",
+        "`count` returns the variable template's value for a key that is absent",
+        "`total` deduces `Key` from its argument while the `Histogram` object spells it",
+        "The file compiles as written"
       ],
-      "solution": "#include <cstddef>\n#include <type_traits>\n#include <vector>\n\n// Function template\ntemplate<class T>\nT square(T value) {\n    return value * value;\n}\n\n// Class template\ntemplate<class T>\nclass Buffer {\npublic:\n    explicit Buffer(std::size_t count) : data_(count) {}\n    T& operator[](std::size_t index) { return data_[index]; }\n\nprivate:\n    std::vector<T> data_;\n};\n\n// Variable template\ntemplate<class T>\nconstexpr T zero = T{};\n\n// Alias template: names std::vector<T>, it does not create a new type.\ntemplate<class T>\nusing Vec = std::vector<T>;\n\nstatic_assert(std::is_same_v<Vec<int>, std::vector<int>>);\n\nvoid use() {\n    int squared = square(7);       // deduced: T is int\n    Buffer<double> prices{64};     // spelled: T is double\n    double origin = zero<double>;  // spelled\n    Vec<int> quantities{1, 2, 3};  // spelled; same type as std::vector<int>\n\n    (void)squared; (void)prices; (void)origin; (void)quantities;\n}",
-      "notes": "`class` and `typename` are interchangeable when introducing a type parameter. The `static_assert` is the point of the alias example: `Vec<int>` and `std::vector<int>` are one type, so they overload-resolve and convert identically — an alias template is a naming convenience, not a wrapper."
+      "solution": "#include <cstddef>\n#include <map>\n#include <string>\n#include <type_traits>\n\n// Alias template: a name for a family of types, not a new type.\ntemplate<class Key>\nusing Counts = std::map<Key, std::size_t>;\n\nstatic_assert(std::is_same_v<Counts<std::string>, std::map<std::string, std::size_t>>);\n\n// Variable template: one constant per type.\ntemplate<class T>\nconstexpr T zero = T{};\n\n// Class template: its argument is spelled at the use site, because ordinary\n// function-template deduction does not apply to a class.\ntemplate<class Key>\nclass Histogram {\npublic:\n    void add(const Key& key) { ++counts_[key]; }\n\n    std::size_t count(const Key& key) const {\n        auto found = counts_.find(key);\n        return found == counts_.end() ? zero<std::size_t> : found->second;\n    }\n\n    const Counts<Key>& buckets() const { return counts_; }\n\nprivate:\n    Counts<Key> counts_{};\n};\n\n// Function template: Key is deduced from the argument.\ntemplate<class Key>\nstd::size_t total(const Histogram<Key>& histogram) {\n    std::size_t sum = 0;\n    for (const auto& bucket : histogram.buckets()) sum += bucket.second;\n    return sum;\n}\n\nstd::size_t demo() {\n    Histogram<std::string> words;   // spelled\n    words.add(\"fig\");\n    words.add(\"fig\");\n    words.add(\"pear\");\n\n    return total(words)             // deduced\n         + words.count(\"fig\")\n         + words.count(\"absent\");   // zero<std::size_t>\n}",
+      "notes": "Only the function template deduces here. `Histogram<std::string>` spells its argument because ordinary deduction does not apply to class templates — CTAD could deduce it from constructor arguments, but this class has no constructor that mentions `Key`. The alias and the variable template have no arguments to deduce from at all. The `static_assert` is the point of the alias: `Counts<std::string>` and the map type are one type, so they overload-resolve and convert identically."
     },
     {
       "id": "c09-w03",
       "section": "Concepts: constraints you can read",
       "minutes": 10,
-      "prompt": "Constrain a `checked_max` to integral types, writing the constraint in two of the three syntaxes from the chapter. Then define your own `Hashable` concept with a `requires` expression that tests `std::hash<T>` and assert it for `int` and `std::string`.",
+      "prompt": "Define a concept `Sized` that a type satisfies when a `const` value of it supports `.size()` convertible to `std::size_t` and `.empty()` convertible to `bool`. Prove with `static_assert`s that it holds for `std::string` and `std::vector<int>` and fails for `int`. Then constrain three functions with it, using a different one of the chapter's three syntaxes each time: `same_length(a, b)`, `widest(items)` over a vector of sized things, and `blank(value)`. Add a comment stating what the constraint costs at run time.",
+      "starter": "#include <concepts>\n#include <cstddef>\n#include <string>\n#include <vector>\n\n// TODO: concept Sized -- a requires expression over .size() and .empty().\n\n// TODO: static_asserts for std::string, std::vector<int>, and !Sized<int>.\n\n// TODO: same_length, with a constrained template parameter.\n\n// TODO: widest, with a requires clause.\n\n// TODO: blank, with the abbreviated auto form.",
       "checklist": [
-        "One overload uses a constrained template parameter (`template<std::integral T>`)",
-        "A second function uses a `requires` clause or the abbreviated `auto` form",
-        "`Hashable` is written with a `requires` expression and a result requirement",
-        "The result requirement uses `std::convertible_to<std::size_t>`",
-        "`static_assert`s show `Hashable` holds for `int` and `std::string`",
-        "A comment states that concepts add no runtime check"
+        "`Sized` is written as a `requires` expression with two result requirements",
+        "Three `static_assert`s cover `std::string`, `std::vector<int>` and the negative case for `int`",
+        "The three functions use a constrained template parameter, a `requires` clause, and the abbreviated `auto` form — one each",
+        "A comment states that a concept is checked by the compiler and adds no runtime work",
+        "The file compiles as written"
       ],
-      "solution": "#include <concepts>\n#include <cstddef>\n#include <functional>\n#include <string>\n\n// Constrained template parameter.\ntemplate<std::integral T>\nT checked_max(T a, T b) {\n    return a < b ? b : a;\n}\n\n// requires clause: the same constraint in another position.\ntemplate<class T>\n    requires std::integral<T>\nT checked_min(T a, T b) {\n    return b < a ? b : a;\n}\n\n// Abbreviated template.\nvoid send(std::integral auto value) { (void)value; }\n\ntemplate<class T>\nconcept Hashable = requires(T value) {\n    { std::hash<T>{}(value) } -> std::convertible_to<std::size_t>;\n};\n\nstatic_assert(Hashable<int>);\nstatic_assert(Hashable<std::string>);\n\n// All of the above is checked by the compiler; the generated code for a\n// constrained template is identical to the unconstrained one.\nvoid use() {\n    (void)checked_max(8, 13);\n    (void)checked_min(8, 13);\n    send(3);\n}",
-      "notes": "The `requires` expression is never executed — `value` is a parameter that never becomes an object. That is what lets a concept test operations that would be expensive or meaningless to run. `checked_max(\"a\", \"b\")` now fails at the call site with \"const char* is not integral\" rather than somewhere inside the body."
+      "solution": "#include <concepts>\n#include <cstddef>\n#include <string>\n#include <vector>\n\n// A requires expression states which expressions must be well-formed and what\n// their results must convert to. Nothing in it is ever evaluated.\ntemplate<class T>\nconcept Sized = requires(const T& value) {\n    { value.size() } -> std::convertible_to<std::size_t>;\n    { value.empty() } -> std::convertible_to<bool>;\n};\n\nstatic_assert(Sized<std::string>);\nstatic_assert(Sized<std::vector<int>>);\nstatic_assert(!Sized<int>);\n\n// Constrained template parameter.\ntemplate<Sized T>\nbool same_length(const T& left, const T& right) {\n    return left.size() == right.size();\n}\n\n// The same constraint written as a requires clause.\ntemplate<class T>\n    requires Sized<T>\nstd::size_t widest(const std::vector<T>& items) {\n    std::size_t best = 0;\n    for (const T& item : items) {\n        if (!item.empty() && item.size() > best) best = item.size();\n    }\n    return best;\n}\n\n// Abbreviated form.\nbool blank(const Sized auto& value) { return value.empty(); }\n\nstd::size_t demo() {\n    std::vector<std::string> rows{\"fig\", \"banana\"};\n\n    // same_length(1, 2) is rejected at the call site: int has no .size().\n    // Every one of these constraints is a compile-time question only; the\n    // generated code is identical to the unconstrained version.\n    return widest(rows)\n         + static_cast<std::size_t>(same_length(rows[0], rows[0]))\n         + static_cast<std::size_t>(blank(rows));\n}",
+      "notes": "A `requires` expression is never executed: `value` is a parameter of the expression that never becomes an object, which is what lets a concept probe operations that would be expensive or meaningless to run. Note also the order of events at a call: the compiler deduces a candidate `T` first and only then asks whether `T` satisfies the constraint. That is why `same_length(1, 2)` reports \"int does not satisfy Sized\" at the call site rather than failing on `1.size()` somewhere inside the body."
     },
     {
       "id": "c09-w04",
       "section": "Function objects and lambda anatomy — the flagship",
-      "minutes": 8,
-      "prompt": "Write a lambda that captures a `double limit` by value and tests whether an `Order`'s price exceeds it. Beside it, hand-write the equivalent function-object class. Call both on the same order and print the two results plus `sizeof` the closure.",
+      "minutes": 9,
+      "prompt": "A spell-checker filters out words shorter than a configurable minimum. Write `count_if_manual(range, pred)` so that the predicate's concrete type reaches the loop body — it must be a template parameter, not a `std::function`. Then supply the same predicate twice: once as a lambda capturing the minimum by value, and once as a hand-written function-object class that models what the compiler generates for that lambda. Assert with `static_assert` that the closure is the size of its single capture, and have `demo()` return whether the two callables agree.",
+      "starter": "#include <cstddef>\n#include <string>\n#include <vector>\n\n// TODO: count_if_manual -- the predicate must be a template parameter.\n\n// TODO: struct LongEnough -- the hand-written closure equivalent.\n\nbool demo() {\n    std::vector<std::string> words{\"a\", \"cat\", \"hippo\"};\n    std::size_t minimum = 3;\n    // TODO: the lambda, a static_assert on its size, and the two counts.\n    return words.size() == minimum;\n}",
       "checklist": [
-        "The lambda captures `limit` explicitly by value, not via `[=]`",
-        "The hand-written class has one data member per capture",
-        "The hand-written `operator()` is marked `const`, matching the lambda's default",
-        "Both callables are invoked on the same `Order` and produce the same result",
-        "A comment notes the closure type is unique and unnamed, so `auto` holds it"
+        "The predicate is a template parameter of `count_if_manual`, and `std::function` appears nowhere",
+        "The lambda captures the minimum explicitly by value, not through `[=]`",
+        "The hand-written class has one data member per capture and a `const` call operator",
+        "A `static_assert` compares `sizeof` the closure against `sizeof` its single captured member",
+        "Both callables are run over the same range and their results compared"
       ],
-      "solution": "#include <iostream>\n\nstruct Order {\n    double price;\n    int quantity;\n};\n\nvoid inspect_closures() {\n    double limit = 100.0;\n\n    // Unique, unnamed closure type: auto is the only practical spelling.\n    auto over = [limit](const Order& order) {\n        return order.price > limit;\n    };\n\n    struct Over {\n        double limit;  // one data member for the one capture\n\n        // const, because a lambda's operator() is const unless mutable.\n        bool operator()(const Order& order) const {\n            return order.price > limit;\n        }\n    };\n\n    Over over_by_hand{limit};\n    Order order{101.25, 50};\n\n    std::cout << std::boolalpha\n              << over(order) << ' '\n              << over_by_hand(order) << ' '\n              << (sizeof(over) == sizeof(double)) << '\\n';\n}",
-      "notes": "Each by-value capture normally becomes one unnamed data member, so a closure over a single `double` is commonly the size of a `double` — though exact layout is implementation-defined. An empty closure still has nonzero size, because every complete object needs an addressable identity."
+      "solution": "#include <cstddef>\n#include <string>\n#include <vector>\n\n// The predicate is a template parameter, so its concrete type reaches this\n// loop body and can be inlined. No std::function, no indirect call.\ntemplate<class Range, class Pred>\nstd::size_t count_if_manual(const Range& range, Pred pred) {\n    std::size_t hits = 0;\n    for (const auto& item : range) {\n        if (pred(item)) ++hits;\n    }\n    return hits;\n}\n\n// What the compiler generates for a lambda capturing one std::size_t by value:\n// one data member per capture, and a const call operator.\nstruct LongEnough {\n    std::size_t minimum;\n\n    bool operator()(const std::string& word) const { return word.size() >= minimum; }\n};\n\nbool demo() {\n    std::vector<std::string> words{\"a\", \"cat\", \"hippo\"};\n    std::size_t minimum = 3;\n\n    // The closure type is unique and unnamed, so auto is the only spelling.\n    auto long_enough = [minimum](const std::string& word) {\n        return word.size() >= minimum;\n    };\n\n    static_assert(sizeof(long_enough) == sizeof(std::size_t));\n\n    return count_if_manual(words, long_enough)\n        == count_if_manual(words, LongEnough{minimum});\n}",
+      "notes": "The `const` on the hand-written `operator()` is not decoration: a lambda's call operator is `const` unless the lambda is declared `mutable`, so a faithful model must match it. The `sizeof` assertion holds on ordinary implementations because each by-value capture becomes one unnamed data member, but layout is implementation-defined — an empty closure still has nonzero size, since every complete object needs an addressable identity."
     },
     {
       "id": "c09-w05",
       "section": "Dangling captures",
-      "minutes": 7,
-      "prompt": "Write a factory that returns an adder closure. Show the broken reference-capturing version as a comment explaining the undefined behaviour, then the correct by-value version. Add a short comment list of the chapter's rules for choosing a capture mode.",
+      "minutes": 8,
+      "prompt": "A log tool needs two callables with opposite lifetime contracts. `make_matcher(pattern)` returns a predicate that must stay valid after the factory returns and after the caller's original pattern is gone. `count_matches(lines, pattern)` creates a callable, consumes it inside the same call, and returns a count. Write both, choosing the capture mode each contract demands, and include as a comment the reference-capturing version of the factory together with a one-line diagnosis of why it is undefined behaviour rather than merely wasteful.",
+      "starter": "#include <cstddef>\n#include <string>\n#include <vector>\n\n// TODO: the broken reference-capturing factory, as a comment with a diagnosis.\n\n// TODO: make_matcher -- returned, so it must own its state.\n\n// TODO: count_matches -- consumed here and now, so [&] is appropriate.",
       "checklist": [
-        "The broken version is present as a comment, with a note that it reads a destroyed object",
-        "The working factory captures by value",
+        "The returned closure owns its pattern by value",
+        "The locally consumed closure captures by reference and a comment justifies why that is safe here",
+        "The broken factory appears as a comment naming the destroyed referent",
         "A comment states that a reference capture does not extend the referent's lifetime",
-        "The rules distinguish returned/stored/queued lambdas from immediately consumed ones",
-        "A rule notes that a copied pointer or view is still a lifetime dependency despite being a by-value capture"
+        "The file compiles as written"
       ],
-      "solution": "// BROKEN: n dies when the function returns; the closure keeps only a\n// reference, which never extends a lifetime. Calling the result reads a\n// destroyed object -- undefined behaviour.\n//\n//   auto make_bad_adder(int n) {\n//       return [&n](int x) { return x + n; };\n//   }\n\nauto make_adder(int n) {\n    return [n](int x) { return x + n; };  // the value travels with the closure\n}\n\n// Capture rules:\n//  - Capture by value when the lambda is returned, stored, or queued.\n//  - Capture by reference only when the lambda is consumed immediately\n//    and the referent clearly outlives the call.\n//  - A copied pointer, reference wrapper, or view is a lifetime\n//    dependency even though the capture itself is by value.\n//  - Recheck captures whenever an immediate lambda becomes a stored or\n//    asynchronous callback.\n\nint use() {\n    auto add_five = make_adder(5);\n    return add_five(3);  // 8\n}",
-      "notes": "The fourth rule is the one that bites in real codebases: the lambda was correct when it ran inline, someone later moved it onto a queue, and the capture list was never revisited. `[=]` inside a member function is the same trap in disguise — it captures `this` as a pointer, not a copy of the object."
+      "solution": "#include <cstddef>\n#include <string>\n#include <vector>\n\n// BROKEN: pattern dies with the call, and a reference capture never extends a\n// lifetime, so every later match reads a destroyed string -- undefined\n// behaviour, not merely a wasted copy avoided.\n//\n//   auto make_matcher(const std::string& pattern) {\n//       return [&pattern](const std::string& line) {\n//           return line.find(pattern) != std::string::npos;\n//       };\n//   }\n\n// Returned, so it must own everything it needs: capture by value.\nauto make_matcher(std::string pattern) {\n    return [pattern](const std::string& line) {\n        return line.find(pattern) != std::string::npos;\n    };\n}\n\n// Consumed inside this call only, and both referents outlive it, so a\n// reference capture is safe here and keeps the closure to two pointers.\nstd::size_t count_matches(const std::vector<std::string>& lines,\n                          const std::string& pattern) {\n    std::size_t hits = 0;\n    auto tally = [&](const std::string& line) {\n        if (line.find(pattern) != std::string::npos) ++hits;\n    };\n\n    for (const std::string& line : lines) tally(line);\n    return hits;\n}\n\nstd::size_t demo() {\n    std::vector<std::string> lines{\"GET /home\", \"GET /help\", \"POST /home\"};\n\n    auto is_home = make_matcher(\"/home\");   // outlives the string it was built from\n    std::size_t direct = count_matches(lines, \"/home\");\n\n    std::size_t stored = 0;\n    for (const std::string& line : lines) stored += is_home(line);\n    return direct + stored;\n}",
+      "notes": "The rule that decides both cases is where the closure goes, not how big the captured object is. Returned, stored, or queued closures capture by value; a closure consumed inside the call that created it may capture by reference. The failure mode worth remembering is the edit that moves an existing lambda from the second category to the first without anyone revisiting its capture list. Note also that copying a pointer or a view by value copies a lifetime dependency, so a by-value capture is not automatically self-contained."
     },
     {
       "id": "c09-w06",
       "section": "Generic lambdas and passing lambdas to algorithms",
-      "minutes": 9,
-      "prompt": "Write a generic lambda that compares any two objects having a `.price` member, use it to sort a `std::vector<Order>` with `std::sort`, and use the same closure on a different type. Add a comment explaining why passing it directly to `std::sort` is faster than routing it through a function pointer.",
+      "minutes": 10,
+      "prompt": "Write `sort_by(range, project)`, which sorts a range in place by a caller-supplied projection. Contract: it must work for any range whose projected keys are ordered by `<`; the projection's type must be a template parameter so its body stays visible to the optimiser; and the comparator handed to `std::sort` must not copy the projection on every comparison. Then demonstrate it with a single generic lambda used on two different element types, plus one type-specific projection, and note in a comment which call the generic lambda would reject.",
+      "starter": "#include <algorithm>\n#include <string>\n#include <vector>\n\n// TODO: sort_by(range, project) -- project is a template parameter, and the\n//       comparator handed to std::sort must not copy it per comparison.\n\nstruct Session {\n    std::string user;\n    int seconds;\n};\n\nvoid demo() {\n    std::vector<std::string> words{\"banana\", \"fig\", \"pear\"};\n    std::vector<std::vector<int>> rows{{1, 2, 3}, {4}, {5, 6}};\n    std::vector<Session> sessions{{\"ana\", 30}, {\"bo\", 12}};\n    // TODO: one generic lambda used on two element types, plus a\n    //       Session-specific projection.\n    (void)words; (void)rows; (void)sessions;\n}",
       "checklist": [
-        "The comparator's parameters are declared `const auto&`",
-        "The same closure object is used with two different element types",
-        "`std::sort` receives the closure directly as its third argument",
-        "A comment states that `std::sort` is instantiated with the closure's concrete type, exposing the body for inlining",
-        "A comment contrasts that with the indirect call a function pointer usually forces"
+        "`sort_by` takes the projection as a template parameter and passes a comparator to `std::sort`",
+        "The comparator captures the projection by reference rather than copying it per comparison",
+        "One generic lambda with `const auto&` parameters is used on two different element types",
+        "A second, type-specific projection is used on a third range",
+        "A comment names a call the generic lambda would reject and why"
       ],
-      "solution": "#include <algorithm>\n#include <iostream>\n#include <vector>\n\nstruct Order {\n    double price;\n    int quantity;\n};\n\nstruct Quote {\n    double price;\n};\n\n// One closure type; its operator() is a template, so each call\n// instantiates a suitable version.\nauto less_price = [](const auto& left, const auto& right) {\n    return left.price < right.price;\n};\n\nvoid sort_both() {\n    std::vector<Order> orders{{100.25, 10}, {99.95, 30}, {100.10, 20}};\n    std::vector<Quote> quotes{{100.10}, {99.95}};\n\n    // std::sort is instantiated with less_price's exact concrete type,\n    // so the comparator body is visible inside that instantiation and\n    // can be inlined. A comparator passed as a function pointer is a\n    // runtime value; unless the optimizer can prove its target, the\n    // call site must issue an indirect call it cannot inline through.\n    std::sort(orders.begin(), orders.end(), less_price);\n    std::sort(quotes.begin(), quotes.end(), less_price);\n\n    std::cout << orders.front().price << ' ' << quotes.front().price << '\\n';\n}",
-      "notes": "The lambda body is valid only for types that support the operations it uses — calling `less_price(1, 2)` fails because `int` has no `.price`, exactly as an ordinary template would. Iterator and comparator requirements are formalised in Chapter 13; what matters here is that the concrete closure type is what makes the comparator transparent to the optimiser."
+      "solution": "#include <algorithm>\n#include <string>\n#include <vector>\n\n// The projection is a template parameter, so its concrete type -- and with it\n// its body -- is visible inside this instantiation and inside the std::sort\n// instantiation it drives. The comparator captures it by reference, so the\n// projection object is not copied once per comparison.\ntemplate<class Range, class Project>\nvoid sort_by(Range& range, Project project) {\n    std::sort(range.begin(), range.end(),\n              [&project](const auto& left, const auto& right) {\n                  return project(left) < project(right);\n              });\n}\n\nstruct Session {\n    std::string user;\n    int seconds;\n};\n\nvoid demo() {\n    std::vector<std::string> words{\"banana\", \"fig\", \"pear\"};\n    std::vector<std::vector<int>> rows{{1, 2, 3}, {4}, {5, 6}};\n    std::vector<Session> sessions{{\"ana\", 30}, {\"bo\", 12}};\n\n    // One closure object, two instantiations of its templated operator().\n    auto by_size = [](const auto& value) { return value.size(); };\n\n    sort_by(words, by_size);\n    sort_by(rows, by_size);\n    sort_by(sessions, [](const Session& session) { return session.seconds; });\n\n    // sort_by(sessions, by_size) would not compile: Session has no .size().\n    // A generic lambda is still only valid for types supporting what it uses.\n}",
+      "notes": "Two mechanisms combine here. The projection is a template parameter, so `sort_by` and the `std::sort` instantiation it drives both see the concrete closure type and can inline the body — a `std::function` or a function pointer would leave an indirect call the optimiser usually cannot see through. And the generic lambda has one closure type whose `operator()` is a template, so the same object serves `std::string` and `std::vector<int>` without any erasure. Iterator and comparator requirements are formalised in Chapter 13."
     }
   ]
 }

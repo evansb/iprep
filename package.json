@@ -9,7 +9,8 @@
     "build": "astro build",
     "preview": "astro preview",
     "astro": "astro",
-    "verify:exercises": "node scripts/verify-exercises.mjs"
+    "verify:exercises": "node scripts/verify-exercises.mjs",
+    "check:novelty": "node scripts/check-novelty.mjs"
   },
   "dependencies": {
     "astro": "^5.6.0",

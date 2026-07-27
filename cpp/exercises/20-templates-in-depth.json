@@ -426,252 +426,254 @@
     {
       "id": "c20-r01",
       "section": "Specialization",
-      "prompt": "What does this print?",
-      "code": "#include <iostream>\n\ntemplate<class T>\nstruct Storage {\n    static constexpr int id = 0;\n};\n\ntemplate<class T>\nstruct Storage<T*> {\n    static constexpr int id = 1;\n};\n\ntemplate<>\nstruct Storage<void> {\n    static constexpr int id = 2;\n};\n\nint main() {\n    std::cout << Storage<int>::id\n              << Storage<int*>::id\n              << Storage<void>::id\n              << Storage<void*>::id << '\\n';\n}",
+      "prompt": "A serialiser picks a wire encoding by matching the argument type against partial specializations. What does this print?",
+      "code": "#include <cstddef>\n#include <iostream>\n\ntemplate<class T>\nstruct WireKind { static constexpr int id = 0; };   // plain value\n\ntemplate<class T>\nstruct WireKind<T*> { static constexpr int id = 1; };\n\ntemplate<class T>\nstruct WireKind<const T> { static constexpr int id = 2; };\n\ntemplate<class T, std::size_t N>\nstruct WireKind<T[N]> { static constexpr int id = 3; };\n\nint main() {\n    std::cout << WireKind<int>::id\n              << WireKind<const int*>::id\n              << WireKind<int* const>::id\n              << WireKind<double[4]>::id << '\\n';\n}",
       "kind": "value",
       "accept": [
-        "0121"
+        "0123"
       ],
-      "explain": "`Storage<int>` matches only the primary. `Storage<int*>` matches the primary and the `T*` partial specialization; the partial one is more specialized and wins. `Storage<void>` selects the exact full specialization. The last one is the trap: `void*` is still a pointer type, so it matches `Storage<T*>` with T = void and reports 1, not 2."
+      "explain": "`int` matches only the primary, so 0. The two pointer cases are the trap and they are not symmetric: `const int*` is a *pointer to const*, so its top level is an ordinary pointer and it matches `WireKind<T*>` with T = const int, giving 1 — the `const T` specialization never sees it, because the argument itself is not const-qualified. `int* const` is a *const pointer*: its top level is const, so it matches `WireKind<const T>` with T = int*, giving 2, and it does not match `T*` because a partial specialization is matched against the argument's own cv-qualification. Reading both pointer spellings as 'a pointer, therefore 1' or 'contains const, therefore 2' gets one of them wrong either way. The array matches `T[N]` and gives 3."
     },
     {
       "id": "c20-r02",
       "section": "Constraint subsumption",
-      "prompt": "What does this print?",
-      "code": "#include <concepts>\n#include <iostream>\n\nconst char* classify(std::integral auto) {\n    return \"integral\";\n}\n\nconst char* classify(std::signed_integral auto) {\n    return \"signed\";\n}\n\nint main() {\n    std::cout << classify(42) << ' ' << classify(42u) << '\\n';\n}",
-      "kind": "value",
-      "accept": [
-        "signed integral"
-      ],
-      "explain": "`42` is an int, satisfying both constraints; `std::signed_integral` subsumes `std::integral`, so the more constrained overload is chosen and prints 'signed'. `42u` satisfies only `std::integral`, leaving one viable candidate. Reading the calls in source order and expecting 'integral signed' is the common slip."
+      "prompt": "Two overloads of an encoder guard themselves with the same requirement, one of them adding a second condition. What happens when this is compiled and run?",
+      "code": "#include <concepts>\n\ntemplate<class T>\nint send(const T&)\n    requires requires(const T& message) { message.encode(); }\n{\n    return 1;\n}\n\ntemplate<class T>\nint send(const T&)\n    requires (requires(const T& message) { message.encode(); }\n              && std::copy_constructible<T>)\n{\n    return 2;\n}\n\nstruct Heartbeat {\n    int encode() const { return 0; }\n};\n\nint main() {\n    return send(Heartbeat{});\n}",
+      "kind": "no-compile",
+      "explain": "The call is ambiguous. Both constraints are satisfied by `Heartbeat`, so the tiebreak has to be subsumption — and subsumption compares *atomic constraints by source identity*, not by matching text. The two requires-expressions are written out separately, so they normalise to two different atoms; the second constraint therefore does not contain the first and neither overload is more constrained. The tempting reading is that `A` and `A && B` obviously means the second is more constrained, which would be true if both spelled `A` as one named concept: define `template<class T> concept Encodable = requires(const T& m) { m.encode(); };` and use `Encodable<T>` in both, and the atoms match, the second subsumes the first, and the call resolves to 2."
     },
     {
       "id": "c20-r03",
-      "section": "Dispatch on type: from tags to concepts",
-      "prompt": "What happens when this is compiled and run?",
-      "code": "#include <type_traits>\n\ntemplate<class T, class = std::enable_if_t<std::is_integral_v<T>>>\nvoid encode(T);\n\ntemplate<class T, class = std::enable_if_t<std::is_floating_point_v<T>>>\nvoid encode(T);\n\nint main() {\n    encode(42);\n}",
-      "kind": "no-compile",
-      "explain": "A default template argument is not part of a function template's signature, so both declarations declare `template<class, class> void encode(T)` and the second is a redefinition. The error appears at the declaration, before any call is considered — the two conditions never get the chance to be complementary. Put the enable_if in the return type, or use concepts."
+      "section": "Variadic templates and folds",
+      "prompt": "A validation helper folds a predicate over its arguments. What does this print?",
+      "code": "#include <iostream>\n\nbool check(int value) {\n    std::cout << value << ' ';\n    return value > 0;\n}\n\ntemplate<class... Values>\nbool all_valid(Values... values) {\n    return (... && check(values));\n}\n\nint main() {\n    std::cout << std::boolalpha\n              << all_valid(3, -1, 5) << ' '\n              << all_valid() << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "3 -1 false true"
+      ],
+      "explain": "A fold over `&&` expands to real `&&` operators, so it keeps their short-circuiting: the expansion is `(check(3) && check(-1)) && check(5)`, and once `check(-1)` is false the third call is never made. So only `3 ` and `-1 ` are printed, then `false`. Expecting `3 -1 5 false` is the natural slip — a fold looks like a loop over the pack, but it is one expression built from an operator, side effects included. The empty pack then shows the identity element: a unary `&&` fold over no arguments is `true`, which is one of only three unary folds (with `||` and comma) that an empty pack permits at all."
     },
     {
       "id": "c20-r04",
-      "section": "Variadic templates and folds",
-      "prompt": "What does this print?",
-      "code": "#include <iostream>\n\ntemplate<class... Numbers>\nconstexpr int left_fold(Numbers... numbers) {\n    return (... - numbers);\n}\n\ntemplate<class... Numbers>\nconstexpr int right_fold(Numbers... numbers) {\n    return (numbers - ...);\n}\n\nint main() {\n    std::cout << left_fold(10, 3, 2) << ' '\n              << right_fold(10, 3, 2) << '\\n';\n}",
+      "section": "Forwarding references and perfect forwarding",
+      "prompt": "A router has a generic entry point and one hand-written overload for the common case. What does this print?",
+      "code": "#include <iostream>\n\ntemplate<class T>\nconst char* route(T&&) {\n    return \"template\";\n}\n\nconst char* route(const int&) {\n    return \"overload\";\n}\n\nint main() {\n    int live = 1;\n    const int frozen = 2;\n\n    std::cout << route(live) << ' '\n              << route(frozen) << ' '\n              << route(3) << '\\n';\n}",
       "kind": "value",
       "accept": [
-        "5 9"
+        "template overload template"
       ],
-      "explain": "The unary left fold groups as ((10 - 3) - 2) = 5; the unary right fold groups as (10 - (3 - 2)) = 9. Subtraction is not associative, so the two forms genuinely differ. The mnemonic is where the ellipsis sits relative to the pack: `... - numbers` builds up from the left, `numbers - ...` nests to the right."
+      "explain": "The rule people reach for — 'a non-template beats a template' — is only the *last* tiebreak, applied after conversion sequences have been compared. For `live`, the forwarding reference deduces T = int& and binds `int&` exactly, while the non-template has to add `const`: the template has the better conversion sequence and wins outright. For `frozen`, both candidates end up with the parameter type `const int&`, the sequences tie, and only then does the non-template win. For the literal `3`, both bind a reference to an rvalue, but an rvalue reference binding to an rvalue outranks an lvalue reference binding to it, so the template wins again. This is the mechanism behind the forwarding constructor that steals calls from a copy constructor."
     },
     {
       "id": "c20-r05",
       "section": "Two-phase name lookup",
-      "prompt": "What happens when this is compiled and run?",
-      "code": "#include <iostream>\n\ntemplate<class T>\nstruct Base {\n    void flush() {\n        std::cout << \"flush\\n\";\n    }\n};\n\ntemplate<class T>\nstruct Derived : Base<T> {\n    void broken() {\n        flush();\n    }\n};\n\nint main() {\n    Derived<int> side;\n    side.broken();\n}",
-      "kind": "no-compile",
-      "explain": "`Base<T>` is a dependent base, and ordinary unqualified lookup in phase one does not look inside it — the compiler cannot know what `Base<T>` will contain until T is known. `flush` is therefore an undeclared identifier at definition time. `this->flush()` or `Base<T>::flush()` makes the lookup dependent and defers it to instantiation; this is the CRTP surprise in miniature."
+      "prompt": "A template calls an overloaded helper. Two overloads are declared before it and one after. What does this print?",
+      "code": "#include <iostream>\n\nnamespace units {\nstruct Metres {\n    double value;\n};\n\nconst char* describe(const Metres&) {\n    return \"adl\";\n}\n}  // namespace units\n\nconst char* describe(int) {\n    return \"int\";\n}\n\ntemplate<class T>\nconst char* report(const T& value) {\n    return describe(value);\n}\n\nconst char* describe(double) {\n    return \"double\";\n}\n\nint main() {\n    std::cout << report(units::Metres{1.5}) << ' '\n              << report(2.5) << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "adl int"
+      ],
+      "explain": "`describe(value)` is a dependent call, so its candidate set is ordinary lookup *at the template's definition* plus argument-dependent lookup at instantiation. For `units::Metres`, ADL adds `units::describe` and it is the best match. For `double`, ADL contributes nothing — a fundamental type has no associated namespace — so the only candidate is the `describe(int)` that was visible when the template was parsed, and the argument converts. The `describe(double)` declared afterwards is never considered, even though it appears earlier in the file than `main` and would be an exact match. Assuming that everything declared before the point of instantiation is visible is the classic two-phase mistake, and it is what makes 'declare your customization points before the template, or make them findable by ADL' a real rule rather than style advice."
     },
     {
       "id": "c20-r06",
-      "section": "Forwarding references and perfect forwarding",
-      "prompt": "What does this print?",
-      "code": "#include <iostream>\n#include <type_traits>\n\ntemplate<class T>\nconst char* observe(T&&) {\n    return std::is_lvalue_reference_v<T> ? \"lvalue\" : \"rvalue\";\n}\n\nint main() {\n    int quantity = 20;\n    const int limit = 5;\n\n    std::cout << observe(quantity) << ' '\n              << observe(20) << ' '\n              << observe(limit) << ' '\n              << observe(std::move(quantity)) << '\\n';\n}",
-      "kind": "value",
-      "accept": [
-        "lvalue rvalue lvalue rvalue"
-      ],
-      "explain": "For a forwarding reference, an lvalue argument deduces T as an lvalue-reference type (`int&`, `const int&`) and an rvalue deduces a non-reference type. Note the third call: `const` is preserved in the deduction but does not change the category — a const lvalue is still an lvalue, which is exactly why forwarding it cannot manufacture permission to move."
+      "section": "Non-type template parameters",
+      "prompt": "A schema type wants to carry its field name as a template argument. What happens when this is compiled and run?",
+      "code": "#include <cstddef>\n#include <iostream>\n#include <string>\n\ntemplate<std::size_t N>\nstruct FixedName {\n    char text[N]{};\n\n    constexpr FixedName(const char (&source)[N]) {\n        for (std::size_t i = 0; i < N; ++i) {\n            text[i] = source[i];\n        }\n    }\n};\n\nstruct FieldName {\n    std::string text;\n};\n\ntemplate<FixedName Name>\nstruct FastField {\n    double value;\n};\n\ntemplate<FieldName Name>\nstruct SlowField {\n    double value;\n};\n\nint main() {\n    FastField<\"bid\"> fast{101.25};\n    SlowField<FieldName{\"bid\"}> slow{101.25};\n    std::cout << fast.value + slow.value << '\\n';\n}",
+      "kind": "no-compile",
+      "explain": "`FastField` is fine: `FixedName` is a structural class type — a literal type whose bases and non-static data members are public, non-mutable and themselves structural — so C++20 lets it be a non-type template parameter and copies the characters into the specialization's identity. `SlowField` is the error: `FieldName` holds a `std::string`, whose members are private and which manages storage, so it is not structural and cannot be a template parameter type at all. The tempting reading is that the problem is `\"bid\"` not being a constant expression; it is a perfectly good constant expression, and `FieldName{\"bid\"}` would even be a valid constant *value*. What fails is the parameter's declared type, which is diagnosed at the template declaration rather than at the use."
     },
     {
       "id": "c20-r07",
       "section": "Expression templates",
-      "prompt": "What happens when this is compiled and run?",
-      "code": "#include <cstddef>\n#include <iostream>\n#include <vector>\n\nstruct Vec {\n    std::vector<double> values;\n\n    double operator[](std::size_t index) const {\n        return values[index];\n    }\n};\n\nstruct AddExpr {\n    const Vec& left;\n    const Vec& right;\n\n    double operator[](std::size_t index) const {\n        return left[index] + right[index];\n    }\n};\n\nAddExpr operator+(const Vec& left, const Vec& right) {\n    return AddExpr{left, right};\n}\n\nint main() {\n    Vec bids{{100.0, 101.0}};\n    auto expression = bids + Vec{{0.5, 0.5}};\n    std::cout << expression[1] << '\\n';\n}",
+      "prompt": "A lazy zip view keeps references to the ranges it was given, so combining them costs no allocation. What happens when this is compiled and run?",
+      "code": "#include <cstddef>\n#include <iostream>\n#include <tuple>\n#include <vector>\n\ntemplate<class... Ranges>\nclass ZipView {\npublic:\n    explicit ZipView(const Ranges&... ranges) : ranges_(ranges...) {}\n\n    int sum_at(std::size_t index) const {\n        return std::apply(\n            [index](const Ranges&... range) { return (... + range[index]); },\n            ranges_);\n    }\n\nprivate:\n    std::tuple<const Ranges&...> ranges_;\n};\n\ntemplate<class... Ranges>\nZipView<Ranges...> zip(const Ranges&... ranges) {\n    return ZipView<Ranges...>(ranges...);\n}\n\nint main() {\n    std::vector<int> desks{1, 2, 3};\n    auto totals = zip(desks, std::vector<int>{10, 20, 30});\n    std::cout << totals.sum_at(1) << '\\n';\n}",
       "kind": "ub",
-      "explain": "`operator+` returns a node holding references to its operands, but the second operand is a temporary that dies at the end of the full-expression that initialized `expression`. Indexing the node afterwards reads a destroyed Vec and its freed heap buffer — ASan reports a use-after-free. This is the documented hazard of storing an expression template in `auto` rather than assigning it into a destination."
+      "explain": "The node stores `const Ranges&...`, so `totals` holds a reference to a temporary `std::vector` that was destroyed at the end of the full-expression that initialised it. `sum_at` then indexes freed heap memory and ASan reports a use-after-free. The reassuring reading is that the fold reads only element 1 of a three-element vector and that the value 20 is 'still there' — the storage may well still contain it, which is exactly what makes this class of bug survive testing. It is the same lifetime shape as an expression-template node or a lazy view: cheap because it borrows, and therefore only valid while every operand is alive. Storing the view in `auto` is what extends its life past its operands; consuming it in the same expression, or holding the ranges by value, removes the hazard."
     },
     {
       "id": "c20-r08",
       "section": "Dispatch on type: from tags to concepts",
-      "prompt": "What does this print?",
-      "code": "#include <array>\n#include <cstddef>\n#include <iostream>\n#include <type_traits>\n#include <utility>\n#include <vector>\n\ntemplate<class C, class = void>\nstruct HasReserve : std::false_type {};\n\ntemplate<class C>\nstruct HasReserve<C, std::void_t<decltype(\n    std::declval<C&>().reserve(std::size_t{}))>> : std::true_type {};\n\ntemplate<class C>\nconst char* probe(C& container) {\n    if constexpr (HasReserve<C>::value) {\n        container.reserve(4);\n        return \"reserved\";\n    } else {\n        return \"skipped\";\n    }\n}\n\nint main() {\n    std::vector<int> levels;\n    std::array<int, 8> fixed{};\n    std::cout << probe(levels) << ' ' << probe(fixed) << '\\n';\n}",
+      "prompt": "An encoder tries a member hook, then an ADL free hook, then a fallback. What does this print?",
+      "code": "#include <iostream>\n\nnamespace wire {\n\nstruct Heartbeat {\n    int to_bytes() const { return 1; }\n};\n\nint to_bytes(const Heartbeat&) { return 11; }\n\nstruct Reject {\n    int code;\n};\n\nint to_bytes(const Reject& reject) { return reject.code; }\n\nstruct Raw {\n    int size;\n};\n\n}  // namespace wire\n\ntemplate<class T>\nconcept MemberEncodable = requires(const T& value) { value.to_bytes(); };\n\ntemplate<class T>\nconcept FreeEncodable = requires(const T& value) { to_bytes(value); };\n\ntemplate<class T>\nconst char* how(const T&) {\n    if constexpr (MemberEncodable<T>) {\n        return \"member\";\n    } else if constexpr (FreeEncodable<T>) {\n        return \"free\";\n    } else {\n        return \"fallback\";\n    }\n}\n\nint main() {\n    std::cout << how(wire::Heartbeat{}) << ' '\n              << how(wire::Reject{7}) << ' '\n              << how(wire::Raw{4}) << '\\n';\n}",
       "kind": "value",
       "accept": [
-        "reserved skipped"
+        "member free fallback"
       ],
-      "explain": "The partial specialization is selected only when `declval<C&>().reserve(size_t{})` is a well-formed expression, so HasReserve is true for vector and false for array. For the array specialization the `reserve` call sits in a discarded `if constexpr` branch and is never instantiated — without `if constexpr` the same body would be a hard error even though the branch can never be taken."
+      "explain": "`Heartbeat` satisfies *both* concepts — it has the member and there is a free `to_bytes` in its namespace that ADL finds — and an `if constexpr` chain is not overload resolution: it takes the first true branch, so branch order alone decides, and it reports `member`. There is no ambiguity to diagnose, which is the point: an `if constexpr` ladder silently encodes a priority, so the order of the branches is part of the interface. `Reject` has only the free hook and `Raw` has neither. Had these been three constrained overloads instead, `Heartbeat` would have been an ambiguous call unless one concept subsumed the other."
     },
     {
       "id": "c20-r09",
-      "section": "Forwarding references and perfect forwarding",
-      "prompt": "What happens when this is compiled and run?",
-      "code": "#include <vector>\n\nstruct Order {\n    int id;\n};\n\ntemplate<class T>\nvoid consume(std::vector<T>&&) {\n}\n\nint main() {\n    std::vector<Order> orders{{1}, {2}};\n    consume(orders);\n}",
+      "section": "Instantiation mechanics",
+      "prompt": "A journal is instantiated for a type that supports none of its arithmetic. What happens when this is compiled and run?",
+      "code": "#include <cstddef>\n#include <iostream>\n#include <vector>\n\nstruct Opaque {};\n\ntemplate<class T>\nclass Journal {\npublic:\n    void append(const T& entry) { entries_.push_back(entry); }\n\n    std::size_t size() const { return entries_.size(); }\n\n    void compact() { entries_.front() += entries_.back(); }\n\nprivate:\n    std::vector<T> entries_;\n};\n\nint main() {\n    Journal<Opaque> journal;\n    journal.append(Opaque{});\n    std::cout << journal.size() << '\\n';\n\n    auto hook = &Journal<Opaque>::compact;\n    static_cast<void>(hook);\n}",
       "kind": "no-compile",
-      "explain": "`std::vector<T>&&` is not a forwarding reference — the parameter is not the bare deduced form `T&&` — so it is an ordinary rvalue reference and cannot bind to the lvalue `orders`. There is no matching function. `consume(std::move(orders))` compiles, as would declaring the parameter `T&&` and deducing the whole vector type."
+      "explain": "Everything up to the `std::cout` line is fine, and that is the part worth understanding: a class specialization instantiates its members lazily, so `compact` — which needs an `operator+=` that `Opaque` does not have — is merely declared, never compiled. Taking its address is what breaks it. `&Journal<Opaque>::compact` odr-uses the member function, which requires a definition, which instantiates the body, which fails. The tempting reading is 'the member is never called, so it is never instantiated'; the rule is about *use*, and forming a pointer to a function is a use. Delete those two lines and the program compiles and prints 1."
     },
     {
       "id": "c20-r10",
-      "section": "Non-type template parameters",
-      "prompt": "What does this print?",
-      "code": "#include <array>\n#include <cstddef>\n#include <iostream>\n#include <type_traits>\n\ntemplate<class T, std::size_t Rows, std::size_t Columns>\nstruct Matrix {\n    static constexpr std::size_t rows = Rows;\n    static constexpr std::size_t columns = Columns;\n    std::array<T, Rows * Columns> elements{};\n};\n\nint main() {\n    Matrix<double, 2, 3> prices;\n    std::cout << std::boolalpha\n              << decltype(prices)::rows\n              << ' ' << prices.elements.size()\n              << ' ' << std::is_same_v<Matrix<double, 2, 3>,\n                                       Matrix<double, 3, 2>>\n              << '\\n';\n}",
+      "section": "Compile-time type traits",
+      "prompt": "A serialiser decides between a memcpy fast path and a field-by-field path by asking traits. What does this print?",
+      "code": "#include <iostream>\n#include <type_traits>\n\nstruct Packet {\n    int sequence;\n    double price;\n};\n\nint main() {\n    std::cout << std::boolalpha\n              << std::is_trivially_copyable_v<Packet> << ' '\n              << std::is_trivially_copyable_v<Packet&> << ' '\n              << std::is_pointer_v<Packet* const> << ' '\n              << std::is_same_v<std::remove_cv_t<const Packet*>, Packet*> << ' '\n              << std::is_same_v<std::remove_cvref_t<const Packet&>, Packet> << '\\n';\n}",
       "kind": "value",
       "accept": [
-        "2 6 false"
+        "true false true false true"
       ],
-      "explain": "The dimensions are compile-time constants inside the specialization, so `rows` is 2 and the flat storage holds 2 * 3 = 6 elements. The third value is the point: `Matrix<double, 2, 3>` and `Matrix<double, 3, 2>` are unrelated types even though their storage is identically sized, because every distinct argument list names a distinct specialization."
+      "explain": "Every answer here is about the *exact* type supplied. `Packet` is trivially copyable; `Packet&` is not, because a reference is not an object type and nothing about it is copyable in that sense — this is the trap that fires when a deduced parameter type reaches a trait unstripped. `Packet* const` is still a pointer, so `is_pointer_v` is true: the trait asks about the pointer-ness, not the constness. The fourth is the mirror-image slip: `const Packet*` has no top-level cv-qualification at all — the `const` applies to the pointee — so `remove_cv_t` changes nothing and the types differ. Only `remove_cvref_t` on the reference gives the bare type the author usually meant to ask about."
     }
   ],
   "writing": [
     {
       "id": "c20-w01",
       "section": "Non-type template parameters",
-      "minutes": 10,
-      "prompt": "Write a `RingBuffer<T, Capacity>` class template whose capacity is a non-type template parameter. Give it `push` and `size`, store elements in a std::array, reject a zero capacity at compile time, and expose the capacity as a static constexpr member.",
-      "starter": "#include <array>\n#include <cstddef>\n\ntemplate<class T, std::size_t Capacity>\nclass RingBuffer {\n    // ...\n};",
+      "minutes": 12,
+      "prompt": "Build a dimensional-analysis type `Quantity<Metres, Seconds>` whose unit exponents are non-type template parameters. Requirements: multiplying two quantities must produce a type whose exponents are the sums; dividing must subtract them; addition must be available only between identical dimensions, and a mismatched addition must fail during template argument deduction rather than through a static_assert. Prove all four with static_asserts, including one that shows two different dimensions are unrelated types.",
+      "starter": "template<int Metres, int Seconds>\nstruct Quantity {\n    double value{};\n};\n\n// operator*, operator/, operator+ ...",
       "checklist": [
-        "Capacity is a std::size_t non-type template parameter, not a constructor argument",
-        "A static_assert rejects Capacity == 0",
-        "Storage is std::array<T, Capacity> — no heap allocation",
-        "A static constexpr member exposes the capacity to callers",
-        "push wraps the write index modulo Capacity"
+        "Unit exponents are int non-type template parameters, not runtime fields",
+        "operator* adds the exponents and operator/ subtracts them, each returning a differently parameterised Quantity",
+        "operator+ deduces one pair of exponents for both operands, so a mismatch is a deduction failure with no overload to select",
+        "A static_assert shows the derived type of a division (for example metres over seconds)",
+        "A static_assert shows two different exponent lists are unrelated types"
       ],
-      "solution": "#include <array>\n#include <cstddef>\n\ntemplate<class T, std::size_t Capacity>\nclass RingBuffer {\npublic:\n    static_assert(Capacity > 0, \"a ring buffer needs at least one slot\");\n\n    static constexpr std::size_t capacity = Capacity;\n\n    void push(const T& value) {\n        elements_[next_] = value;\n        next_ = (next_ + 1) % Capacity;\n        if (size_ < Capacity) {\n            ++size_;\n        }\n    }\n\n    std::size_t size() const {\n        return size_;\n    }\n\nprivate:\n    std::array<T, Capacity> elements_{};\n    std::size_t next_ = 0;\n    std::size_t size_ = 0;\n};",
-      "notes": "Because Capacity is a constant inside the specialization, the compiler can turn the modulo into a mask when the capacity is a power of two, and can unroll fixed-shape loops. The cost is a distinct type per capacity: RingBuffer<Order, 64> and RingBuffer<Order, 128> share no code."
+      "solution": "#include <type_traits>\n\ntemplate<int Metres, int Seconds>\nstruct Quantity {\n    double value{};\n};\n\ntemplate<int M1, int S1, int M2, int S2>\nconstexpr Quantity<M1 + M2, S1 + S2> operator*(Quantity<M1, S1> left,\n                                               Quantity<M2, S2> right) {\n    return {left.value * right.value};\n}\n\ntemplate<int M1, int S1, int M2, int S2>\nconstexpr Quantity<M1 - M2, S1 - S2> operator/(Quantity<M1, S1> left,\n                                               Quantity<M2, S2> right) {\n    return {left.value / right.value};\n}\n\n// One M and one S for both operands: adding metres to seconds is not a\n// rejected call, it is a deduction failure - there is no candidate at all.\ntemplate<int M, int S>\nconstexpr Quantity<M, S> operator+(Quantity<M, S> left, Quantity<M, S> right) {\n    return {left.value + right.value};\n}\n\nusing Metres = Quantity<1, 0>;\nusing Seconds = Quantity<0, 1>;\nusing MetresPerSecond = Quantity<1, -1>;\n\nstatic_assert(std::is_same_v<decltype(Metres{10.0} / Seconds{2.0}),\n                             MetresPerSecond>);\nstatic_assert((Metres{10.0} / Seconds{2.0}).value == 5.0);\nstatic_assert(std::is_same_v<decltype(MetresPerSecond{5.0} * Seconds{2.0}),\n                             Metres>);\nstatic_assert(!std::is_same_v<Metres, Seconds>);\nstatic_assert(std::is_same_v<decltype(Metres{1.0} + Metres{2.0}), Metres>);",
+      "notes": "The exponents cost nothing at runtime: every Quantity holds one double, and the unit checking happens entirely in the type system. The price is the usual one — each exponent pair is a distinct specialization, so a library with many derived units emits many types. Note also that the exponents must be a fixed parameter list; supporting arbitrary unit systems means a different design (a pack, or a single structural type carrying the exponents) rather than more integer parameters."
     },
     {
       "id": "c20-w02",
       "section": "Template-template parameters and policy families",
-      "minutes": 8,
-      "prompt": "Write a `BookSide` class template that takes its sequence *template* as a parameter and instantiates it for its own `Level` element type. Show it used with both std::vector and std::deque, and add a comment explaining when an ordinary type parameter would be the better choice.",
+      "minutes": 10,
+      "prompt": "A metrics sink must choose its storage family without its callers naming an element type. Write two sinks: one parameterised on a `template<class...> class` family so it can be used with `std::vector` and `std::list`, and one parameterised on a `template<class, std::size_t> class` family plus a capacity so it can be used with `std::array`. Add a comment stating why `std::array` cannot be passed to the first, and one stating when an ordinary type parameter would have been the better choice.",
       "checklist": [
-        "Parameter is declared `template<class...> class Sequence`, not `class Sequence`",
-        "The class instantiates Sequence<Level> itself rather than being handed a container type",
-        "Instantiated with at least two different container templates",
-        "Comment states that a plain type parameter (or a constrained container parameter) is simpler when the caller already has a container object"
+        "The first sink declares `template<template<class...> class Buffer>` and forms `Buffer<Sample>` itself",
+        "The second declares a `template<class, std::size_t> class` parameter plus a capacity NTTP and forms `Buffer<Sample, Capacity>`",
+        "Each sink is instantiated with at least one real standard container template",
+        "A comment explains that std::array does not match the variadic type-parameter shape because its second parameter is a value",
+        "A comment says an ordinary (or concept-constrained) type parameter is simpler when the caller already owns a container object"
       ],
-      "solution": "#include <deque>\n#include <vector>\n\nstruct Level {\n    int price;\n    int quantity;\n};\n\n// A template-template parameter is the right tool only because BookSide has\n// to form Sequence<Level> itself. If the caller already owned a container,\n// a constrained `class Container` parameter would be simpler and would not\n// constrain the argument's parameter shape.\ntemplate<template<class...> class Sequence>\nclass BookSide {\npublic:\n    void add(Level level) {\n        levels_.push_back(level);\n    }\n\n    const Level& best() const {\n        return levels_.front();\n    }\n\n    std::size_t depth() const {\n        return levels_.size();\n    }\n\nprivate:\n    Sequence<Level> levels_;\n};\n\nBookSide<std::vector> contiguous_side;\nBookSide<std::deque> stable_ends_side;",
-      "notes": "The variadic `template<class...> class` form matters: std::vector really has two parameters (element and allocator), and only the variadic spelling absorbs the defaulted one. A template needing a non-type parameter, such as FixedVector<T, N>, has a different shape and needs a differently declared parameter."
+      "solution": "#include <array>\n#include <cstddef>\n#include <list>\n#include <vector>\n\nstruct Sample {\n    double value;\n};\n\n// A template-template parameter earns its keep only because the sink forms\n// Buffer<Sample> itself. If the caller already had a container object, a\n// constrained \"class Container\" parameter would be simpler and would not\n// constrain the argument's parameter shape at all.\ntemplate<template<class...> class Buffer>\nclass MetricSink {\npublic:\n    void record(Sample sample) { samples_.push_back(sample); }\n    std::size_t count() const { return samples_.size(); }\n\nprivate:\n    Buffer<Sample> samples_;\n};\n\n// std::array is template<class, std::size_t>: its second parameter is a value,\n// so it does not match template<class...> class no matter how many defaults\n// it has. A fixed-shape family needs a parameter declared in that shape.\ntemplate<template<class, std::size_t> class Buffer, std::size_t Capacity>\nclass BoundedMetricSink {\npublic:\n    void record(Sample sample) {\n        if (used_ < Capacity) {\n            samples_[used_++] = sample;\n        }\n    }\n\n    std::size_t count() const { return used_; }\n\nprivate:\n    Buffer<Sample, Capacity> samples_{};\n    std::size_t used_ = 0;\n};\n\nMetricSink<std::vector> heap_sink;\nMetricSink<std::list> node_sink;\nBoundedMetricSink<std::array, 32> fixed_sink;",
+      "notes": "The variadic `template<class...> class` spelling is what absorbs std::vector's defaulted allocator parameter; a parameter written `template<class> class` would reject std::vector outright. Every policy combination is another enclosing specialization, so a sink parameterised on storage *and* on a clock *and* on a serialiser multiplies specializations exactly the way independent template arguments always do."
     },
     {
       "id": "c20-w03",
       "section": "Instantiation mechanics",
-      "minutes": 8,
-      "prompt": "Show how `extern template` plus one explicit instantiation definition suppresses redundant instantiation of `PriceLevel<int>`. Write it as one annotated listing with comments marking where each part would live: the header (template definition plus the extern template declaration), the single source file holding the explicit instantiation definition, and a consumer. Add a comment saying what breaks if the definition is deleted.",
+      "minutes": 10,
+      "prompt": "Write a `Column<T>` holding values, with `size()`, a `total()` that needs `operator+`, and a `describe()` that needs `operator<<`. Requirement: `Column<Opaque>` — where `Opaque` supports neither — must still be constructible and usable through `size()`, with no `if constexpr`, no concept and no SFINAE anywhere in the class. Then add two commented-out lines that would break that, and say in a comment what each one does.",
       "checklist": [
-        "The header part contains the full template definition, not just a declaration",
-        "`extern template class PriceLevel<int>;` follows the definition",
-        "Exactly one `template class PriceLevel<int>;` explicit instantiation definition appears",
-        "A comment states the failure mode is an undefined-symbol link error, not a compile error",
-        "The consumer part only uses PriceLevel<int>; it declares nothing extra"
+        "The class body is written without any conditional-compilation machinery",
+        "A function actually instantiates Column<Opaque> and calls size() on it",
+        "A function uses total() on a type that supports it, showing the member is fine when instantiable",
+        "A commented-out explicit instantiation definition is identified as instantiating every member",
+        "A commented-out address-of-member is identified as odr-using and therefore instantiating that member"
       ],
-      "solution": "// ---- price_level.hpp ----\ntemplate<class Price>\nclass PriceLevel {\npublic:\n    void add(Price quantity) { quantity_ += quantity; }\n    Price quantity() const { return quantity_; }\n\nprivate:\n    Price quantity_{};\n};\n\n// Including translation units will not instantiate PriceLevel<int>\n// implicitly. Delete the definition below and the program still compiles\n// but fails to link with an undefined symbol.\nextern template class PriceLevel<int>;\n\n// ---- price_level.cpp ----\n// (would #include \"price_level.hpp\")\ntemplate class PriceLevel<int>;   // the one explicit instantiation definition\n\n// ---- strategy.cpp ----\n// (would #include \"price_level.hpp\")\nint visible_quantity() {\n    PriceLevel<int> level;\n    level.add(20);\n    return level.quantity();\n}\n",
-      "notes": "Shown as one listing so it compiles standalone; in a real project the three parts are three files and the header needs an include guard. The header still carries the full definition, because the explicit instantiation needs it and because other argument sets — PriceLevel<double>, say — must remain implicitly instantiable. This is a build-time optimization only; calls are no faster at runtime."
+      "solution": "#include <cstddef>\n#include <ostream>\n#include <vector>\n\ntemplate<class T>\nclass Column {\npublic:\n    void add(const T& value) { values_.push_back(value); }\n\n    std::size_t size() const { return values_.size(); }\n\n    T total() const {\n        T sum{};\n        for (const T& value : values_) {\n            sum = sum + value;              // requires operator+\n        }\n        return sum;\n    }\n\n    void describe(std::ostream& out) const {\n        for (const T& value : values_) {\n            out << value << ' ';            // requires operator<<\n        }\n    }\n\nprivate:\n    std::vector<T> values_;\n};\n\nstruct Opaque {};\n\nstd::size_t opaque_depth() {\n    Column<Opaque> column;\n    column.add(Opaque{});\n    return column.size();   // total() and describe() are never instantiated\n}\n\nint int_total(Column<int>& column) {\n    return column.total();  // instantiated here, and valid for int\n}\n\n// template class Column<Opaque>;\n//   An explicit instantiation definition asks for the whole specialization,\n//   so every member is instantiated and total()/describe() fail.\n//\n// auto hook = &Column<Opaque>::total;\n//   Forming a pointer to a member function odr-uses it, which requires a\n//   definition, which instantiates the body - and fails for the same reason.",
+      "notes": "Lazy member instantiation is why standard containers can offer operations their element types do not support: `std::vector<T>::operator==` exists for every T and compiles only where it is used. The rule is about use, not about calls, so anything that requires a definition — an address, an explicit instantiation, a virtual member reached through the vtable — triggers it."
     },
     {
       "id": "c20-w04",
       "section": "Specialization",
-      "minutes": 10,
-      "prompt": "Write a `Wire<T>` trait-like class template reporting how a type is sent: a primary answering \"value\", a partial specialization for `T*` answering \"pointer\", a partial specialization for `std::vector<T>` answering \"sequence\", and a full specialization for `bool` answering \"flag\". Expose the answer as a static constexpr const char*.",
+      "minutes": 12,
+      "prompt": "Encode a state machine's transition table entirely in class-template specializations of `Transition<From, On>`, with no runtime table and no `switch`. Requirements: at least two individually specified transitions; one rule that applies to *every* source state for a single event; an undefined transition must be a compile error rather than a wrong answer; and an alias or variable template `next_state<From, On>` giving the destination.",
       "checklist": [
-        "Primary template plus two partial specializations plus one full specialization",
-        "The vector partial specialization is parameterized on the element type",
-        "The bool case uses `template<>` full specialization syntax",
-        "static_asserts (or equivalent) demonstrate each of the four selections",
-        "No attempt to partially specialize a function template"
+        "Transition is parameterised on two non-type template parameters of enumeration type",
+        "The primary template deliberately provides no destination, so an undefined transition fails to compile",
+        "At least two full specializations give individual transitions",
+        "One partial specialization covers all source states for a single event",
+        "static_asserts demonstrate an individual transition, the catch-all rule, and their interaction"
       ],
-      "solution": "#include <string_view>\n#include <vector>\n\ntemplate<class T>\nstruct Wire {\n    static constexpr std::string_view how = \"value\";\n};\n\ntemplate<class T>\nstruct Wire<T*> {\n    static constexpr std::string_view how = \"pointer\";\n};\n\ntemplate<class T>\nstruct Wire<std::vector<T>> {\n    static constexpr std::string_view how = \"sequence\";\n};\n\ntemplate<>\nstruct Wire<bool> {\n    static constexpr std::string_view how = \"flag\";\n};\n\nstatic_assert(Wire<int>::how == \"value\");\nstatic_assert(Wire<int*>::how == \"pointer\");\nstatic_assert(Wire<std::vector<int>>::how == \"sequence\");\nstatic_assert(Wire<bool>::how == \"flag\");",
-      "notes": "Note that Wire<std::vector<int>*> would select the pointer specialization, not the sequence one — the argument is a pointer type whose pointee happens to be a vector. Partial specialization matches the argument's own structure, one level at a time."
+      "solution": "enum class State { idle, armed, firing, halted };\nenum class Event { arm, trigger, fault, reset };\n\n// Primary: no \"next\" member at all, so an undefined transition is a compile\n// error naming the missing member rather than a silently wrong destination.\ntemplate<State From, Event On>\nstruct Transition {};\n\ntemplate<>\nstruct Transition<State::idle, Event::arm> {\n    static constexpr State next = State::armed;\n};\n\ntemplate<>\nstruct Transition<State::armed, Event::trigger> {\n    static constexpr State next = State::firing;\n};\n\ntemplate<>\nstruct Transition<State::firing, Event::reset> {\n    static constexpr State next = State::idle;\n};\n\n// Partial specialization: a fault halts the machine from any state.\ntemplate<State From>\nstruct Transition<From, Event::fault> {\n    static constexpr State next = State::halted;\n};\n\ntemplate<State From, Event On>\ninline constexpr State next_state = Transition<From, On>::next;\n\nstatic_assert(next_state<State::idle, Event::arm> == State::armed);\nstatic_assert(next_state<State::armed, Event::trigger> == State::firing);\nstatic_assert(next_state<State::idle, Event::fault> == State::halted);\nstatic_assert(next_state<State::firing, Event::fault> == State::halted);\n\n// next_state<State::idle, Event::trigger> does not compile: the primary\n// template matches and has no \"next\" member.",
+      "notes": "The catch-all rule is a partial specialization even though every parameter is a value — partial specialization is about the argument *pattern*, not about type parameters. Note what this design buys and costs: the machine has no runtime dispatch at all and an illegal transition cannot be written, but every transition is a type, the table is only queryable with compile-time states, and a machine driven by a runtime event still needs a conversion layer."
     },
     {
       "id": "c20-w05",
       "section": "Two-phase name lookup",
-      "minutes": 7,
-      "prompt": "Write a `template<class Range> auto first_element(Range& range)` that declares an iterator using the range's nested `iterator` type and returns the first element, plus a CRTP-style `Derived : Base<Derived>` pair whose derived member correctly calls an inherited `flush()`. Comment each disambiguator with the rule that requires it.",
+      "minutes": 10,
+      "prompt": "Write a decoder layer that needs every disambiguator: a function template using a nested type of its template parameter *and* calling a member template on it, plus a class template deriving from a dependent base and calling an inherited member. The code must compile under a compiler that implements two-phase lookup strictly (do not rely on delayed lookup). Comment each disambiguator with the rule that requires it.",
       "checklist": [
-        "Uses `typename Range::iterator` with a comment naming the dependent-type rule",
-        "Derived calls the inherited member through `this->` or a qualified `Base<Derived>::` name",
-        "A comment states that unqualified lookup does not search a dependent base in phase one",
-        "The code compiles as written (no reliance on MSVC's delayed lookup)"
+        "`typename` is used for a dependent qualified type, with a comment naming the rule",
+        "`template` is used before a dependent member template name, with a comment naming the rule",
+        "A class template derives from a base that depends on a template parameter",
+        "The inherited member is reached through `this->` or a qualified `Base<...>::` name",
+        "A comment states that unqualified lookup does not search a dependent base during phase one"
       ],
-      "solution": "#include <vector>\n\ntemplate<class Range>\nauto first_element(Range& range) {\n    // `Range::iterator` is a dependent qualified name; without `typename`\n    // the parser cannot assume it denotes a type.\n    typename Range::iterator position = range.begin();\n    return *position;\n}\n\ntemplate<class Derived>\nstruct Base {\n    void flush() {}\n};\n\nstruct Session : Base<Session> {\n    void commit() {\n        // Unqualified lookup does not search the dependent base Base<Derived>\n        // during phase one, so the access must be made dependent.\n        this->flush();\n        // Base<Session>::flush();  // equivalent qualified form\n    }\n};\n\nint first_price(std::vector<int>& prices) {\n    return first_element(prices);\n}",
-      "notes": "C++20 removed the need for `typename` in several unambiguous contexts, but the rule to remember is unchanged: a dependent qualified name is assumed to be a non-type unless you say otherwise. The dependent-base rule is what makes CRTP bases feel oddly formal — every inherited name needs `this->`."
+      "solution": "#include <cstddef>\n#include <cstdint>\n\nstruct ByteReader {\n    using size_type = std::size_t;\n\n    template<class T>\n    T read() { return T{}; }\n};\n\ntemplate<class Reader>\ntypename Reader::size_type decode_length(Reader& reader) {\n    // Reader::size_type is a dependent qualified name. Without typename the\n    // parser must assume it names a non-type, and the declaration fails.\n    typename Reader::size_type length =\n        // Without the template keyword, the < after read parses as less-than.\n        reader.template read<std::size_t>();\n    return length;\n}\n\ntemplate<class Codec>\nstruct DecoderBase {\n    void reset() {}\n    std::uint32_t decode_one() { return 0; }\n};\n\ntemplate<class Codec>\nstruct FrameDecoder : DecoderBase<Codec> {\n    std::uint32_t run() {\n        // Phase-one unqualified lookup does not search DecoderBase<Codec>: the\n        // base is dependent, so its contents are unknown until instantiation.\n        this->reset();\n        return DecoderBase<Codec>::decode_one();\n    }\n};\n\nstd::size_t use(ByteReader& reader) {\n    FrameDecoder<ByteReader> decoder;\n    decoder.run();\n    return decode_length(reader);\n}",
+      "notes": "C++20 removed the need for `typename` in several unambiguous type contexts, but the underlying model is unchanged: a dependent qualified name is assumed not to be a type unless you say otherwise, and a dependent base contributes nothing to unqualified lookup. The second rule is why CRTP bases feel oddly formal — every inherited name needs `this->` — and why code that compiled under an older MSVC can fail everywhere else."
     },
     {
       "id": "c20-w06",
       "section": "Compile-time type traits",
-      "minutes": 8,
-      "prompt": "Write a trait `is_matrix_v<T>` that reports true for any specialization of a `Matrix<T, Rows, Columns>` class template, using a primary template plus a partial specialization. It must answer true for `const Matrix<double, 2, 3>&` as well as for the bare type.",
+      "minutes": 10,
+      "prompt": "Write `is_specialization_of_v<T, Template>` that answers true when `T` is any specialization of the given class template, and must also answer true for a cv-ref-qualified `T`. Then show what it cannot do: add a separate trait recognising `std::array<T, N>` and explain in a comment why the general one cannot cover it.",
       "checklist": [
-        "Primary template derives from std::false_type",
-        "Partial specialization matches Matrix<T, Rows, Columns> and derives from std::true_type",
-        "The partial specialization is parameterized on the non-type dimensions, not hard-coded",
-        "The _v variable template applies std::remove_cvref_t before querying",
-        "static_asserts cover a bare type, a cv-ref-qualified type, and a negative case"
+        "The general trait takes a `template<class...> class` parameter alongside the type",
+        "The partial specialization matches `Template<Args...>` and derives from std::true_type",
+        "The _v alias applies std::remove_cvref_t before querying",
+        "static_asserts cover a positive case, a cv-ref-qualified case, and a negative case",
+        "A separate trait handles std::array, with a comment naming the parameter-shape mismatch"
       ],
-      "solution": "#include <array>\n#include <cstddef>\n#include <type_traits>\n\ntemplate<class T, std::size_t Rows, std::size_t Columns>\nstruct Matrix {\n    std::array<T, Rows * Columns> elements{};\n};\n\ntemplate<class T>\nstruct IsMatrix : std::false_type {};\n\ntemplate<class T, std::size_t Rows, std::size_t Columns>\nstruct IsMatrix<Matrix<T, Rows, Columns>> : std::true_type {};\n\ntemplate<class T>\ninline constexpr bool is_matrix_v =\n    IsMatrix<std::remove_cvref_t<T>>::value;\n\nstatic_assert(is_matrix_v<Matrix<double, 2, 3>>);\nstatic_assert(is_matrix_v<const Matrix<double, 2, 3>&>);\nstatic_assert(!is_matrix_v<std::array<double, 6>>);",
-      "notes": "The remove_cvref_t step is the part people forget. A trait answers about the exact type it is given, and a deduced parameter type is very often a reference — so the raw IsMatrix<const Matrix<...>&> would fall through to the false-answering primary."
+      "solution": "#include <array>\n#include <cstddef>\n#include <tuple>\n#include <type_traits>\n#include <vector>\n\ntemplate<class T, template<class...> class Template>\nstruct IsSpecializationOf : std::false_type {};\n\ntemplate<template<class...> class Template, class... Args>\nstruct IsSpecializationOf<Template<Args...>, Template> : std::true_type {};\n\ntemplate<class T, template<class...> class Template>\ninline constexpr bool is_specialization_of_v =\n    IsSpecializationOf<std::remove_cvref_t<T>, Template>::value;\n\nstatic_assert(is_specialization_of_v<std::tuple<int, double>, std::tuple>);\nstatic_assert(is_specialization_of_v<const std::vector<int>&, std::vector>);\nstatic_assert(!is_specialization_of_v<std::vector<int>, std::tuple>);\n\n// std::array cannot even be *named* as an argument here: the parameter is\n// declared template<class...> class, and std::array's second parameter is a\n// value. A fixed-shape family needs its own trait with a matching shape.\ntemplate<class T>\nstruct IsStdArray : std::false_type {};\n\ntemplate<class T, std::size_t N>\nstruct IsStdArray<std::array<T, N>> : std::true_type {};\n\ntemplate<class T>\ninline constexpr bool is_std_array_v =\n    IsStdArray<std::remove_cvref_t<T>>::value;\n\nstatic_assert(is_std_array_v<std::array<int, 4>>);\nstatic_assert(is_std_array_v<const std::array<int, 4>&>);\nstatic_assert(!is_std_array_v<std::vector<int>>);",
+      "notes": "The remove_cvref_t step is the part that gets forgotten: a trait answers about the exact type it is handed, and a deduced parameter type is very often a reference. The shape restriction is the deeper limitation — there is no way to write one trait that is generic over templates with arbitrary mixes of type and non-type parameters, which is why the standard library has separate traits rather than one universal one."
     },
     {
       "id": "c20-w07",
       "section": "Dispatch on type: from tags to concepts",
-      "minutes": 12,
-      "prompt": "Express the same selection three ways: a `Reservable` concept plus a constrained overload with an unconstrained fallback; an `if constexpr` version in a single function; and a comment naming which diagnostics each produces on failure. Both must reserve on std::vector and do nothing for std::array.",
+      "minutes": 14,
+      "prompt": "Write `encode_any(value, out)` that selects, in this priority: a member `value.encode(out)`; otherwise an ADL-found free `encode(value, out)`; otherwise a memcpy fast path, permitted only when the type is trivially copyable; otherwise a compile error naming the problem. Requirement: the failure must be a readable diagnostic, not a wall of substitution notes. Then write the same selection as a constrained overload set and comment on how the two differ when it fails.",
       "checklist": [
-        "A named concept using a requires-expression, not a copy-pasted requires clause",
-        "Constrained overload plus unconstrained fallback, relying on the constrained one being more specialized",
-        "An if constexpr version whose invalid call sits in the discarded branch",
-        "Comment contrasts the diagnostics (named failed requirement vs. error inside the chosen branch)",
-        "Both versions compile for std::array<int, 8>"
+        "The member and free hooks are expressed as named concepts, not inline requires-clauses",
+        "The if constexpr chain establishes an explicit priority and the memcpy branch is guarded by is_trivially_copyable_v",
+        "The final else fails through a dependent false condition so the message names the type",
+        "A constrained overload set covers the same cases, with the more constrained overload preferred",
+        "A comment contrasts the diagnostics: a named unsatisfied requirement versus an error inside the selected branch"
       ],
-      "solution": "#include <array>\n#include <cstddef>\n#include <vector>\n\ntemplate<class C>\nconcept Reservable = requires(C& container, std::size_t count) {\n    container.reserve(count);\n};\n\n// Overload form: a failed call names the unsatisfied concept.\ntemplate<class C>\nvoid reserve_concept(C&, std::size_t) {\n}\n\ntemplate<Reservable C>\nvoid reserve_concept(C& container, std::size_t count) {\n    container.reserve(count);\n}\n\n// if constexpr form: one interface, and an error would point into whichever\n// branch was selected rather than at an overload set.\ntemplate<class C>\nvoid reserve_if_possible(C& container, std::size_t count) {\n    if constexpr (Reservable<C>) {\n        container.reserve(count);\n    } else {\n        static_cast<void>(container);\n        static_cast<void>(count);\n    }\n}\n\nvoid use() {\n    std::vector<int> levels;\n    std::array<int, 8> fixed{};\n\n    reserve_concept(levels, 32);\n    reserve_concept(fixed, 32);\n    reserve_if_possible(levels, 32);\n    reserve_if_possible(fixed, 32);\n}",
-      "notes": "Naming the concept is what makes the overload form composable: another overload that adds `&& std::copy_constructible<C>` will subsume this one because both expand the same Reservable definition. Two copy-pasted requires-expressions would produce distinct atoms and an ambiguity instead."
+      "solution": "#include <concepts>\n#include <cstddef>\n#include <cstring>\n#include <span>\n#include <type_traits>\n\ntemplate<class T>\nconcept MemberEncodable = requires(const T& value, std::span<std::byte> out) {\n    { value.encode(out) } -> std::convertible_to<std::size_t>;\n};\n\ntemplate<class T>\nconcept FreeEncodable = requires(const T& value, std::span<std::byte> out) {\n    { encode(value, out) } -> std::convertible_to<std::size_t>;\n};\n\ntemplate<class>\ninline constexpr bool always_false_v = false;\n\ntemplate<class T>\nstd::size_t encode_any(const T& value, std::span<std::byte> out) {\n    if constexpr (MemberEncodable<T>) {\n        return value.encode(out);\n    } else if constexpr (FreeEncodable<T>) {\n        return encode(value, out);\n    } else if constexpr (std::is_trivially_copyable_v<T>) {\n        std::memcpy(out.data(), &value, sizeof(T));\n        return sizeof(T);\n    } else {\n        // Dependent condition: false only once T is known, so the message\n        // names T instead of firing while the template is parsed.\n        static_assert(always_false_v<T>, \"no encoding available for T\");\n    }\n}\n\n// The same selection as an overload set. A failure here names the unsatisfied\n// concept at the call; the if constexpr version instead reports an error from\n// inside whichever branch it chose, which is easier to read once you are in\n// the right branch and harder to read when you are not.\ntemplate<class T>\n    requires std::is_trivially_copyable_v<T>\nstd::size_t encode_one(const T& value, std::span<std::byte> out) {\n    std::memcpy(out.data(), &value, sizeof(T));\n    return sizeof(T);\n}\n\ntemplate<FreeEncodable T>\nstd::size_t encode_one(const T& value, std::span<std::byte> out) {\n    return encode(value, out);\n}\n\ntemplate<MemberEncodable T>\nstd::size_t encode_one(const T& value, std::span<std::byte> out) {\n    return value.encode(out);\n}",
+      "notes": "Naming the concepts is what keeps the overload form composable: a later overload conjoining `MemberEncodable<T> && std::copy_constructible<T>` subsumes this one because both expand the same definition, while two copy-pasted requires-expressions would produce distinct atoms and an ambiguity. Note also that the overload set has a real hazard the if constexpr version does not: a type satisfying two unrelated concepts is ambiguous rather than prioritised."
     },
     {
       "id": "c20-w08",
       "section": "Variadic templates and folds",
-      "minutes": 10,
-      "prompt": "Write three variadic helpers using fold expressions: `all_positive(args...)` returning true for an empty pack, `sum(args...)` returning 0 for an empty pack, and `print_all(args...)` writing every argument to std::cout left to right. Say in a comment why sum needs a different fold form from all_positive.",
+      "minutes": 12,
+      "prompt": "Write a comma-separated printer `print_csv(out, values...)` with three requirements: no trailing separator, correct output for an empty pack, and left-to-right ordering guaranteed rather than incidental. Add `print_tuple` that reuses it for a `std::tuple`, and a `min_of` reduction that works for any arity of at least one. Use folds, not recursion.",
       "checklist": [
-        "all_positive uses a unary && fold and is constexpr-checkable on an empty pack",
-        "sum uses a binary fold with an explicit 0 initializer",
-        "print_all uses a binary << fold or a comma fold, not recursion",
-        "Comment explains that only &&, || and , have defined empty-pack results for unary folds",
-        "static_asserts or equivalent demonstrate the empty-pack cases"
+        "print_csv uses a comma fold, so the evaluation order of the arguments is guaranteed",
+        "The separator is part of the repeated pattern, giving no trailing separator and correct empty-pack behaviour",
+        "print_tuple adapts a std::tuple to print_csv without a second implementation",
+        "min_of reduces with a fold rather than recursive peeling",
+        "A static_assert or equivalent demonstrates min_of, and a comment notes why an unseeded fold could not be used for it"
       ],
-      "solution": "#include <iostream>\n\ntemplate<class... Numbers>\nconstexpr bool all_positive(const Numbers&... numbers) {\n    return (... && (numbers > 0));\n}\n\n// A unary fold is only defined on an empty pack for &&, || and comma, so a\n// sum needs a *binary* fold supplying 0 as the explicit identity.\ntemplate<class... Numbers>\nconstexpr auto sum(const Numbers&... numbers) {\n    return (0 + ... + numbers);\n}\n\ntemplate<class... Ts>\nvoid print_all(const Ts&... values) {\n    (std::cout << ... << values) << '\\n';\n}\n\nstatic_assert(all_positive());\nstatic_assert(all_positive(1, 2.5, 9));\nstatic_assert(!all_positive(1, -2, 9));\nstatic_assert(sum() == 0);\nstatic_assert(sum(1, 2, 3) == 6);",
-      "notes": "Every one of these is a single specialization per argument list. The recursive peeling alternative instantiates one function per suffix of the pack, so a ten-argument call costs eleven instantiations instead of one."
+      "solution": "#include <cstddef>\n#include <iostream>\n#include <tuple>\n\ntemplate<class... Values>\nvoid print_csv(std::ostream& out, const Values&... values) {\n    std::size_t index = 0;\n    // Comma fold: the pattern is repeated once per element and the comma\n    // operator sequences those repetitions left to right, so index is a\n    // reliable \"have I written anything yet\" flag.\n    ((out << (index++ ? \",\" : \"\") << values), ...);\n    out << '\\n';\n}\n\ntemplate<class... Values>\nvoid print_tuple(std::ostream& out, const std::tuple<Values...>& values) {\n    std::apply(\n        [&out](const Values&... elements) { print_csv(out, elements...); },\n        values);\n}\n\n// Seeded by the first argument rather than by an identity: there is no\n// universal identity for \"minimum\", so an unseeded unary fold would have no\n// defined result for an empty pack and no operator to fold over either.\ntemplate<class T, class... Rest>\nconstexpr T min_of(T first, Rest... rest) {\n    T best = first;\n    ((best = rest < best ? static_cast<T>(rest) : best), ...);\n    return best;\n}\n\nstatic_assert(min_of(4) == 4);\nstatic_assert(min_of(4, 2, 9) == 2);\n\nvoid demo() {\n    print_csv(std::cout);                       // just a newline\n    print_csv(std::cout, 1, 2.5, \"bid\");        // 1,2.5,bid\n    print_tuple(std::cout, std::tuple{7, 'x'}); // 7,x\n}",
+      "notes": "The separator problem is the reason a comma fold is worth knowing: a `(out << ... << values)` fold is shorter but has nowhere to put the separator logic. Recursive peeling would also solve it, at one instantiation per suffix of the pack — a ten-argument call becomes eleven functions instead of one."
     },
     {
       "id": "c20-w09",
       "section": "Forwarding references and perfect forwarding",
-      "minutes": 10,
-      "prompt": "Write `template<class T, class... Args> T* make_pooled(ObjectPool& pool, Args&&... arguments)` that obtains raw storage from the pool, constructs a T in place with perfectly forwarded arguments, and releases the slot if construction throws. Comment on what omitting std::forward would cost.",
-      "starter": "#include <cstddef>\n#include <new>\n#include <utility>\n\nclass ObjectPool {\npublic:\n    void* allocate(std::size_t size, std::size_t alignment);\n    void release(void* address) noexcept;\n};",
+      "minutes": 12,
+      "prompt": "Write `with_retry(attempts, action, arguments...)` that calls `action(arguments...)` until it reports success or the attempts run out. The hard requirement: the arguments must be forwarded *exactly once*, on the final attempt only, and every earlier attempt must pass them in a way that leaves them intact. Explain in a comment what goes wrong if you forward on every attempt.",
+      "starter": "#include <utility>\n\nstruct Outcome {\n    bool ok;\n    int code;\n};\n\ntemplate<class Action, class... Args>\nOutcome with_retry(int attempts, Action&& action, Args&&... arguments);",
       "checklist": [
         "Args is a forwarding-reference pack declared `Args&&...`",
-        "Placement new constructs into the pool-supplied storage",
-        "Each argument is forwarded with std::forward<Args>(arguments)... — expanded, not moved",
-        "A try/catch releases the slot and rethrows on construction failure",
-        "Comment states that omitting std::forward turns every argument into an lvalue and can replace moves with copies"
+        "Non-final attempts pass `arguments...` as lvalues, with no std::forward",
+        "The final attempt forwards both the action and every argument, expanded with the pack",
+        "A comment states that forwarding on every attempt lets a retry observe moved-from arguments",
+        "The function compiles and is exercised with at least one call"
       ],
-      "solution": "#include <cstddef>\n#include <new>\n#include <utility>\n\nclass ObjectPool {\npublic:\n    void* allocate(std::size_t size, std::size_t alignment);\n    void release(void* address) noexcept;\n};\n\ntemplate<class T, class... Args>\nT* make_pooled(ObjectPool& pool, Args&&... arguments) {\n    void* storage = pool.allocate(sizeof(T), alignof(T));\n\n    try {\n        // Each pack element is forwarded independently, so an lvalue stays an\n        // lvalue and a temporary stays movable. Writing T(arguments...) would\n        // make every named parameter an lvalue and silently copy.\n        return ::new (storage) T(std::forward<Args>(arguments)...);\n    } catch (...) {\n        pool.release(storage);\n        throw;\n    }\n}",
-      "notes": "`Args` is a pack of independently deduced types: one call can carry a std::string lvalue as std::string&, a temporary Price as Price, and a const Config as const Config&, each collapsing to the right parameter type. Forward the same argument into two consuming operations and the second sees a moved-from object."
+      "solution": "#include <string>\n#include <utility>\n\nstruct Outcome {\n    bool ok;\n    int code;\n};\n\ntemplate<class Action, class... Args>\nOutcome with_retry(int attempts, Action&& action, Args&&... arguments) {\n    for (int attempt = 1; attempt < attempts; ++attempt) {\n        // Deliberately NOT forwarded. Every named parameter is an lvalue here,\n        // so the callable sees lvalues and cannot consume the arguments. Write\n        // std::forward inside the loop and attempt 2 works on the wreckage\n        // attempt 1 left behind: a moved-from string, an emptied vector, a\n        // null unique_ptr.\n        Outcome outcome = action(arguments...);\n        if (outcome.ok) {\n            return outcome;\n        }\n    }\n\n    // Last attempt: nothing follows it, so the arguments may now be consumed\n    // and the caller's value categories are restored exactly.\n    return std::forward<Action>(action)(std::forward<Args>(arguments)...);\n}\n\nOutcome send_once(const std::string& payload);\n\nOutcome send_with_retry(std::string payload) {\n    return with_retry(\n        3,\n        [](const std::string& body) { return send_once(body); },\n        std::move(payload));\n}",
+      "notes": "This is the general shape of the \"forward once\" rule: `std::forward` is a licence to consume, so it belongs at the last use of the argument, not at every use. The same reasoning governs a wrapper that passes one argument to two operations — forward into the second, copy into the first — and it is why an emplace-style function that internally retries has to be written this way or documented as consuming its arguments on the first attempt."
     },
     {
       "id": "c20-w10",
       "section": "Template costs",
-      "minutes": 8,
-      "prompt": "Write a short comparison — as a commented code sketch, not prose alone — of a hot-path template callback versus a type-erased boundary. Show one function taking a callable as a template parameter and one taking an erased interface, and comment each with its call cost, code-size behaviour, and header exposure.",
+      "minutes": 12,
+      "prompt": "A header-only encoder is instantiated for a dozen message types in every translation unit, and the build is slow. Apply two of the chapter's compile-time controls together: move the type-independent work into a non-template core so each specialization emits almost nothing, and suppress redundant instantiation of the two hottest specializations across translation units while leaving other message types implicitly instantiable. Write it as one annotated listing marking which part lives in which file, and state what breaks if the explicit instantiation definition is removed.",
       "checklist": [
-        "Template version takes the callable as a deduced template parameter and can inline",
-        "Erased version dispatches through a virtual or function-pointer interface",
-        "Comments name the call cost for each (direct/inlineable vs. indirect)",
-        "Comments name the code-size trade (per argument set vs. shared implementation)",
-        "Comments name the header-exposure trade (definition visible vs. implementation hidden)"
+        "A non-template function performs the type-independent work and is only declared in the header",
+        "The function template is a thin shim that calls that core",
+        "extern template declarations name the two hot specializations in the header part",
+        "Exactly one matching explicit instantiation definition per specialization appears in the source part",
+        "A comment states that removing the definition yields an undefined-symbol link error, not a compile error, and that other message types still instantiate implicitly"
       ],
-      "solution": "#include <span>\n\nstruct Level {\n    int price;\n    int quantity;\n};\n\n// Template parameter: the concrete callable type is preserved, so the call\n// usually inlines and constants propagate into the loop. Cost: one emitted\n// specialization per callable type, and the definition must live in a header.\ntemplate<class Handler>\nvoid for_each_level(std::span<const Level> levels, Handler handler) {\n    for (const Level& level : levels) {\n        handler(level);\n    }\n}\n\n// Type-erased boundary: one shared implementation, and the .cpp can hide it\n// behind this interface. Cost: an indirect call per element that the\n// optimizer normally cannot see through.\nstruct LevelSink {\n    virtual void on_level(const Level& level) = 0;\n    virtual ~LevelSink() = default;\n};\n\nvoid for_each_level_erased(std::span<const Level> levels, LevelSink& sink);",
-      "notes": "The honest summary has two axes. Templates buy inlining and type-specific optimization and pay in compile time, emitted code, and instruction-cache footprint; erasure buys a single shared implementation and stable headers and pays an indirect call plus a wall the optimizer cannot see past. Use erasure at module boundaries and templates inside the loop."
+      "solution": "// ---- codec.hpp ----\n#include <cstddef>\n#include <cstdint>\n#include <cstring>\n#include <span>\n\n// The type-independent core: one non-template function, compiled once. Every\n// specialization of encode() below shrinks to an address, a size and a call.\nstd::size_t encode_bytes(const void* source,\n                         std::size_t size,\n                         std::span<std::byte> out);\n\ntemplate<class Message>\nstd::size_t encode(const Message& message, std::span<std::byte> out) {\n    return encode_bytes(&message, sizeof(Message), out);\n}\n\nstruct Heartbeat {\n    std::uint64_t sent_at;\n};\n\nstruct Reject {\n    std::uint32_t code;\n};\n\n// The two hot specializations are promised to exist elsewhere, so including\n// translation units stop substituting and emitting them. Other message types\n// are unaffected and still instantiate implicitly from this header.\nextern template std::size_t encode<Heartbeat>(const Heartbeat&,\n                                              std::span<std::byte>);\nextern template std::size_t encode<Reject>(const Reject&,\n                                           std::span<std::byte>);\n\n// ---- codec.cpp ----\n// (would #include \"codec.hpp\")\n\nstd::size_t encode_bytes(const void* source,\n                         std::size_t size,\n                         std::span<std::byte> out) {\n    if (out.size() < size) {\n        return 0;\n    }\n    std::memcpy(out.data(), source, size);\n    return size;\n}\n\n// Exactly one explicit instantiation definition per promised specialization.\n// Delete either one and the program still compiles everywhere and fails at\n// link time with an undefined symbol - the front end has no way to know the\n// promise was unkept.\ntemplate std::size_t encode<Heartbeat>(const Heartbeat&,\n                                       std::span<std::byte>);\ntemplate std::size_t encode<Reject>(const Reject&, std::span<std::byte>);\n\n// ---- strategy.cpp ----\n// (would #include \"codec.hpp\")\n\nstruct Cancel {\n    std::uint64_t order_id;\n};\n\nstd::size_t emit(const Heartbeat& heartbeat,\n                 const Cancel& cancel,\n                 std::span<std::byte> out) {\n    // Heartbeat resolves to the pre-built specialization; Cancel is\n    // instantiated here as usual.\n    return encode(heartbeat, out) + encode(cancel, out);\n}",
+      "notes": "Shown as one listing so it compiles standalone; in a real project these are three files and the header needs an include guard. Keep the two controls distinct in your head: the thin-shim refactor reduces *emitted code per specialization* and therefore instruction-cache pressure, while extern template reduces *repeated front-end work and duplicate weak definitions*. Neither makes a call faster at runtime, and neither hides the template definition — the explicit instantiation itself needs it."
     }
   ]
 }

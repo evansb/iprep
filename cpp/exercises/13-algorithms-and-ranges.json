@@ -355,194 +355,204 @@
   "reading": [
     {
       "id": "c13-r01",
-      "section": "Predicates, comparators, and projections",
+      "section": "Heap, merge, set, and compaction algorithms",
       "prompt": "What does this print?",
-      "code": "#include <algorithm>\n#include <cstdint>\n#include <iostream>\n#include <vector>\n\nstruct Order {\n    std::int64_t price_ticks;\n    std::int64_t id;\n};\n\nint main() {\n    std::vector<Order> orders{{101, 1}, {100, 2}, {101, 3}, {100, 4}};\n\n    std::ranges::stable_sort(orders, {}, &Order::price_ticks);\n\n    for (const Order& order : orders) {\n        std::cout << order.price_ticks << '/' << order.id << ' ';\n    }\n    std::cout << '\\n';\n}",
+      "code": "#include <algorithm>\n#include <iostream>\n#include <vector>\n\nint main() {\n    std::vector<int> rainfall_mm{3, 8, 5, 12, 7};\n\n    // Drop every even reading: the gauge only reports odd millimetres.\n    auto leftover = std::ranges::remove_if(\n        rainfall_mm, [](int mm) { return mm % 2 == 0; });\n\n    std::cout << rainfall_mm.size() << ' '\n              << std::ranges::distance(leftover) << ' ';\n\n    rainfall_mm.erase(leftover.begin(), leftover.end());\n\n    std::cout << rainfall_mm.size() << '\\n';\n}",
       "kind": "value",
-      "accept": ["100/2 100/4 101/1 101/3"],
-      "explain": "The `{}` is the default std::ranges::less and &Order::price_ticks is the projection, so orders are compared by price alone and the two 100s are equivalent, as are the two 101s. stable_sort preserves the arrival order within each equivalence class, giving id 2 before 4 and id 1 before 3. Plain sort would produce the same prices but is entitled to swap the ids within a price — which is exactly the time priority a book must not lose."
+      "accept": [
+        "5 2 3"
+      ],
+      "explain": "An algorithm sees iterators, never the container, so it cannot destroy anything: remove_if shuffles the three odd readings into the front and hands back the leftover tail, but the vector is still five elements long at the first print. distance over that returned subrange is 2 — the number of positions the survivors did not need. Only the erase changes the size, to 3. The tempting reading is that remove_if already removed something and size() is 3 twice over; the size a container reports is the container's business alone, which is exactly why this idiom has two halves."
     },
     {
       "id": "c13-r02",
-      "section": "Binary search on sorted data",
+      "section": "Transformation and accumulation",
       "prompt": "What does this print?",
-      "code": "#include <algorithm>\n#include <iostream>\n#include <vector>\n\nint main() {\n    std::vector<int> prices{100, 101, 101, 101, 103};\n\n    auto low = std::ranges::lower_bound(prices, 101);\n    auto high = std::ranges::upper_bound(prices, 101);\n    auto missing = std::ranges::lower_bound(prices, 102);\n\n    std::cout << (low - prices.begin()) << ' '\n              << (high - prices.begin()) << ' '\n              << (missing - prices.begin()) << ' '\n              << std::ranges::binary_search(prices, 102) << '\\n';\n}",
+      "code": "#include <algorithm>\n#include <iostream>\n#include <numeric>\n#include <vector>\n\nint main() {\n    // One day of card transactions, in cents. All of them are debits.\n    std::vector<int> deltas{-450, -120, -900, -60};\n\n    int largest = std::accumulate(\n        deltas.begin(), deltas.end(), 0,\n        [](int best, int delta) { return std::max(best, delta); });\n\n    int smallest = std::accumulate(\n        deltas.begin(), deltas.end(), deltas.front(),\n        [](int worst, int delta) { return std::min(worst, delta); });\n\n    std::cout << largest << ' ' << smallest << '\\n';\n}",
       "kind": "value",
-      "accept": ["1 4 4 0"],
-      "explain": "lower_bound gives the first element not less than 101, at index 1; upper_bound gives the first element strictly greater, at index 4 — so [1, 4) is exactly the run of three 101s, which is what equal_range would return as a pair. For the absent key 102, lower_bound still answers with the insertion position (index 4, before the 103) rather than failing, while binary_search only reports absence as false, streamed here as 0. That is the usual reason to prefer the iterator-returning form."
+      "accept": [
+        "0 -900"
+      ],
+      "explain": "The initial value is not just a type declaration, it is the first operand of the fold. Seeding a maximum with 0 means the answer can never drop below 0, so a day of pure debits reports a largest transaction of 0 — a value that is not in the input at all. The minimum is seeded with an actual element, so it correctly reports -900. Reading 0 as a harmless neutral start is the trap: it is only neutral for addition, and for max the identity would have to be the smallest representable int, which is why seeding from the first element (and rejecting an empty range up front) is the habit worth keeping."
     },
     {
       "id": "c13-r03",
-      "section": "Transformation and accumulation",
+      "section": "Predicates, comparators, and projections",
       "prompt": "What does this print?",
-      "code": "#include <iostream>\n#include <numeric>\n#include <vector>\n\nint main() {\n    std::vector<double> values{1.1, 1.2, 0.4};\n\n    auto truncated = std::accumulate(values.begin(), values.end(), 0);\n    auto precise = std::accumulate(values.begin(), values.end(), 0.0);\n\n    std::cout << truncated << ' ' << precise << '\\n';\n}",
+      "code": "#include <algorithm>\n#include <iostream>\n#include <string>\n#include <vector>\n\nstruct Player {\n    std::string handle;\n    int score;\n};\n\nint main() {\n    std::vector<Player> board{\n        {\"ada\", 40}, {\"bo\", 95}, {\"cy\", 17}, {\"di\", 61}};\n\n    // \"We want the highest score, so pass greater.\"\n    auto leader = std::ranges::max_element(\n        board, std::ranges::greater{}, &Player::score);\n\n    auto trailer = std::ranges::min_element(\n        board, std::ranges::greater{}, &Player::score);\n\n    std::cout << leader->handle << ' ' << trailer->handle << '\\n';\n}",
       "kind": "value",
-      "accept": ["2 2.7"],
-      "explain": "The initial value fixes the accumulator type. With 0 the fold runs in int: 0 + 1.1 truncates to 1, 1 + 1.2 truncates to 2, and 2 + 0.4 truncates back to 2, so the loss happens three times rather than once at the end and no cast on the result could recover it. With 0.0 the accumulator is a double and the answer is 2.7. Deducing the accumulator from the initial value is convenient right up to the moment an integer literal slips in."
+      "accept": [
+        "cy bo"
+      ],
+      "explain": "The third argument is a projection and the second is the ordering itself, not a direction switch. max_element returns the element no other element compares *before* under the given ordering; with std::ranges::greater the ordering is reversed, so the element at the top of that ordering is the lowest score, cy at 17, and min_element under the same reversed ordering yields bo at 95. The tempting reading — greater means bigger, so max_element with greater is doubly the maximum — inverts the comparator twice in the reader's head and once in the code. Either keep the default ordering and swap the algorithm, or keep the algorithm and swap the ordering, never both."
     },
     {
       "id": "c13-r04",
       "section": "Lazy views and pipelines",
       "prompt": "What does this print?",
-      "code": "#include <cstdint>\n#include <iostream>\n#include <ranges>\n#include <vector>\n\nint main() {\n    std::vector<std::int64_t> quantities{5, -3, 8, -1, 2, 7};\n\n    auto pipeline = quantities\n        | std::views::filter([](std::int64_t q) { return q > 0; })\n        | std::views::transform([](std::int64_t q) { return q * 10; })\n        | std::views::take(3);\n\n    for (std::int64_t value : pipeline) {\n        std::cout << value << ' ';\n    }\n    std::cout << '\\n';\n}",
+      "code": "#include <iostream>\n#include <ranges>\n#include <vector>\n\nint main() {\n    std::vector<int> raw_celsius{2, 4, 6};\n    int conversions = 0;\n\n    auto fahrenheit = raw_celsius\n        | std::views::transform([&conversions](int c) {\n              ++conversions;\n              return c * 9 / 5 + 32;\n          });\n\n    int first = 0;\n    for (int f : fahrenheit) { first += f; }\n\n    int second = 0;\n    for (int f : fahrenheit) { second += f; }\n\n    std::cout << first << ' ' << (first == second) << ' '\n              << conversions << '\\n';\n}",
       "kind": "value",
-      "accept": ["50 80 20"],
-      "explain": "Each element is pulled through every stage before the source advances, so the order is: keep 5 and emit 50, skip -3, keep 8 and emit 80, skip -1, keep 2 and emit 20 — at which point take has produced three values and iteration stops. The 7 is never examined and the -3 and -1 are never transformed. Constructing `pipeline` did none of this work; it only composed the stages."
+      "accept": [
+        "116 1 6"
+      ],
+      "explain": "Integer division truncates before the offset, so the three readings map to 35, 39 and 42 and each pass sums to 116; the two passes agree because the transform is a pure function of its input. What they do not share is the work: nothing is memoised, so the lambda runs once per element per traversal and the counter reaches 6. The tempting reading is that laziness caches — that building `fahrenheit` computed the values once, or that the second loop reuses the first. Lazy means no output container is allocated and no work happens until you iterate; it says nothing about repeating that work on the next iteration, which is the argument for materialising with ranges::to when a pipeline is read twice."
     },
     {
       "id": "c13-r05",
-      "section": "Heap, merge, set, and compaction algorithms",
+      "section": "Binary search on sorted data",
       "prompt": "What does this print?",
-      "code": "#include <algorithm>\n#include <iostream>\n#include <iterator>\n#include <vector>\n\nint main() {\n    std::vector<int> ids{4, 1, 4, 9, 1, 4};\n\n    std::ranges::sort(ids);\n    auto duplicates = std::ranges::unique(ids);\n    ids.erase(duplicates.begin(), duplicates.end());\n\n    std::vector<int> known{1, 2, 9};\n    std::vector<int> added;\n    std::ranges::set_difference(ids, known, std::back_inserter(added));\n\n    std::cout << ids.size() << ' ' << added.size() << ' ' << added[0] << '\\n';\n}",
+      "code": "#include <algorithm>\n#include <iostream>\n#include <string>\n#include <vector>\n\nstruct Ticket {\n    int priority;\n    std::string tag;\n};\n\nvoid enqueue(std::vector<Ticket>& queue, Ticket ticket) {\n    auto at = std::ranges::upper_bound(\n        queue, ticket.priority, {}, &Ticket::priority);\n    queue.insert(at, std::move(ticket));\n}\n\nint main() {\n    std::vector<Ticket> queue;\n    enqueue(queue, {2, \"a\"});\n    enqueue(queue, {1, \"b\"});\n    enqueue(queue, {2, \"c\"});\n    enqueue(queue, {1, \"d\"});\n\n    for (const Ticket& ticket : queue) {\n        std::cout << ticket.priority << ticket.tag << ' ';\n    }\n    std::cout << '\\n';\n}",
       "kind": "value",
-      "accept": ["3 1 4"],
-      "explain": "Sorting first is what makes the equal ids adjacent, so unique coalesces them into the prefix {1, 4, 9} and returns the leftover tail as a subrange; the following erase is what actually shrinks the container, because an algorithm cannot change a container's size. set_difference then needs both inputs sorted under the same ordering, which they are, and reports the ids present today but not in `known` — just 4, since 1 and 9 are in both."
+      "accept": [
+        "1b 1d 2a 2c"
+      ],
+      "explain": "upper_bound answers with the first position strictly greater than the key, so a newcomer lands after every ticket already at its priority and the queue stays first-in-first-out within each priority band. Tracing: a gives [2a]; b goes to the front; c goes after 2a; d goes after 1b. The tempting reading is that lower_bound and upper_bound differ only for a key that is present and are therefore interchangeable here — but a key that is present is precisely what a priority queue has, and lower_bound would insert *before* the equals, printing 1d 1b 2c 2a and quietly giving the newest ticket priority over the oldest."
     },
     {
       "id": "c13-r06",
       "section": "Range algorithms and range concepts",
       "prompt": "What happens when this is compiled and run?",
-      "code": "#include <algorithm>\n#include <iostream>\n#include <list>\n\nint main() {\n    std::list<int> values{3, 1, 2};\n\n    std::ranges::sort(values);\n\n    for (int value : values) {\n        std::cout << value << ' ';\n    }\n    std::cout << '\\n';\n}",
+      "code": "#include <algorithm>\n#include <iostream>\n#include <string>\n#include <vector>\n\nstd::vector<std::string> read_config_keys() {\n    return {\"cache_mb\", \"port\", \"workers\"};\n}\n\nint main() {\n    auto key = std::ranges::find(read_config_keys(), \"port\");\n\n    std::cout << key->size() << '\\n';\n}",
       "kind": "no-compile",
-      "explain": "std::ranges::sort is constrained to random_access_range, and a std::list offers only bidirectional iterators, so the constraint is not satisfied and overload resolution finds nothing to call. This is the concept machinery earning its keep: the classic std::sort would have produced a wall of errors from deep inside the implementation instead. Use the member std::list::sort, which is written for a linked list."
+      "explain": "The vector returned by read_config_keys is a temporary that dies at the end of the full expression, so an iterator into it would be dead before it could be used. A std::vector is not a borrowed_range, so ranges::find deduces its return type as std::ranges::dangling — a type with no operator*, no operator-> and no conversion to an iterator — and the member access through it is what fails to compile. The tempting reading is that the temporary lives as long as `found` refers to it; nothing here extends its lifetime, and the library's answer is to make the mistake unrepresentable rather than to hand back an iterator that dangles at runtime. Bind the vector to a named variable first, or finish the search in the same expression."
     },
     {
       "id": "c13-r07",
-      "section": "The contract: preconditions and complexity",
+      "section": "The iterator model",
       "prompt": "What happens when this is compiled and run?",
-      "code": "#include <algorithm>\n#include <iostream>\n#include <vector>\n\nint main() {\n    std::vector<int> source{1, 2, 3, 4, 5};\n    std::vector<int> destination(2);\n\n    std::ranges::copy(source, destination.begin());\n\n    std::cout << destination[0] << '\\n';\n}",
+      "code": "#include <algorithm>\n#include <iostream>\n#include <vector>\n\nint main() {\n    std::vector<int> monday{4, 9, 4};\n    std::vector<int> tuesday{9, 9, 5};\n\n    // Intended: count the nines across both days.\n    auto nines = std::ranges::count(monday.begin(), tuesday.end(), 9);\n\n    std::cout << nines << '\\n';\n}",
       "kind": "ub",
-      "explain": "copy writes one element per source element starting at the given output iterator and never consults the destination's size — the destination is a bare iterator, not a range. With five sources and room for two, the last three writes land past the end of the vector's buffer, which ASan reports as a heap-buffer-overflow. Either size the destination first, or pass std::back_inserter(destination) so each write becomes a push_back."
+      "explain": "The two endpoints must describe one sequence. Here they name positions in two unrelated allocations, so the loop increments monday's iterator looking for equality with tuesday's end — a comparison that never has to become true — and keeps reading past the end of monday's buffer, which the address sanitizer reports as a heap-buffer-overflow. It compiles because both endpoints have the same type; the iterator model has no way to check that they belong together. The tempting reading is that this is at worst a wrong count, since the two vectors are 'next to each other' in the source; there is no such adjacency in memory, and counting both days means two calls added together."
     },
     {
       "id": "c13-r08",
-      "section": "View lifetimes and view costs",
+      "section": "Binary search on sorted data",
       "prompt": "What happens when this is compiled and run?",
-      "code": "#include <iostream>\n#include <ranges>\n#include <vector>\n\nauto positive_quantities() {\n    std::vector<int> local{5, -3, 8};\n    return local | std::views::filter([](int q) { return q > 0; });\n}\n\nint main() {\n    auto view = positive_quantities();\n    std::cout << *view.begin() << '\\n';\n}",
+      "code": "#include <algorithm>\n#include <iostream>\n#include <vector>\n\nint main() {\n    // Free slots in a booking grid, in minutes past the hour.\n    std::vector<int> slots{10, 20, 40};\n\n    auto at = std::ranges::lower_bound(slots, 30);\n    slots.insert(at, 30);\n\n    // Report the slot we just took.\n    std::cout << *at << '\\n';\n}",
       "kind": "ub",
-      "explain": "`local` is an lvalue, so views::all wraps it in a reference-like view and the returned pipeline refers to a vector that is destroyed when the function returns. Every use of the result then reads a dead object; the sanitizers flag the access made while filter_view searches for its first satisfying element. Had the source been an rvalue — `get_orders() | std::views::filter(...)` — views::all would have produced an owning_view and the elements would have survived. Keep the container in the receiving scope."
+      "explain": "Inserting at the lower bound is the correct way to keep the vector sorted, so the container is fine; the iterator is not. The vector's size equals its capacity, so the insert reallocates, and `at` still points into the old buffer that the vector has already freed — the read is a heap-use-after-free the sanitizer flags. The tempting reading is that the value is still 30 either way, so the print is harmless; a stale iterator is invalid regardless of what happens to be behind it, and vector::insert invalidates iterators at or after the insertion point whether or not it reallocated. Capture insert's return value, which is a valid iterator to the newly inserted element."
     }
   ],
   "writing": [
     {
       "id": "c13-w01",
       "section": "Predicates, comparators, and projections",
-      "minutes": 8,
-      "prompt": "Write `sort_book(std::vector<Order>& orders)` that orders a buy book by descending price, keeping orders at the same price in their original arrival order. `Order` has `std::int64_t price_ticks` and `std::int64_t arrival_seq`. Use a range algorithm and a projection rather than a two-parameter lambda, and say in a comment why the algorithm choice matters.",
+      "minutes": 10,
+      "prompt": "A speedrun leaderboard holds `Entry{std::string handle; int score; int seconds;}`. Write `rank(std::vector<Entry>&)` that orders it by score descending, then by seconds ascending, then by handle ascending. The contract: exactly one call to a sorting algorithm, one comparator, and the comparator must be a strict weak ordering — argue for that in a comment rather than asserting it.",
       "checklist": [
-        "Uses std::ranges::stable_sort, not std::ranges::sort",
-        "Passes std::ranges::greater{} as the comparator for descending order",
-        "Passes &Order::price_ticks as a projection rather than writing a two-parameter lambda",
-        "Comment explains that equal prices are equivalent under this ordering and plain sort may reorder them",
-        "Does not sort by arrival_seq, relying on stability instead"
+        "A single sort call with a single comparator; no repeated passes over different keys",
+        "Score is compared in the reverse direction from seconds and handle within that one comparator",
+        "Every comparison uses < (or >), never <= or >=",
+        "Comment argues irreflexivity and transitivity, e.g. via the lexicographic tuple comparison",
+        "The comparator takes both parameters by const reference"
       ],
-      "solution": "#include <algorithm>\n#include <cstdint>\n#include <vector>\n\nstruct Order {\n    std::int64_t price_ticks;\n    std::int64_t arrival_seq;\n};\n\nvoid sort_book(std::vector<Order>& orders) {\n    // Two orders at the same price are *equivalent* under this comparator --\n    // neither precedes the other -- and plain sort is free to reorder an\n    // equivalence class, which would destroy time priority. stable_sort\n    // preserves the prior relative order by contract.\n    std::ranges::stable_sort(\n        orders, std::ranges::greater{}, &Order::price_ticks);\n}",
-      "notes": "Adding arrival_seq as a tiebreaker in the comparator would also work, and would let you use the cheaper unstable sort — but it changes the ordering rather than relying on stability, and it only works when the element actually carries a usable sequence number. Remember that stable_sort may allocate a temporary buffer."
+      "solution": "#include <algorithm>\n#include <string>\n#include <tuple>\n#include <vector>\n\nstruct Entry {\n    std::string handle;\n    int score;\n    int seconds;\n};\n\nvoid rank(std::vector<Entry>& board) {\n    // Lexicographic comparison of two tuples is irreflexive and transitive\n    // whenever each element comparison is, and < on int and on std::string\n    // both are -- so this relation is a strict weak ordering by\n    // construction, with no case analysis to get wrong. Flipping only the\n    // score fields between the two tuples reverses that one key.\n    // Writing >= anywhere would make compare(a, a) true and hand sort\n    // undefined behaviour.\n    std::ranges::sort(board, [](const Entry& lhs, const Entry& rhs) {\n        return std::tie(rhs.score, lhs.seconds, lhs.handle)\n             < std::tie(lhs.score, rhs.seconds, rhs.handle);\n    });\n}",
+      "notes": "Two sorts -- by handle, then by score -- is the classic wrong answer: the second sort is unstable and is free to scramble the first. Two *stable* sorts in reverse key order does work, but it costs a second pass and a possible buffer allocation to express what one comparator says directly. Because the comparator is a total tie-break, stability is irrelevant here: no two distinct entries are equivalent unless all three keys match."
     },
     {
       "id": "c13-w02",
       "section": "Sorting, selection, and partial sorting",
-      "minutes": 10,
-      "prompt": "Write `top_k(std::vector<Order> orders, std::size_t k)` returning the k highest-priced orders in descending order, taking the input by value and doing the least work that satisfies the contract. Handle k >= orders.size(). Comment on the complexity of each step.",
+      "minutes": 12,
+      "prompt": "Write `median(std::vector<double> samples, double fallback)` for a sensor stream. It takes the vector by value and may reorder it. Contract: average linear time — the range must never be fully sorted — correct for both odd and even sizes, and `fallback` is returned for an empty input.",
       "checklist": [
-        "Handles k >= orders.size() without forming an out-of-range iterator",
-        "Uses nth_element (or partial_sort) rather than sorting the whole range",
-        "If nth_element is used, the k-prefix is sorted afterwards — nth_element alone does not order it",
-        "Erases the tail before returning",
-        "Comments state the selection step as average O(N) and the prefix sort as O(k log k)"
+        "Empty input returns fallback before any iterator arithmetic",
+        "Uses nth_element (not sort or partial_sort) for the selection",
+        "The even case averages the two middle values, not one of them",
+        "The second middle value is found with max_element over the left partition, not by sorting it",
+        "A comment states that nth_element leaves both sides unordered but partitioned"
       ],
-      "solution": "#include <algorithm>\n#include <cstdint>\n#include <vector>\n\nstruct Order {\n    std::int64_t price_ticks;\n    std::int64_t arrival_seq;\n};\n\nstd::vector<Order> top_k(std::vector<Order> orders, std::size_t k) {\n    if (k >= orders.size()) {\n        std::ranges::sort(\n            orders, std::ranges::greater{}, &Order::price_ticks);\n        return orders;\n    }\n\n    const auto middle =\n        orders.begin() + static_cast<std::ptrdiff_t>(k);\n\n    // Selection only: average O(N), and it guarantees a partition around\n    // the rank, not an order on either side of it.\n    std::ranges::nth_element(\n        orders, middle, std::ranges::greater{}, &Order::price_ticks);\n\n    // The prefix is the right *set* but in unspecified order: O(k log k).\n    std::ranges::sort(orders.begin(), middle,\n                      std::ranges::greater{}, &Order::price_ticks);\n\n    orders.erase(middle, orders.end());\n    return orders;\n}",
-      "notes": "std::ranges::partial_sort does both steps in one call at roughly O(N log k), and is the better answer when a sorted prefix is the direct deliverable. The interview question worth asking first is whether the best k must themselves be ordered — if not, nth_element alone suffices and the second step disappears."
+      "solution": "#include <algorithm>\n#include <cstddef>\n#include <vector>\n\ndouble median(std::vector<double> samples, double fallback) {\n    if (samples.empty()) {\n        return fallback;\n    }\n\n    const std::size_t count = samples.size();\n    const auto middle =\n        samples.begin() + static_cast<std::ptrdiff_t>(count / 2);\n\n    // Average O(N): places one element at its final rank and partitions\n    // around it. Neither side is ordered afterwards -- only bounded.\n    std::ranges::nth_element(samples, middle);\n    const double upper = *middle;\n\n    if (count % 2 == 1) {\n        return upper;\n    }\n\n    // Even size needs the other middle value too. Everything in\n    // [begin, middle) compares no greater than *middle, so the value we\n    // want is simply the largest of that partition: one more linear scan,\n    // no second selection and no sort.\n    const double lower = *std::ranges::max_element(samples.begin(), middle);\n    return (lower + upper) / 2.0;\n}",
+      "notes": "Sorting and indexing the middle is the obvious O(N log N) answer and is the right call for a handful of samples; the point of the exercise is that the ordering of the other N-1 elements is work nobody reads. Note also that median of an even-sized set is a definition choice: averaging the two central values is the common one, but a latency histogram usually wants a named percentile rule instead."
     },
     {
       "id": "c13-w03",
       "section": "Binary search on sorted data",
       "minutes": 8,
-      "prompt": "Write `insert_sorted(std::vector<std::int64_t>& prices, std::int64_t price)` that keeps the vector sorted ascending, and `count_at(const std::vector<std::int64_t>& prices, std::int64_t price)` that returns how many entries equal that price. Add a comment on why the iterator returned by lower_bound must not be reused after the insert.",
+      "prompt": "`starts` holds appointment start times in minutes, sorted ascending, with duplicates allowed. Write `count_in_window(const std::vector<int>& starts, int from, int until)` returning how many appointments start in the half-open window `[from, until)`. Contract: logarithmic in the size of the vector — no call may inspect every element.",
       "checklist": [
-        "insert_sorted computes the position with lower_bound and inserts there",
-        "Comment states that vector::insert invalidates iterators, so the position must be recomputed if needed again",
-        "count_at uses equal_range (or lower_bound and upper_bound together)",
-        "count_at returns a distance, not a Boolean",
-        "Neither function sorts the vector"
+        "Uses two binary searches, not count_if or any linear scan",
+        "The lower edge is inclusive and the upper edge exclusive: lower_bound is used for both",
+        "The result is a distance between the two iterators, not a Boolean or an index",
+        "The second search is bounded by the first iterator, not by starts.begin()",
+        "A comment or the signature makes the sorted-input precondition explicit"
       ],
-      "solution": "#include <algorithm>\n#include <cstdint>\n#include <vector>\n\nvoid insert_sorted(std::vector<std::int64_t>& prices,\n                   std::int64_t price) {\n    const auto at_or_above = std::ranges::lower_bound(prices, price);\n    prices.insert(at_or_above, price);\n    // `at_or_above` is now unusable: vector::insert invalidates iterators\n    // whether or not it reallocated. Recompute if the position is needed.\n}\n\nstd::ptrdiff_t count_at(const std::vector<std::int64_t>& prices,\n                        std::int64_t price) {\n    const auto matches = std::ranges::equal_range(prices, price);\n    return std::ranges::distance(matches);\n}",
-      "notes": "Inserting at the lower bound is what preserves the ordering, so the vector never needs re-sorting. Each insertion still shifts a suffix, though: for a batch, append everything and sort once — the final ordering is identical and far less data moves."
+      "solution": "#include <algorithm>\n#include <cstddef>\n#include <vector>\n\n// Precondition: `starts` is sorted ascending. Nothing here checks that,\n// and a violation is undefined behaviour rather than a wrong answer.\nstd::ptrdiff_t count_in_window(const std::vector<int>& starts,\n                               int from, int until) {\n    const auto first = std::ranges::lower_bound(starts, from);\n\n    // Both edges use lower_bound because the window is half-open: an\n    // appointment starting exactly at `until` is outside it. Searching\n    // only [first, end) keeps the second probe sequence inside the part\n    // of the range that can still qualify.\n    const auto last = std::ranges::lower_bound(first, starts.end(), until);\n\n    return last - first;\n}",
+      "notes": "Using upper_bound for the upper edge would include appointments starting exactly at `until`, turning the window closed -- the kind of off-by-one that only shows up on a boundary-aligned query. If the window edges are themselves keys of a different type from the elements, the projection parameter is what keeps the comparison honest without writing a heterogeneous comparator."
     },
     {
       "id": "c13-w04",
       "section": "Partitioning",
       "minutes": 8,
-      "prompt": "Write `arrange(std::vector<WorkingOrder>& orders)` — where WorkingOrder has `std::int64_t id` and `bool active` — that moves all active orders to the front in one pass and then sorts only that active prefix by id, leaving the cancelled ones untouched.",
+      "prompt": "A build plan is a `std::vector<Step>` where `Step` has `std::string name` and `bool ready`. Write `hoist_ready(std::vector<Step>&)` that moves every ready step ahead of every blocked one and returns the number of ready steps. Contract: the relative order *within* each group must be exactly what it was — a build log has to stay readable — and the function must not sort.",
       "checklist": [
-        "Uses std::ranges::partition with a projection or predicate on `active`",
-        "Takes the partition point from the returned subrange's begin()",
-        "Sorts the half-open range [orders.begin(), partition point) only",
-        "Does not sort the whole container",
-        "Comment or code makes clear that partition leaves each group in unspecified internal order"
+        "Uses stable_partition, not partition and not sort",
+        "Passes &Step::ready as the projection or an equivalent predicate",
+        "Derives the count from the returned subrange's begin(), not by counting ready steps again",
+        "The returned count is computed as a distance from steps.begin()",
+        "A comment notes that stable_partition may allocate a temporary buffer"
       ],
-      "solution": "#include <algorithm>\n#include <cstdint>\n#include <vector>\n\nstruct WorkingOrder {\n    std::int64_t id;\n    bool active;\n};\n\nvoid arrange(std::vector<WorkingOrder>& orders) {\n    // partition returns the *second* group as a subrange, so its begin() is\n    // the boundary. Neither group is ordered internally afterwards.\n    auto cancelled = std::ranges::partition(orders, &WorkingOrder::active);\n    const auto boundary = cancelled.begin();\n\n    std::ranges::sort(orders.begin(), boundary, {}, &WorkingOrder::id);\n}",
-      "notes": "The partition point is an ordinary iterator, which is what lets it compose with a half-open sort over just the prefix. If the cancelled orders also had to keep their relative order, stable_partition would be required — at the cost of a possible buffer allocation, which is the same trade stable_sort makes."
+      "solution": "#include <algorithm>\n#include <cstddef>\n#include <string>\n#include <vector>\n\nstruct Step {\n    std::string name;\n    bool ready;\n};\n\nstd::size_t hoist_ready(std::vector<Step>& steps) {\n    // Plain partition would satisfy the grouping but is free to scramble\n    // each group; preserving the original order inside both groups is\n    // stable_partition's contract, paid for with a possible temporary\n    // buffer allocation.\n    auto blocked = std::ranges::stable_partition(steps, &Step::ready);\n\n    // The algorithm returns the *second* group, so its begin() is the\n    // boundary -- the count is already in hand, with no second pass.\n    return static_cast<std::size_t>(blocked.begin() - steps.begin());\n}",
+      "notes": "The boundary is an ordinary iterator, so `[steps.begin(), blocked.begin())` composes directly with any half-open algorithm -- sorting or printing just the ready steps needs no further searching. If the plan were re-partitioned later with the same predicate, partition_point recovers the boundary in logarithmically many predicate calls, but only because the range is already partitioned for it."
     },
     {
       "id": "c13-w05",
       "section": "Transformation and accumulation",
-      "minutes": 8,
-      "prompt": "Write `total_notional(const std::vector<Order>& orders)` returning the sum of `price_ticks * quantity` as an `std::int64_t`, and `average_price(const std::vector<Order>& orders)` returning a double. Both must state their accumulator type explicitly, and a comment must note the overflow obligation.",
+      "minutes": 10,
+      "prompt": "A shopping basket is stored as two parallel arrays: `std::span<const std::int32_t> unit_price_cents` and `std::span<const std::int32_t> quantities`. Write `basket_total` returning the total in cents as `std::int64_t`. Contract: one pass, no intermediate container, mismatched lengths rejected rather than silently truncated, and no product may be computed in 32-bit arithmetic.",
       "checklist": [
-        "total_notional uses transform_reduce (or accumulate) with an std::int64_t{0} initial value, not 0",
-        "average_price uses 0.0 (or an explicitly double accumulator), not an integer initial value",
-        "average_price guards against an empty range before dividing",
-        "Comment notes that the products and the sum must fit in std::int64_t, since signed overflow is undefined behaviour",
-        "Includes <numeric>"
+        "Rejects mismatched span sizes explicitly instead of using the shorter one",
+        "Uses transform_reduce (or inner_product) over both ranges; no temporary vector is built",
+        "The initial value is std::int64_t{0}, not 0",
+        "The widening cast is applied to an operand before the multiplication, not to the product",
+        "A comment states that signed overflow is undefined behaviour, not a wrap"
       ],
-      "solution": "#include <cstdint>\n#include <functional>\n#include <numeric>\n#include <vector>\n\nstruct Order {\n    std::int64_t price_ticks;\n    std::int64_t quantity;\n};\n\nstd::int64_t total_notional(const std::vector<Order>& orders) {\n    // Every product and the running sum must fit in std::int64_t: signed\n    // overflow is undefined behaviour, not a wrap. Real code range-checks\n    // against the units its domain contract defines.\n    return std::transform_reduce(\n        orders.begin(), orders.end(), std::int64_t{0}, std::plus<>{},\n        [](const Order& order) {\n            return order.price_ticks * order.quantity;\n        });\n}\n\ndouble average_price(const std::vector<Order>& orders) {\n    if (orders.empty()) {\n        return 0.0;\n    }\n\n    const double sum = std::accumulate(\n        orders.begin(), orders.end(), 0.0,\n        [](double running, const Order& order) {\n            return running + static_cast<double>(order.price_ticks);\n        });\n\n    return sum / static_cast<double>(orders.size());\n}",
-      "notes": "transform_reduce is allowed to regroup its additions, which is fine for integer addition but would make the floating-point average non-reproducible — that is why average_price uses accumulate's ordered left fold instead. Had its initial value been `0` rather than `0.0`, every partial sum would have been truncated to int inside the loop."
+      "solution": "#include <cstdint>\n#include <functional>\n#include <numeric>\n#include <span>\n#include <stdexcept>\n\nstd::int64_t basket_total(std::span<const std::int32_t> unit_price_cents,\n                          std::span<const std::int32_t> quantities) {\n    if (unit_price_cents.size() != quantities.size()) {\n        throw std::invalid_argument{\"basket arrays disagree in length\"};\n    }\n\n    return std::transform_reduce(\n        unit_price_cents.begin(), unit_price_cents.end(),\n        quantities.begin(),\n        std::int64_t{0},\n        std::plus<>{},\n        [](std::int32_t price, std::int32_t quantity) {\n            // Cast first: price * quantity would be evaluated in int and\n            // could overflow before anything widened it, and signed\n            // overflow is undefined behaviour rather than a wrap. The\n            // std::int64_t initial value keeps the running sum wide too.\n            return static_cast<std::int64_t>(price) * quantity;\n        });\n}",
+      "notes": "transform_reduce is permitted to regroup its additions, which is exactly why it can vectorise -- harmless for integer addition that does not overflow, and unacceptable if these were doubles and the total had to reproduce bit for bit. In that case accumulate's ordered left fold is the one with the guarantee you need."
     },
     {
       "id": "c13-w06",
       "section": "Heap, merge, set, and compaction algorithms",
-      "minutes": 8,
-      "prompt": "Write `compact(std::vector<WorkingOrder>& orders)` that removes every inactive order and then removes duplicate ids, leaving the survivors sorted by id. Explain in a comment why each algorithm needs a following `erase`.",
+      "minutes": 10,
+      "prompt": "Two sorted, duplicate-free manifests of file paths describe last night's build and tonight's. Write `merge_manifests` returning every path that appears in either, sorted and with no path twice, and `only_tonight` returning the paths added since last night. Contract: neither function may sort, and neither may use an associative container.",
       "checklist": [
-        "Uses remove_if (or std::erase_if) for the inactive orders",
-        "Sorts by id before calling unique, so equal ids are adjacent",
-        "Uses unique for the duplicates, followed by erase",
-        "Comment states that an algorithm cannot change a container's size, so the container must do the erasing",
-        "The erase calls use the iterators the algorithms returned, not begin()/end()"
+        "Both functions use a sorted-set algorithm (set_union and set_difference)",
+        "Neither calls sort, unique, or any container with its own ordering",
+        "Output is produced through back_inserter into a vector, or into a sized destination",
+        "merge_manifests reserves against a stated bound before writing",
+        "A comment states the shared-ordering precondition on both inputs"
       ],
-      "solution": "#include <algorithm>\n#include <cstdint>\n#include <vector>\n\nstruct WorkingOrder {\n    std::int64_t id;\n    bool active;\n};\n\nvoid compact(std::vector<WorkingOrder>& orders) {\n    // An algorithm sees only iterators; it can move retained values to the\n    // front but cannot destroy elements or change size. The container owns\n    // destruction, so each compaction needs a following erase.\n    auto [new_end, old_end] =\n        std::ranges::remove_if(orders, [](const WorkingOrder& order) {\n            return !order.active;\n        });\n    orders.erase(new_end, old_end);\n\n    // unique only coalesces *adjacent* equivalents, so sort first.\n    std::ranges::sort(orders, {}, &WorkingOrder::id);\n    auto duplicates = std::ranges::unique(orders, {}, &WorkingOrder::id);\n    orders.erase(duplicates.begin(), duplicates.end());\n}",
-      "notes": "std::erase_if packages the first pattern for standard containers and is the better choice when nothing else is needed from the returned iterators. The tail left behind by remove_if and unique holds elements in an unspecified state — it is not a scratch area to read from."
+      "solution": "#include <algorithm>\n#include <iterator>\n#include <string>\n#include <vector>\n\nusing Manifest = std::vector<std::string>;\n\n// Precondition on both functions: each input is sorted under the same\n// ordering the output is expected in. Sorted-set algorithms trust that\n// and never verify it.\nManifest merge_manifests(const Manifest& last_night,\n                         const Manifest& tonight) {\n    Manifest all;\n    // A union is at most both inputs combined; reserving that bound turns\n    // the growth of the destination into one allocation.\n    all.reserve(last_night.size() + tonight.size());\n\n    std::ranges::set_union(last_night, tonight, std::back_inserter(all));\n    return all;\n}\n\nManifest only_tonight(const Manifest& last_night,\n                      const Manifest& tonight) {\n    Manifest added;\n    std::ranges::set_difference(\n        tonight, last_night, std::back_inserter(added));\n    return added;\n}",
+      "notes": "Argument order is the whole meaning of set_difference: swapping the two ranges answers the opposite question -- what disappeared -- and the compiler has nothing to say about it. std::ranges::merge is the other tool here; it keeps every element from both inputs, so a path present in both would appear twice, which is why set_union rather than merge answers this contract."
     },
     {
       "id": "c13-w07",
       "section": "Lazy views and pipelines",
       "minutes": 10,
-      "prompt": "Given `std::vector<BookOrder>` with `Side side; std::int64_t price_ticks, quantity;`, write two functions: `print_buy_notionals` that streams the first 100 buy-side notionals through a lazy pipeline without building any container, and `collect_buy_notionals` that returns them as a `std::vector<std::int64_t>`. Comment on when the second is worth its cost.",
+      "prompt": "Given `const std::vector<int>& samples` in arrival order, write `print_recent_spikes(samples, threshold)` that prints the three most recent readings above the threshold, newest first, one per line. Contract: no container may be created, the samples must not be copied or reordered, and the scan must stop as soon as three spikes have been printed rather than walking the whole history.",
       "checklist": [
-        "The printing function builds a filter/transform/take pipeline and iterates it directly",
-        "No intermediate container is constructed in the printing function",
-        "The collecting function materialises with std::ranges::to<std::vector>() (or an explicit loop with reserve)",
-        "Comment states that traversing a lazy pipeline twice repeats the predicate and transform work",
-        "Both take the orders by const reference and neither returns a view"
+        "Builds one pipeline and iterates it; no vector, no ranges::to, no copy of samples",
+        "Reverses before filtering so that 'most recent' is what take bounds",
+        "take(3) bounds the output, and fewer than three spikes is handled by the pipeline itself",
+        "The parameter is a const reference and no element is modified",
+        "A comment explains that iteration pulls one element through all stages, so the scan stops early"
       ],
-      "solution": "#include <cstdint>\n#include <iostream>\n#include <ranges>\n#include <vector>\n\nenum class Side { Buy, Sell };\n\nstruct BookOrder {\n    Side side;\n    std::int64_t price_ticks;\n    std::int64_t quantity;\n};\n\nauto buy_notionals(const std::vector<BookOrder>& orders) {\n    return orders\n        | std::views::filter([](const BookOrder& order) {\n              return order.side == Side::Buy;\n          })\n        | std::views::transform([](const BookOrder& order) {\n              return order.price_ticks * order.quantity;\n          })\n        | std::views::take(100);\n}\n\nvoid print_buy_notionals(const std::vector<BookOrder>& orders) {\n    for (std::int64_t notional : buy_notionals(orders)) {\n        std::cout << notional << '\\n';  // nothing is stored\n    }\n}\n\nstd::vector<std::int64_t> collect_buy_notionals(\n        const std::vector<BookOrder>& orders) {\n    // Materialise when the results need storage, random access, or a second\n    // traversal: iterating the lazy pipeline twice would re-run the filter\n    // predicate and recompute every product.\n    return buy_notionals(orders) | std::ranges::to<std::vector>();\n}",
-      "notes": "Note that buy_notionals returns a view over its parameter, so the result is only valid while the caller's vector lives — safe here because both callers consume it in the same expression or scope. A filtered source generally has no constant-time size(), so ranges::to may grow the destination as accepted elements arrive rather than reserving once."
+      "solution": "#include <iostream>\n#include <ranges>\n#include <vector>\n\nvoid print_recent_spikes(const std::vector<int>& samples, int threshold) {\n    // Order of stages is the whole design. Reversing first makes \"most\n    // recent\" the front of the pipeline, so take(3) stops the scan after\n    // the third spike from the end -- iteration pulls one sample through\n    // reverse, filter and take before touching the next one, and an\n    // older history beyond that point is never examined.\n    auto recent = samples\n        | std::views::reverse\n        | std::views::filter([threshold](int sample) {\n              return sample > threshold;\n          })\n        | std::views::take(3);\n\n    for (int sample : recent) {\n        std::cout << sample << '\\n';\n    }\n}",
+      "notes": "Filtering before reversing would produce the same three numbers, because reversing a filtered range still yields the last three accepted elements -- but it forces the filter to be traversed from its far end, and reverse over a filter_view is the awkward composition to reason about. Note that `recent` refers to the caller's vector: it must not be returned or stored, only consumed here."
     },
     {
       "id": "c13-w08",
       "section": "Parallel algorithms and execution policies",
       "minutes": 8,
-      "prompt": "Write `offline_sort(std::vector<std::int64_t>& values)` that uses a parallel execution policy where the standard library provides one and falls back to an ordinary sort where it does not. Add a comment stating why this call belongs in an offline analytics path rather than on a tick path.",
+      "prompt": "An offline log analysis counts HTTP status codes of 400 and above over a `std::span<const std::uint32_t>` holding hundreds of millions of entries. Write `count_rejects` that uses a parallel execution policy where the library provides one and compiles unchanged where it does not. Contract: the predicate must be safe under the policy you choose, and a comment must say why this call belongs offline rather than on a request path.",
       "checklist": [
-        "Guards the parallel call with a feature-test macro such as __cpp_lib_parallel_algorithm",
-        "Guards the <execution> include as well, so the file compiles where the header is absent",
-        "The fallback branch calls the ordinary sequential std::sort",
-        "Uses std::execution::par (not par_unseq) for a sort with an ordinary comparator",
-        "Comment names scheduling overhead or the loss of core-placement control as the reason to keep it off a latency path"
+        "The <execution> include is guarded, so the file compiles where the header is absent",
+        "The parallel call itself is guarded by a feature-test macro such as __cpp_lib_parallel_algorithm",
+        "The fallback branch calls the same algorithm with no policy argument",
+        "The predicate is pure: no shared counter, no locking, no I/O",
+        "A comment names scheduling overhead or loss of core placement as the reason to keep it offline"
       ],
-      "solution": "#include <algorithm>\n#include <cstdint>\n#include <vector>\n#if __has_include(<execution>)\n#  include <execution>\n#endif\n\nvoid offline_sort(std::vector<std::int64_t>& values) {\n    // A policy is a permission, not a promise: the implementation may still\n    // run sequentially. Parallel algorithms buy throughput at the cost of\n    // scheduling overhead and any control over core placement, which is the\n    // wrong exchange on a tick path. Suitable only after measurement on a\n    // large offline workload.\n#if defined(__cpp_lib_parallel_algorithm)\n    std::sort(std::execution::par, values.begin(), values.end());\n#else\n    std::sort(values.begin(), values.end());\n#endif\n}",
-      "notes": "par_unseq would additionally permit unsequenced execution, which forbids blocking operations inside the callbacks — a mutex lock there can deadlock. Note also that execution policies are an argument to the classic algorithms, not to the std::ranges family, and that an exception escaping such a call causes std::terminate."
+      "solution": "#include <algorithm>\n#include <cstddef>\n#include <cstdint>\n#include <span>\n#if __has_include(<execution>)\n#  include <execution>\n#endif\n\nstd::ptrdiff_t count_rejects(std::span<const std::uint32_t> status_codes) {\n    // The predicate reads its argument and nothing else. Under any policy\n    // the library may call it concurrently, in any order, and from any\n    // thread; keeping a counter or a log line in here would be a data\n    // race the caller owns, not something the library synchronises.\n    const auto is_reject = [](std::uint32_t code) { return code >= 400; };\n\n    // A policy is a permission, not a promise -- the implementation may\n    // still run this sequentially. What it costs unconditionally is\n    // scheduling overhead and any control over which cores run the work,\n    // which is the wrong trade on a request path and a fine one for a\n    // batch that reads a night of logs.\n#if defined(__cpp_lib_parallel_algorithm)\n    return std::count_if(std::execution::par,\n                         status_codes.begin(), status_codes.end(),\n                         is_reject);\n#else\n    return std::count_if(status_codes.begin(), status_codes.end(),\n                         is_reject);\n#endif\n}",
+      "notes": "par_unseq would additionally allow the calls to be interleaved within one thread, which forbids anything that blocks -- a mutex taken inside such a predicate can deadlock against itself. Note also that policies are arguments to the classic algorithms, not to std::ranges, and that an exception escaping a policy-taking call is not propagated: the implementation calls std::terminate."
     }
   ]
 }

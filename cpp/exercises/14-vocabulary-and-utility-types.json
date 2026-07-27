@@ -357,192 +357,202 @@
       "id": "c14-r01",
       "section": "Pair, Tuple, and Unpacking",
       "prompt": "What does this print?",
-      "code": "#include <iostream>\n#include <map>\n#include <string>\n\nint main() {\n    std::map<std::string, int> books{{\"AAPL\", 201}, {\"MSFT\", 418}};\n\n    for (auto [symbol, best_bid] : books) {\n        best_bid += 1;\n    }\n\n    for (const auto& [symbol, best_bid] : books) {\n        std::cout << symbol << ' ' << best_bid << '\\n';\n    }\n}",
+      "code": "#include <iostream>\n#include <map>\n#include <string>\n\nint main() {\n    std::map<std::string, int> shelf{{\"bolts\", 4}, {\"nuts\", 9}};\n\n    // Stocktake: double everything, then add the one we found on the floor.\n    for (auto [part, count] : shelf) {\n        count *= 2;\n    }\n    for (auto& [part, count] : shelf) {\n        count += 1;\n    }\n\n    for (const auto& [part, count] : shelf) {\n        std::cout << part << '=' << count << ' ';\n    }\n    std::cout << '\\n';\n}",
       "kind": "value",
-      "accept": ["AAPL 201 MSFT 418"],
-      "explain": "The first loop uses a value binding, so each iteration copies the whole map entry and increments the copy's second member; the map is untouched. Writing `auto&` there would have modified the map. The map also iterates in key order, so AAPL precedes MSFT."
+      "accept": [
+        "bolts=5 nuts=10"
+      ],
+      "explain": "A structured binding names the parts of whatever object the declaration introduced, and `auto [part, count]` introduces a *copy* of the map entry — so the first loop doubles two temporaries that are destroyed at the end of each iteration and the map never sees it. `auto&` binds to the entry itself, so the second loop really does increment, leaving 4+1 and 9+1. The tempting reading is that the names are references because they look like ones; the ampersand is on the declaration, not on the names, and forgetting it produces a loop that compiles, runs, and does nothing. Note the keys are unchanged either way: a map's key half is const."
     },
     {
       "id": "c14-r02",
       "section": "`std::optional`: Absence Without Sentinels",
       "prompt": "What does this print?",
-      "code": "#include <iostream>\n#include <optional>\n\nstd::optional<int> half(int value) {\n    if (value % 2 != 0) {\n        return std::nullopt;\n    }\n    return value / 2;\n}\n\nint main() {\n    auto first = half(40).and_then(half).transform([](int v) { return v + 1; });\n    auto second = half(30).and_then(half).transform([](int v) { return v + 1; });\n\n    std::cout << first.value_or(-1) << ' ' << second.value_or(-1) << '\\n';\n}",
+      "code": "#include <iostream>\n#include <optional>\n\n// A refund of zero is a real, settled answer; no refund is not.\nstd::optional<int> refund_cents(bool settled, int amount) {\n    if (!settled) {\n        return std::nullopt;\n    }\n    return amount;\n}\n\nint main() {\n    std::optional<int> settled_zero = refund_cents(true, 0);\n    std::optional<int> unsettled = refund_cents(false, 0);\n\n    std::cout << (settled_zero ? \"yes\" : \"no\") << ' '\n              << *settled_zero << ' '\n              << (settled_zero.value_or(0) == unsettled.value_or(0))\n              << '\\n';\n}",
       "kind": "value",
-      "accept": ["11 -1"],
-      "explain": "half(40) is 20, half(20) is 10, and transform adds one: 11. half(30) is 15, and half(15) is disengaged because 15 is odd — so transform never runs and value_or supplies -1. Each stage runs only on the engaged path, which is what makes the chain read as the success story."
+      "accept": [
+        "yes 0 1"
+      ],
+      "explain": "The Boolean conversion on an optional reports engagement, never the value inside, so an engaged optional holding 0 tests true — which is the entire reason optional exists rather than a sentinel. The trap is in the third column: value_or(0) maps 'absent' onto the same 0 that 'settled at zero' already produces, so the comparison is 1 and the distinction the type was protecting has been thrown away at the point of use. The tempting reading is that `if (settled_zero)` would be false because the payload is falsy — that is the behaviour of a bare int, and swapping in optional is what removes it. When zero is a legitimate value, branch on has_value() and keep the two cases apart."
     },
     {
       "id": "c14-r03",
       "section": "`std::variant`: The Type-Safe Tagged Union",
       "prompt": "What happens when this is compiled and run?",
-      "code": "#include <iostream>\n#include <variant>\n\nint main() {\n    std::variant<int, double> value = 7;\n    double* maybe = std::get_if<double>(&value);\n    std::cout << *maybe << '\\n';\n}",
+      "code": "#include <iostream>\n#include <string>\n#include <variant>\n\nusing Setting = std::variant<int, std::string, bool>;\n\nint main() {\n    Setting retries = 3;\n    Setting venue = std::string{\"main\"};\n\n    // get_if never throws, so this is the exception-free access.\n    std::cout << *std::get_if<int>(&retries) << ' ';\n    std::cout << *std::get_if<int>(&venue) << '\\n';\n}",
       "kind": "ub",
-      "explain": "The active alternative is int, so std::get_if<double> reports the mismatch by returning nullptr — and the code dereferences it without checking. Null dereference is undefined behaviour; UBSan reports 'load of null pointer of type double'. get_if is the non-throwing accessor precisely because it hands you the check; ignoring the result throws away the safety std::get would have given you as an exception."
+      "explain": "get_if is exception-free precisely because it reports a mismatch through its return value: asked for the int alternative of a variant currently holding a std::string, it returns nullptr, and dereferencing that is undefined behaviour the sanitizer reports as a null pointer dereference. The first access is fine; the second is the bug. The tempting reading is that 'does not throw' means 'safe', so get_if can replace std::get without further thought — the two differ in *how* they report the mismatch, and get_if moves the obligation onto the caller. Test the pointer, or use std::visit and let the compiler prove every alternative is handled."
     },
     {
       "id": "c14-r04",
       "section": "`std::variant`: The Type-Safe Tagged Union",
       "prompt": "What happens when this is compiled and run?",
-      "code": "#include <iostream>\n#include <variant>\n\nstruct Trade {\n    int quantity;\n};\n\nstruct Quote {\n    int bid;\n};\n\nint main() {\n    std::variant<Trade, Quote> message = Quote{100};\n    std::visit(\n        [](const Trade& trade) { std::cout << trade.quantity << '\\n'; },\n        message);\n}",
+      "code": "#include <iostream>\n#include <string>\n#include <variant>\n\nusing Cell = std::variant<int, double, std::string>;\n\n// One generic lambda handles every alternative, so nothing is forgotten.\nauto widen(const Cell& cell) {\n    return std::visit([](const auto& value) { return value; }, cell);\n}\n\nint main() {\n    Cell cell = 42;\n    std::cout << widen(cell) << '\\n';\n}",
       "kind": "no-compile",
-      "explain": "std::visit requires the visitor to be invocable for every alternative of the variant, and this lambda accepts only Trade. The missing Quote case is a compile error, not a runtime surprise — exhaustive handling is a checked property. Note that the variant currently holds a Quote is irrelevant: the requirement is static."
+      "explain": "std::visit must have one return type for the whole call: the visitor is instantiated once per alternative, and here those instantiations return int, double and std::string, which have no single common type the call could adopt. The compiler rejects it rather than picking one. The tempting reading is that a generic lambda makes a visitor automatically correct — it does make it exhaustive, which is a different property, and exhaustiveness is worth nothing if the alternatives cannot agree on a result. Give the lambda an explicit return type that every alternative converts to, such as `-> std::string` with a conversion in the body, or have the visitor produce its output as a side effect and return void."
     },
     {
       "id": "c14-r05",
       "section": "`std::expected`: A Value or a Typed Failure",
       "prompt": "What does this print?",
-      "code": "#include <expected>\n#include <iostream>\n\nenum class Error {\n    negative,\n    off_tick\n};\n\nstd::expected<int, Error> validate(int ticks) {\n    if (ticks < 0) {\n        return std::unexpected(Error::negative);\n    }\n    if (ticks % 5 != 0) {\n        return std::unexpected(Error::off_tick);\n    }\n    return ticks;\n}\n\nint main() {\n    auto good = validate(20).transform([](int t) { return t / 5; });\n    auto bad = validate(23).transform([](int t) { return t / 5; });\n\n    std::cout << good.value_or(-1) << ' '\n              << static_cast<int>(bad.error()) << '\\n';\n}",
+      "code": "#include <expected>\n#include <iostream>\n#include <string>\n\nenum class Fault { empty, not_a_number };\n\nstd::expected<int, Fault> to_count(const std::string& field) {\n    if (field.empty()) {\n        return std::unexpected(Fault::empty);\n    }\n    if (field.find_first_not_of(\"0123456789\") != std::string::npos) {\n        return std::unexpected(Fault::not_a_number);\n    }\n    return std::stoi(field);\n}\n\nint main() {\n    auto twice = [](int n) { return n * 2; };\n\n    auto good = to_count(\"21\").transform(twice);\n    auto bad = to_count(\"2x\").transform(twice);\n\n    std::cout << good.value_or(-1) << ' ' << bad.value_or(-1) << ' '\n              << good.has_value() << bad.has_value() << ' '\n              << (bad.error() == Fault::not_a_number) << '\\n';\n}",
       "kind": "value",
-      "accept": ["4 1"],
-      "explain": "20 passes both checks, so transform maps it to 4. 23 is not a multiple of 5, so validate returns std::unexpected(Error::off_tick); transform skips the error path entirely and the error survives to the caller, where off_tick's underlying value is 1. That preserved reason is exactly what an optional would have discarded."
+      "accept": [
+        "42 -1 10 1"
+      ],
+      "explain": "transform maps the success side and leaves the failure side alone: the good field becomes 42, while the bad one never calls the lambda and keeps carrying Fault::not_a_number all the way out, which is what distinguishes expected from optional — the reason survives the pipeline. value_or supplies -1 for the failed one, and error() is still readable afterwards because transform did not consume or translate it. The tempting reading is that transform must be given something to do for the error case, or that value_or discards the error: the error is only replaced by transform_error, and only read by error() on an object that has none."
     },
     {
       "id": "c14-r06",
       "section": "`std::any` and `std::reference_wrapper`",
-      "prompt": "What happens when this is compiled and run?",
-      "code": "#include <any>\n#include <iostream>\n\nint main() {\n    std::any stored = 3;\n    std::cout << \"before\\n\";\n    std::cout << std::any_cast<long>(stored) << '\\n';\n    std::cout << \"after\\n\";\n}",
-      "kind": "crash",
-      "explain": "The stored type is exactly int. any_cast matches the stored type through runtime type identification and performs no implicit conversion, so requesting long throws std::bad_any_cast; nothing catches it, so the program terminates after printing 'before'. Use the pointer form, std::any_cast<long>(&stored), when a mismatch should yield nullptr instead."
+      "prompt": "What does this print?",
+      "code": "#include <any>\n#include <iostream>\n#include <string>\n\nint main() {\n    std::any cell = 7;\n\n    const bool as_long = std::any_cast<long>(&cell) != nullptr;\n    const bool as_int = std::any_cast<int>(&cell) != nullptr;\n\n    cell = \"seven\";\n\n    const bool as_string = std::any_cast<std::string>(&cell) != nullptr;\n    const bool as_charptr = std::any_cast<const char*>(&cell) != nullptr;\n\n    std::cout << as_long << as_int << as_string << as_charptr << '\\n';\n}",
+      "kind": "value",
+      "accept": [
+        "0101"
+      ],
+      "explain": "any_cast matches the stored type exactly, with no conversions and no relatives: an int is not retrievable as a long even though every int fits in one, so the first two columns are 0 and 1. The assignment then stores whatever the expression's type is, and a string literal is a const char*, not a std::string — so asking for std::string fails and asking for const char* succeeds. The tempting reading is that assigning the literal stores a string because that is what it looks like; type erasure erases the static type but records it precisely, and the conversion that would normally happen at a std::string parameter never gets a chance to. The pointer form used here reports the mismatch as nullptr; the value form would throw std::bad_any_cast."
     },
     {
       "id": "c14-r07",
       "section": "Bits: `bitset` and the `<bit>` Utilities",
-      "prompt": "What does this print?",
-      "code": "#include <bit>\n#include <cstdint>\n#include <iostream>\n\nint main() {\n    std::uint64_t occupied = 0;\n    occupied |= std::uint64_t{1} << 7;\n    occupied |= std::uint64_t{1} << 3;\n    occupied |= std::uint64_t{1} << 12;\n\n    std::cout << std::countr_zero(occupied) << ' '\n              << std::popcount(occupied) << '\\n';\n\n    occupied &= ~(std::uint64_t{1} << 3);\n    std::cout << std::countr_zero(occupied) << ' '\n              << std::countr_zero(std::uint64_t{0}) << '\\n';\n}",
-      "kind": "value",
-      "accept": ["3 3 7 64"],
-      "explain": "Bits 3, 7 and 12 are set, so the lowest set bit is 3 and popcount is 3. Clearing bit 3 makes 7 the new lowest. The last value is the trap: countr_zero of an all-zero mask returns the bit width, 64 — well-defined, but not a usable level index, so an empty mask must be tested for before the result is used to subscript anything."
+      "prompt": "What happens when this is compiled and run?",
+      "code": "#include <bitset>\n#include <iostream>\n\nint main() {\n    // One bit per feature flag; the build has 128 of them.\n    std::bitset<128> enabled;\n    enabled.set(3);\n    enabled.set(100);\n\n    std::cout << enabled.count() << ' ' << enabled.test(3) << '\\n';\n\n    // Hand the mask to a C API that takes an unsigned long.\n    unsigned long packed = enabled.to_ulong();\n    std::cout << packed << '\\n';\n}",
+      "kind": "crash",
+      "explain": "The first line prints fine — count() and test() work at any width. to_ulong() is the one that cannot: it throws std::overflow_error whenever a set bit lies outside the range of unsigned long, and bit 100 does, so the exception escapes main and the program terminates. The tempting reading is that the conversion silently truncates to the low bits, the way a narrowing integer conversion would; bitset chose to report the loss instead. The size of the bitset is a compile-time constant, but whether the *value* fits is a runtime property, which is why this cannot be a compile error. Extract a specific word (to_ullong on a narrower slice, or a shifted-and-masked sub-bitset) when a C API needs one."
     },
     {
       "id": "c14-r08",
       "section": "`chrono`: Durations, Time Points, and Clocks",
       "prompt": "What does this print?",
-      "code": "#include <chrono>\n#include <iostream>\n\nint main() {\n    using namespace std::chrono_literals;\n\n    auto total = 1500us + 2ms;\n    auto whole = std::chrono::duration_cast<std::chrono::milliseconds>(total);\n\n    std::cout << total.count() << ' ' << whole.count() << '\\n';\n}",
+      "code": "#include <chrono>\n#include <iostream>\n\nusing namespace std::chrono;\nusing namespace std::chrono_literals;\n\nint main() {\n    // A frame has 2ms of budget; rendering has already taken 1400us.\n    auto budget = 2ms;\n    auto spent = 1400us;\n\n    auto left = budget - spent;\n    auto truncated = duration_cast<milliseconds>(left);\n    auto rounded = round<milliseconds>(left);\n\n    std::cout << left.count() << ' ' << truncated.count() << ' '\n              << rounded.count() << ' ' << (left > 0us) << '\\n';\n}",
       "kind": "value",
-      "accept": ["3500 3"],
-      "explain": "Adding durations promotes to the finer unit — microseconds — because that conversion is exact, so total is 3500us and its count is 3500, not 3.5. duration_cast to milliseconds truncates toward zero, giving 3; the leftover 500us is silently dropped, which is why the standard requires the cast to be written out rather than happening implicitly."
+      "accept": [
+        "600 0 1 1"
+      ],
+      "explain": "Subtracting two durations converts both to their common type, and the common type of milliseconds and microseconds is the finer one, so `left` is 600 microseconds and its count() is 600 rather than 0.6 — a duration's count is meaningless without its unit, which is exactly why the unit is in the type. duration_cast then truncates toward zero and reports 0 whole milliseconds, while round gives the nearest, 1. The tempting reading is that budget - spent is 'obviously in milliseconds' because that is how the budget was written, and that the remaining time is therefore 0 or 1 depending on which cast you happen to use. Compare durations directly, as the last column does, instead of comparing counts."
     }
   ],
   "writing": [
     {
       "id": "c14-w01",
-      "section": "`std::optional`: Absence Without Sentinels",
+      "section": "Pair, Tuple, and Unpacking",
       "minutes": 8,
-      "prompt": "Write `find_order(const std::vector<Order>&, OrderId)` returning `std::optional<Order>`, and a caller `open_quantity` that returns the found order's quantity or 0. Do not use a sentinel id such as -1, and do not use unchecked `operator*`.",
+      "prompt": "A log index is keyed by `LogKey{int severity; std::string source; long line;}`. Write `operator<` ordering by severity, then source, then line, and `emit(const std::tuple<int, std::string, long>&)` that calls an existing `write_row(int, std::string, long)` with the stored arguments. Contract: no chain of if-statements in the comparator, and `emit` must not name any element position.",
       "checklist": [
-        "Return type is std::optional<Order>, not Order plus a bool",
-        "The not-found path returns std::nullopt",
-        "The caller tests engagement before reaching the value",
-        "Access uses operator-> or .value() inside a proven-engaged branch, never bare * on an untested optional",
-        "No magic sentinel id or quantity is used to mean 'absent'"
+        "The comparator is a single expression built from std::tie on both sides",
+        "The two tie calls list the members in the same order, so the comparison is lexicographic",
+        "No <= or >= appears anywhere in the comparator",
+        "emit uses std::apply and never std::get<0>, <1> or <2>",
+        "A comment states why the named struct is preferable to the tuple at an interface"
       ],
-      "solution": "#include <optional>\n#include <vector>\n\nusing OrderId = int;\n\nstruct Order {\n    OrderId id;\n    int quantity;\n};\n\nstd::optional<Order> find_order(const std::vector<Order>& orders,\n                                OrderId wanted) {\n    for (const Order& order : orders) {\n        if (order.id == wanted) {\n            return order;\n        }\n    }\n    return std::nullopt;\n}\n\nint open_quantity(const std::vector<Order>& orders, OrderId id) {\n    if (auto order = find_order(orders, id)) {\n        return order->quantity;  // engagement proved by the condition\n    }\n    return 0;\n}",
-      "notes": "The `if (auto order = ...)` form scopes the optional to the branch that proved it engaged, which is why the unchecked operator-> is safe here. If a natural default exists, `.value_or(fallback)` collapses the whole caller to one expression."
+      "solution": "#include <string>\n#include <tuple>\n\nstruct LogKey {\n    int severity;\n    std::string source;\n    long line;\n};\n\n// One expression, and it is a strict weak ordering by construction:\n// lexicographic comparison of tuples inherits irreflexivity and\n// transitivity from < on each member, with no branch to get wrong.\nbool operator<(const LogKey& lhs, const LogKey& rhs) {\n    return std::tie(lhs.severity, lhs.source, lhs.line)\n         < std::tie(rhs.severity, rhs.source, rhs.line);\n}\n\nvoid write_row(int severity, std::string source, long line);\n\nvoid emit(const std::tuple<int, std::string, long>& row) {\n    // apply expands the elements into the call in order. The tuple is\n    // acceptable here because it is generic glue between a queue and a\n    // sink; LogKey is what belongs in the interface, where std::get<1>\n    // would tell a reader nothing about what the string means.\n    std::apply(write_row, row);\n}",
+      "notes": "std::tie makes a tuple of references, so nothing is copied even though `source` is a std::string -- writing std::make_tuple here would copy both strings on every comparison, inside a sort that runs the comparator O(N log N) times. If the type owns all its members and the default member order is the order you want, `auto operator<=>(const LogKey&) const = default;` says the same thing in one line."
     },
     {
       "id": "c14-w02",
-      "section": "`std::expected`: A Value or a Typed Failure",
-      "minutes": 12,
-      "prompt": "Write a price decoder using `std::expected`. Define a `PriceError` enumeration, `parse_ticks(std::string_view)` that uses std::from_chars and distinguishes an invalid number from trailing characters, and `validate_price(std::int64_t)` that rejects negatives and off-tick values. Then compose them with the monadic operations into one `decode_price` function.",
+      "section": "`std::optional`: Absence Without Sentinels",
+      "minutes": 10,
+      "prompt": "A config map is `std::map<std::string, std::string>`. Write `lookup(cfg, key)` returning `std::optional<std::string>`, `as_seconds(const std::string&)` returning `std::optional<int>` for a strictly positive decimal number, and `timeout_seconds(cfg)` which is their composition, clamped to at most 300 and defaulting to 30 when anything is missing or malformed. Contract: `timeout_seconds` must contain no `if`, no `has_value()`, and no dereference.",
       "checklist": [
-        "Error type is a scoped enumeration, and every failure returns std::unexpected(...)",
-        "parse_ticks reports invalid_number and trailing_characters as distinct errors",
-        "The from_chars result pointer is compared against the end of the input",
-        "validate_price rejects negative and off-tick values with distinct errors",
-        "decode_price uses and_then (and optionally transform) rather than nested if blocks"
+        "lookup returns std::nullopt for a missing key rather than an empty string",
+        "as_seconds rejects a non-numeric or non-positive value with std::nullopt",
+        "timeout_seconds is a single monadic chain: and_then, transform, value_or",
+        "and_then is used for the stage that itself returns an optional, transform for the stage that does not",
+        "The 300 clamp is inside transform, so it applies only to a value that was actually present"
       ],
-      "solution": "#include <charconv>\n#include <cstdint>\n#include <expected>\n#include <string_view>\n\nstruct Price {\n    std::int64_t ticks;\n};\n\nenum class PriceError {\n    invalid_number,\n    trailing_characters,\n    negative,\n    off_tick\n};\n\nstd::expected<std::int64_t, PriceError> parse_ticks(std::string_view text) {\n    std::int64_t ticks = 0;\n    const char* end = text.data() + text.size();\n    auto [next, error] = std::from_chars(text.data(), end, ticks);\n\n    if (error != std::errc{}) {\n        return std::unexpected(PriceError::invalid_number);\n    }\n    if (next != end) {\n        return std::unexpected(PriceError::trailing_characters);\n    }\n    return ticks;\n}\n\nstd::expected<Price, PriceError> validate_price(std::int64_t ticks) {\n    if (ticks < 0) {\n        return std::unexpected(PriceError::negative);\n    }\n    if (ticks % 5 != 0) {\n        return std::unexpected(PriceError::off_tick);\n    }\n    return Price{ticks};\n}\n\nstd::expected<Price, PriceError> decode_price(std::string_view field) {\n    return parse_ticks(field).and_then(validate_price);\n}",
-      "notes": "and_then is the right composer because validate_price itself returns an expected; transform would have produced expected<expected<Price, PriceError>, PriceError>. If this decoder is a subsystem boundary, add .transform_error(...) to map PriceError onto the subsystem's own error vocabulary."
+      "solution": "#include <algorithm>\n#include <charconv>\n#include <map>\n#include <optional>\n#include <string>\n\nusing Config = std::map<std::string, std::string>;\n\nstd::optional<std::string> lookup(const Config& cfg,\n                                  const std::string& key) {\n    auto found = cfg.find(key);\n    if (found == cfg.end()) {\n        return std::nullopt;   // absent, not \"empty string\"\n    }\n    return found->second;\n}\n\nstd::optional<int> as_seconds(const std::string& text) {\n    int value = 0;\n    const char* end = text.data() + text.size();\n    auto [next, error] = std::from_chars(text.data(), end, value);\n    if (error != std::errc{} || next != end || value <= 0) {\n        return std::nullopt;\n    }\n    return value;\n}\n\nint timeout_seconds(const Config& cfg) {\n    // Each stage runs only if the previous one produced a value, so the\n    // absent and malformed cases both fall through to the same default\n    // without a single test being written here. and_then is for the\n    // stage that returns an optional of its own; transform maps a value\n    // that is already known to be there.\n    return lookup(cfg, \"timeout\")\n        .and_then(as_seconds)\n        .transform([](int seconds) { return std::min(seconds, 300); })\n        .value_or(30);\n}",
+      "notes": "Using transform where and_then belongs is the usual slip: it would produce an optional<optional<int>>, which then tests engaged whenever the *outer* lookup succeeded, defeating the check. Note also that value_or evaluates its argument unconditionally -- fine for the literal 30, wasteful or wrong if the default were an expensive call or one with side effects."
     },
     {
       "id": "c14-w03",
       "section": "`std::variant`: The Type-Safe Tagged Union",
-      "minutes": 10,
-      "prompt": "Model a market-data feed as `std::variant<Trade, Quote, Heartbeat>` and write a `notional(const Message&)` function that returns price times quantity for a Trade, the spread for a Quote, and 0 for a Heartbeat — using std::visit with the Overloaded recipe from the chapter.",
+      "minutes": 12,
+      "prompt": "A spreadsheet cell is `std::variant<std::monostate, double, std::string>` — blank, numeric, or text. Write `describe(const Cell&)` returning a `std::string` that names which alternative is active, and `column_total(const std::vector<Cell>&)` summing only the numeric cells. Contract: neither function may call `std::get`, `index()`, or `holds_alternative`, and adding a fourth alternative later must make the code fail to compile rather than silently ignore it.",
       "checklist": [
-        "Message is a std::variant over three distinct struct types",
-        "The Overloaded helper inherits from its callables and pulls in operator() with a using-declaration",
-        "Dispatch is std::visit, not a chain of holds_alternative tests",
-        "Every alternative has a handler, and all handlers return the same type",
-        "No std::get<T> call is made without first proving the alternative"
+        "Both functions dispatch with std::visit",
+        "The visitor has one call operator per alternative; no generic `auto` catch-all",
+        "std::get, index() and holds_alternative appear nowhere",
+        "describe returns one type from every alternative, so the visit has a common return type",
+        "std::monostate is handled explicitly as the blank cell"
       ],
-      "solution": "#include <variant>\n\nstruct Trade {\n    int price;\n    int quantity;\n};\n\nstruct Quote {\n    int bid;\n    int ask;\n};\n\nstruct Heartbeat {\n    long sequence;\n};\n\nusing Message = std::variant<Trade, Quote, Heartbeat>;\n\ntemplate<class... Callables>\nstruct Overloaded : Callables... {\n    using Callables::operator()...;\n};\n\nlong notional(const Message& message) {\n    return std::visit(\n        Overloaded{\n            [](const Trade& trade) -> long {\n                return static_cast<long>(trade.price) * trade.quantity;\n            },\n            [](const Quote& quote) -> long {\n                return quote.ask - quote.bid;\n            },\n            [](const Heartbeat&) -> long { return 0; }\n        },\n        message);\n}",
-      "notes": "The explicit `-> long` on every lambda matters: std::visit requires one common return type, and without the annotation the Trade branch would deduce long while the Quote branch deduced int. Adding a fourth alternative to Message now breaks this function at compile time, which is the property you are buying."
+      "solution": "#include <string>\n#include <variant>\n#include <vector>\n\nusing Cell = std::variant<std::monostate, double, std::string>;\n\ntemplate<class... Handlers>\nstruct Visitor : Handlers... {\n    using Handlers::operator()...;\n};\n\nstd::string describe(const Cell& cell) {\n    // No generic fallback on purpose: a fourth alternative added to Cell\n    // would leave this visitor without a matching call operator, and the\n    // visit would fail to compile. A `[](const auto&)` catch-all would\n    // have swallowed it silently, which is the property being traded.\n    return std::visit(Visitor{\n        [](std::monostate) { return std::string{\"blank\"}; },\n        [](double) { return std::string{\"number\"}; },\n        [](const std::string&) { return std::string{\"text\"}; }\n    }, cell);\n}\n\ndouble column_total(const std::vector<Cell>& column) {\n    double total = 0.0;\n    for (const Cell& cell : column) {\n        total += std::visit(Visitor{\n            [](std::monostate) { return 0.0; },\n            [](double value) { return value; },\n            [](const std::string&) { return 0.0; }\n        }, cell);\n    }\n    return total;\n}",
+      "notes": "Each lambda in `describe` returns std::string rather than a string literal, because a visitor whose alternatives return const char* and std::string has no common return type and will not compile -- the same failure the reading exercise on this section shows. Putting monostate first in the alternative list is also what makes a default-constructed Cell blank rather than 0.0."
     },
     {
       "id": "c14-w04",
       "section": "`std::any` and `std::reference_wrapper`",
-      "minutes": 8,
-      "prompt": "Given `using Config = std::unordered_map<std::string, std::any>;`, write a `get_or<T>(const Config&, std::string_view key, T fallback)` helper that returns the stored value when the key exists and the stored type is exactly T, and the fallback otherwise. It must not throw on a missing key or a type mismatch.",
+      "minutes": 10,
+      "prompt": "Given `std::vector<std::string>& lines` holding a log file, write `longest_first(lines, n)` returning the `n` longest lines ordered longest-first. Contract: no `std::string` may be copied, the caller's vector must be left in its original order, and the result must let the caller edit the lines in place.",
       "checklist": [
-        "Missing key is handled by find, not at(), so no std::out_of_range escapes",
-        "Type mismatch uses the pointer form of any_cast and tests for nullptr",
-        "No std::bad_any_cast can escape the function",
-        "The function is a template on the requested type T",
-        "A comment or the code makes clear that any_cast requires the exact stored type"
+        "Returns std::vector<std::reference_wrapper<std::string>>, not a vector of strings or of indices",
+        "The wrappers are what get sorted; lines itself is never reordered",
+        "The projection or comparator reaches the string through .get()",
+        "Truncates to n only after selecting, and handles n larger than lines.size()",
+        "A comment states that every wrapper dangles if `lines` is destroyed or reallocated"
       ],
-      "solution": "#include <any>\n#include <string>\n#include <string_view>\n#include <unordered_map>\n\nusing Config = std::unordered_map<std::string, std::any>;\n\ntemplate<class T>\nT get_or(const Config& config, std::string_view key, T fallback) {\n    auto entry = config.find(std::string{key});\n    if (entry == config.end()) {\n        return fallback;\n    }\n\n    // any_cast matches the stored type exactly: an int stored under this key\n    // will not satisfy a request for long.\n    if (const T* stored = std::any_cast<T>(&entry->second)) {\n        return *stored;\n    }\n    return fallback;\n}",
-      "notes": "The pointer form of any_cast is the whole trick: it turns the type check into a testable nullptr rather than an exception. If the configuration keys and types are actually known at compile time, a struct or a std::variant would document them and remove the runtime type identification entirely."
+      "solution": "#include <algorithm>\n#include <cstddef>\n#include <functional>\n#include <string>\n#include <vector>\n\nusing LineRef = std::reference_wrapper<std::string>;\n\n// The returned wrappers are borrowings, not copies: they are valid only\n// while `lines` lives and only until an insertion reallocates it. Same\n// lifetime discipline as a raw pointer, with value semantics.\nstd::vector<LineRef> longest_first(std::vector<std::string>& lines,\n                                   std::size_t n) {\n    std::vector<LineRef> refs;\n    refs.reserve(lines.size());\n    for (std::string& line : lines) {\n        refs.push_back(std::ref(line));\n    }\n\n    // Sorting the wrappers moves 8 bytes each and leaves the caller's\n    // vector exactly as it was; .get() recovers the referenced string.\n    std::ranges::sort(refs, std::ranges::greater{},\n                      [](const LineRef& ref) { return ref.get().size(); });\n\n    if (n < refs.size()) {\n        // resize is not available here: a reference_wrapper has no\n        // default constructor, because a reference to nothing is not a\n        // thing. Erasing the tail needs no such construction.\n        refs.erase(refs.begin() + static_cast<std::ptrdiff_t>(n),\n                   refs.end());\n    }\n    return refs;\n}",
+      "notes": "A reference_wrapper is assignable and copyable, which is the whole reason it can live in a container where a plain std::string& cannot. Because the elements are references, a caller assigning through refs[0].get() edits the original line -- convenient, and the reason to hand back const references (std::cref) unless mutation is part of the contract."
     },
     {
       "id": "c14-w05",
       "section": "Bits: `bitset` and the `<bit>` Utilities",
-      "minutes": 8,
-      "prompt": "Write three helpers over a `std::uint64_t` level-occupancy mask: `occupy(mask, level)`, `vacate(mask, level)` and `best_level(mask)` returning `std::optional<int>`. Levels come from an untrusted feed, so guard against a shift width that would be undefined behaviour, and make an empty mask return no best level.",
+      "minutes": 10,
+      "prompt": "A worker pool tracks 64 slots in a `std::uint64_t busy` mask, bit `i` set meaning slot `i` is in use. Write `claim(std::uint64_t& busy)` returning the lowest free slot index or -1 when the pool is full, `release(std::uint64_t& busy, int slot)`, and `load_percent(std::uint64_t busy)`. Contract: no loops, no division by a non-constant, and every shift must be provably in range.",
       "checklist": [
-        "Every shift is guarded so the shift count is below 64",
-        "The shifted 1 is a std::uint64_t, not a plain int",
-        "best_level returns std::nullopt for an all-zero mask rather than 64",
-        "best_level uses std::countr_zero rather than a manual loop",
-        "vacate clears exactly one bit and leaves the others alone"
+        "claim inspects the complement of the mask, not the mask itself",
+        "The full-pool case is tested before countr_zero is used as an index",
+        "Shifts are written on a std::uint64_t operand (e.g. std::uint64_t{1} << slot), not on int 1",
+        "release validates the slot index before shifting",
+        "load_percent uses std::popcount rather than a counting loop"
       ],
-      "solution": "#include <bit>\n#include <cstdint>\n#include <optional>\n\nconstexpr int level_count = 64;\n\nstd::uint64_t occupy(std::uint64_t mask, int level) {\n    if (level < 0 || level >= level_count) {\n        return mask;  // shifting by >= the width is undefined behaviour\n    }\n    return mask | (std::uint64_t{1} << level);\n}\n\nstd::uint64_t vacate(std::uint64_t mask, int level) {\n    if (level < 0 || level >= level_count) {\n        return mask;\n    }\n    return mask & ~(std::uint64_t{1} << level);\n}\n\nstd::optional<int> best_level(std::uint64_t mask) {\n    if (mask == 0) {\n        return std::nullopt;  // countr_zero would return 64\n    }\n    return std::countr_zero(mask);\n}",
-      "notes": "Writing `1 << level` instead of `std::uint64_t{1} << level` shifts an int and is undefined behaviour for any level above 30 — a bug that survives every test with a small book. The nullopt return replaces the out-of-range 64 with a state the caller cannot ignore."
+      "solution": "#include <bit>\n#include <cstdint>\n\nint claim(std::uint64_t& busy) {\n    const std::uint64_t free_slots = ~busy;\n    if (free_slots == 0) {\n        // countr_zero would answer 64 here -- well defined, and not a\n        // valid slot index. Test for the empty mask before trusting it.\n        return -1;\n    }\n\n    const int slot = std::countr_zero(free_slots);\n    busy |= std::uint64_t{1} << slot;\n    return slot;\n}\n\nvoid release(std::uint64_t& busy, int slot) {\n    if (slot < 0 || slot >= 64) {\n        return;   // shifting by the operand width or more is UB\n    }\n    busy &= ~(std::uint64_t{1} << slot);\n}\n\nint load_percent(std::uint64_t busy) {\n    // One instruction on mainstream targets, and the 64 is a literal, so\n    // the division is a shift.\n    return std::popcount(busy) * 100 / 64;\n}",
+      "notes": "Writing `1 << slot` would compute in int and be undefined for slot >= 31; the std::uint64_t{1} spelling is not pedantry, it is the difference between a mask and a bug that only fires on the high slots. For a flag set that does not fit a machine word, std::bitset<N> gives the same operations by name -- at the cost of to_ulong() being able to throw."
     },
     {
       "id": "c14-w06",
       "section": "Random Numbers Done Right",
-      "minutes": 8,
-      "prompt": "Write a small `PriceSimulator` class that draws jittered prices reproducibly. It must own its engine, be seeded once from a caller-supplied seed, expose `next(double base)` returning base plus uniform jitter in [-0.01, 0.01], and record the seed so a run can be replayed.",
+      "minutes": 10,
+      "prompt": "Write a `Shuffler` class that puts a playlist into a random order. Contract: two Shufflers built with the same seed must produce identical orderings, the same object must produce a *different* ordering on its second call, the seed must be readable back for a bug report, and no engine may be constructed per call.",
       "checklist": [
-        "The engine is a member, constructed once, not per draw",
-        "The seed is supplied by the caller and stored or exposed for replay",
-        "Jitter uses std::uniform_real_distribution with explicit bounds, not rand() or a modulo",
-        "The distribution is a member or constructed from stable parameters, not from a fresh random_device each call",
-        "std::random_device does not appear on the drawing path"
+        "The engine is a member, constructed once and seeded from the constructor argument",
+        "The seed is stored and exposed through an accessor",
+        "shuffle uses std::ranges::shuffle (or std::shuffle) with the member engine, never std::rand",
+        "The engine is passed by reference so its state advances between calls",
+        "A comment notes that a fixed seed is what makes a failing run replayable"
       ],
-      "solution": "#include <cstdint>\n#include <random>\n\nclass PriceSimulator {\npublic:\n    explicit PriceSimulator(std::uint64_t seed)\n        : seed_(seed), engine_(seed) {}\n\n    double next(double base) {\n        return base + jitter_(engine_);\n    }\n\n    std::uint64_t seed() const noexcept { return seed_; }\n\nprivate:\n    std::uint64_t seed_;\n    std::mt19937_64 engine_;\n    std::uniform_real_distribution<double> jitter_{-0.01, 0.01};\n};",
-      "notes": "mt19937_64 carries kilobytes of state, so reconstructing it per draw both wastes the setup and restarts the same short prefix of one stream instead of advancing through it. Storing the seed beside the run metadata is what makes a failed backtest replayable; recording it only in a log line that gets rotated away is not enough."
+      "solution": "#include <algorithm>\n#include <cstdint>\n#include <random>\n#include <string>\n#include <vector>\n\nclass Shuffler {\npublic:\n    explicit Shuffler(std::uint64_t seed)\n        : seed_{seed}, engine_{seed} {}\n\n    // The engine is state, not a local: it is seeded once and advances\n    // with every draw, so a second shuffle continues the stream rather\n    // than restarting it. Constructing an mt19937_64 per call would both\n    // waste kilobytes of setup and replay the same permutation forever.\n    void shuffle(std::vector<std::string>& tracks) {\n        std::ranges::shuffle(tracks, engine_);\n    }\n\n    // Record this with the run: it is the whole replay recipe.\n    std::uint64_t seed() const { return seed_; }\n\nprivate:\n    std::uint64_t seed_;\n    std::mt19937_64 engine_;\n};",
+      "notes": "std::random_device belongs at the boundary where nondeterminism is genuinely wanted -- seed from it once and *print the value you got*, so the run is still reproducible afterwards. Note also that only the engine sequence is standardised: distributions may be implemented differently across libstdc++, libc++ and MSVC, so a seed reproduces a run on one toolchain, not across three."
     },
     {
       "id": "c14-w07",
       "section": "`chrono`: Durations, Time Points, and Clocks",
-      "minutes": 7,
-      "prompt": "Write a scoped `LatencyTimer` that timestamps construction and, on destruction, reports the elapsed time in nanoseconds to a callback `void record_latency(std::chrono::nanoseconds)`. Choose the clock deliberately and add a comment saying why.",
+      "minutes": 10,
+      "prompt": "Write a `Budget` class for a request handler: constructed with an allowance, it answers `remaining()` and `expired()`. Contract: it must measure elapsed time correctly across a wall-clock adjustment, `remaining()` must return a duration rather than a number, a caller passing a `std::chrono::seconds` allowance must compile while one passing a bare `int` must not, and each check must read the clock once.",
       "checklist": [
-        "Uses std::chrono::steady_clock, with a comment explaining monotonicity",
-        "Stores a time_point member, not a raw integer count",
-        "Elapsed time is obtained by subtracting time points, giving a duration",
-        "Result is converted to nanoseconds with duration_cast",
-        "The report happens in the destructor so early returns are still measured"
+        "steady_clock is used, and system_clock and high_resolution_clock are not",
+        "The allowance parameter is a chrono duration type, so a bare int is rejected by the compiler",
+        "The deadline (or the start time point) is stored as a time_point, not as an integer count",
+        "remaining() returns a duration type, not a count",
+        "now() is called once per query, not twice"
       ],
-      "solution": "#include <chrono>\n\nvoid record_latency(std::chrono::nanoseconds elapsed);\n\nclass LatencyTimer {\npublic:\n    // steady_clock never moves backward, so an NTP step or an operator\n    // changing the wall clock cannot distort or negate the interval.\n    LatencyTimer() : start_(std::chrono::steady_clock::now()) {}\n\n    ~LatencyTimer() {\n        auto finish = std::chrono::steady_clock::now();\n        record_latency(\n            std::chrono::duration_cast<std::chrono::nanoseconds>(\n                finish - start_));\n    }\n\n    LatencyTimer(const LatencyTimer&) = delete;\n    LatencyTimer& operator=(const LatencyTimer&) = delete;\n\nprivate:\n    std::chrono::steady_clock::time_point start_;\n};",
-      "notes": "Subtracting two time_points yields a duration and the units are checked at compile time, so a nanosecond value can never silently be read as microseconds. now() is not free — it may be a vDSO call or a counter read — so place these at path boundaries rather than around inner loops."
+      "solution": "#include <chrono>\n\nclass Budget {\npublic:\n    using Clock = std::chrono::steady_clock;\n\n    // Taking nanoseconds means seconds, milliseconds and microseconds all\n    // convert implicitly (no precision is lost going finer) while a bare\n    // int has no unit and will not convert at all -- the unit check is\n    // the type system's, and it costs nothing at runtime.\n    explicit Budget(std::chrono::nanoseconds allowance)\n        : deadline_{Clock::now() + allowance} {}\n\n    // steady_clock never runs backwards, so an administrator or an NTP\n    // step cannot make a request look like it finished before it began.\n    std::chrono::nanoseconds remaining() const {\n        return deadline_ - Clock::now();   // one clock read\n    }\n\n    bool expired() const { return remaining() <= std::chrono::nanoseconds::zero(); }\n\nprivate:\n    Clock::time_point deadline_;\n};",
+      "notes": "Storing the deadline rather than the start makes every query one subtraction and keeps the allowance out of the object entirely. Returning a duration matters as much as measuring one: a caller who receives an int has to guess the unit, and `remaining().count()` at the call site is where that guess would be made explicit -- or where duration_cast would truncate it deliberately."
     },
     {
       "id": "c14-w08",
       "section": "Calendar and Time Zones",
-      "minutes": 10,
-      "prompt": "Using the C++20 calendar types, write `is_weekend(std::chrono::year_month_day)` and `month_end(std::chrono::year, std::chrono::month)` returning the last day of that month as a year_month_day. Do not hand-write month lengths or leap-year rules.",
+      "minutes": 12,
+      "prompt": "Options expire on the third Friday of the month. Write `nth_weekday(std::chrono::year_month, std::chrono::weekday, unsigned n)` returning `std::expected<std::chrono::year_month_day, CalendarError>` — the error case being a month with no fifth Friday. Contract: no month-length table, no leap-year arithmetic, and no manual day counting.",
       "checklist": [
-        "is_weekend converts the date through sys_days to obtain a weekday",
-        "Weekend test compares against std::chrono::Saturday and Sunday, not raw numbers",
-        "month_end uses year_month_day_last (the `/ last` spelling) rather than a table of month lengths",
-        "No leap-year arithmetic appears anywhere in the solution",
-        "Both functions take and return chrono calendar types, not integers"
+        "Builds the date from the calendar operators (year_month / weekday[n]), not by adding days",
+        "Validates with .ok() before converting, and returns the error otherwise",
+        "Converts through sys_days to produce a year_month_day",
+        "No hard-coded array of month lengths and no % 4 leap-year test",
+        "The error is a typed enumeration returned via std::unexpected, not a sentinel date"
       ],
-      "solution": "#include <chrono>\n\nbool is_weekend(std::chrono::year_month_day date) {\n    std::chrono::weekday day{std::chrono::sys_days{date}};\n    return day == std::chrono::Saturday || day == std::chrono::Sunday;\n}\n\nstd::chrono::year_month_day month_end(std::chrono::year year,\n                                      std::chrono::month month) {\n    std::chrono::year_month_day_last last{year / month / std::chrono::last};\n    return std::chrono::year_month_day{last};\n}",
-      "notes": "The conversion through sys_days is the whole weekday calculation: sys_days is a count of days since the epoch, and weekday's converting constructor does the modular arithmetic. year_month_day_last knows February 2028 has 29 days without you writing the rule, which is the point of the calendar types."
+      "solution": "#include <chrono>\n#include <expected>\n\nenum class CalendarError {\n    no_such_weekday   // e.g. the fifth Friday of a month that has four\n};\n\nstd::expected<std::chrono::year_month_day, CalendarError>\nnth_weekday(std::chrono::year_month month,\n            std::chrono::weekday day,\n            unsigned n) {\n    // `month / day[n]` is the calendar library's own spelling of \"the nth\n    // such weekday of that month\". Month lengths, leap years and the\n    // day-of-week cycle are all inside it.\n    const std::chrono::year_month_weekday candidate = month / day[n];\n\n    if (!candidate.ok()) {\n        return std::unexpected(CalendarError::no_such_weekday);\n    }\n\n    // year_month_weekday is a *rule*; sys_days resolves it to a point on\n    // the timeline, from which the civil date follows.\n    return std::chrono::year_month_day{std::chrono::sys_days{candidate}};\n}",
+      "notes": "The same operators express the other common trading-calendar shapes: `2026y/July/last` for the month end, and `weekday{sys_days{date}}` to ask which day a date fell on. A session *time* is a separate problem -- an exchange open is a local time in a named zone, so it needs zoned_time and the tz database, and adding a fixed offset instead breaks on the daylight-saving boundary."
     }
   ]
 }
