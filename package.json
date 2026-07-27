@@ -10,6 +10,7 @@
     "preview": "astro preview",
     "astro": "astro",
     "verify:exercises": "node scripts/verify-exercises.mjs",
+    "verify:challenges": "node scripts/verify-challenges.mjs",
     "check:novelty": "node scripts/check-novelty.mjs"
   },
   "dependencies": {

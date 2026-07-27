@@ -1,0 +1,475 @@
+{
+  "kind": "optimization",
+  "title": "Code Optimization",
+  "blurb": "Count what the machine actually does — the copies, the moves, the branches and the cache lines — and say which of them the compiler was already going to remove.",
+  "items": [
+    {
+      "id": "opt-01",
+      "title": "Returning by value",
+      "difficulty": "easy",
+      "topic": "copy elision",
+      "prompt": "`Frame` logs every copy construction and every move construction. `load` always fills `samples`, so the early return is never taken. Count only constructions of `Frame`, and assume the mandatory elision rules of C++17 and later.",
+      "code": "#include <utility>\n#include <vector>\n\n// Frame logs \"copy\" on copy construction and \"move\" on move construction.\nstruct Frame {\n    std::vector<double> samples;\n    Frame() = default;\n    Frame(const Frame&);\n    Frame(Frame&&) noexcept;\n    ~Frame();\n};\n\nvoid load(Frame& f, int n);\n\nFrame decode(int n) {\n    Frame f;\n    load(f, n);\n    if (f.samples.empty())\n        return Frame{};\n    return std::move(f);\n}\n\nint main() {\n    Frame a = decode(8);\n    Frame b = a;\n    Frame c = std::move(b);\n}",
+      "parts": [
+        {
+          "id": "copies",
+          "type": "count",
+          "label": "How many copy constructions of Frame run?",
+          "answer": 1,
+          "verify": "copy",
+          "explain": "Only line 25. `Frame a = decode(8);` initialises `a` from a prvalue, which C++17 does not merely permit the compiler to elide — there is no temporary to elide, `a` *is* the return object."
+        },
+        {
+          "id": "moves",
+          "type": "count",
+          "label": "How many move constructions of Frame run?",
+          "answer": 2,
+          "verify": "move",
+          "explain": "Line 20 moves `f` into the return object, and line 26 moves `b` into `c`. The first of those is the one that did not have to happen."
+        },
+        {
+          "id": "avoidable",
+          "type": "lines",
+          "label": "Click every line whose construction the compiler could have removed entirely, but cannot as written.",
+          "answer": [20],
+          "explain": "`return std::move(f);` casts a named local to an rvalue. Named return value optimisation only applies when the operand is the *name* of a local object, so the cast disqualifies it and buys a guaranteed move in exchange for a construction that would otherwise have vanished."
+        },
+        {
+          "id": "fix",
+          "type": "choice",
+          "label": "What changes if line 20 becomes `return f;`?",
+          "options": [
+            "Nothing — the move on that line was already elided.",
+            "It becomes a copy, because `f` is an lvalue.",
+            "NRVO applies and the construction disappears; if the compiler declines, `f` is still treated as an rvalue and moved.",
+            "It fails to compile: a local cannot be returned by value."
+          ],
+          "answer": 2,
+          "explain": "Returning a local by name is the one case where the standard both permits NRVO *and* mandates overload resolution to treat the operand as an rvalue first. So `return f;` is never worse than `return std::move(f);` and is usually one construction better. This is why `std::move` on a return value is a pessimisation, not an optimisation."
+        }
+      ],
+      "explain": "One copy, two moves — and one of those two moves is self-inflicted. The instinct that `std::move` makes a return cheaper is exactly backwards: without it the compiler may construct `f` directly in the caller's storage and run no constructor at all, and if it declines, it still moves. Reach for `std::move` on a return only when the type of the operand differs from the return type.",
+      "review": { "chapter": "07-moves-and-copies", "section": "Elision: RVO, NRVO, and guaranteed elision" },
+      "check": "syntax",
+      "probe": "#include <cstdio>\n#include <utility>\n#include <vector>\n\nstruct Frame {\n    std::vector<double> samples;\n    Frame() = default;\n    Frame(const Frame& o) : samples(o.samples) { std::puts(\"copy\"); }\n    Frame(Frame&& o) noexcept : samples(std::move(o.samples)) { std::puts(\"move\"); }\n    ~Frame() = default;\n};\n\nvoid load(Frame& f, int n) { f.samples.assign(n, 1.0); }\n\nFrame decode(int n) {\n    Frame f;\n    load(f, n);\n    if (f.samples.empty())\n        return Frame{};\n    return std::move(f);\n}\n\nint main() {\n    Frame a = decode(8);\n    Frame b = a;\n    Frame c = std::move(b);\n}"
+    },
+    {
+      "id": "opt-02",
+      "title": "Growing a vector of a throwing type",
+      "difficulty": "medium",
+      "topic": "reallocation",
+      "prompt": "`Tick` logs every copy and every move. Note what its move constructor is *not*. `std::vector` here grows 0 → 1 → 2 → 4.",
+      "code": "#include <string>\n#include <vector>\n\n// Tick logs \"copy\" and \"move\". Its move constructor is not noexcept.\nstruct Tick {\n    std::string symbol;\n    explicit Tick(const char* s);\n    Tick(const Tick&);\n    Tick(Tick&&);\n    ~Tick();\n};\n\nint main() {\n    std::vector<Tick> book;\n    book.push_back(Tick{\"AAPL\"});\n    book.push_back(Tick{\"MSFT\"});\n    book.emplace_back(\"GOOG\");\n}",
+      "parts": [
+        {
+          "id": "copies",
+          "type": "count",
+          "label": "How many copy constructions of Tick run?",
+          "answer": 3,
+          "verify": "copy",
+          "explain": "Three, all of them during reallocation. Growing 1 → 2 transfers one element, and growing 2 → 4 transfers two. Not one of those transfers is a move."
+        },
+        {
+          "id": "moves",
+          "type": "count",
+          "label": "How many move constructions of Tick run?",
+          "answer": 2,
+          "verify": "move",
+          "explain": "Two: the temporaries on lines 15 and 16 are moved into their slots. `emplace_back` on line 17 constructs in place from the `const char*` and moves nothing — which is exactly why it did not help with the copies."
+        },
+        {
+          "id": "where",
+          "type": "lines",
+          "label": "Click every line on which the vector copies an element it already owns.",
+          "answer": [16, 17],
+          "explain": "Reallocation happens on the way *in* to lines 16 and 17: each finds the buffer full, allocates a bigger one, and transfers what is already there. Line 15 grows from empty, so there is nothing to transfer."
+        },
+        {
+          "id": "fixes",
+          "type": "select",
+          "label": "Which changes remove the three copies?",
+          "options": [
+            "`book.reserve(3);` before the first insert.",
+            "Declaring the move constructor `noexcept`.",
+            "Replacing the two `push_back(Tick{…})` calls with `emplace_back(…)`.",
+            "Storing `std::vector<Tick*>` and allocating each tick with `new`."
+          ],
+          "answer": [0, 1],
+          "explain": "Reserving removes the reallocations, so nothing is transferred at all. Marking the move `noexcept` keeps the reallocations but lets `move_if_noexcept` use the move constructor. `emplace_back` removes *moves*, not copies — it is the answer to a different question, and reaching for it here is the usual wrong turn. The pointer vector trades three copies for three allocations and a lifetime problem."
+        }
+      ],
+      "explain": "`vector` must be able to leave itself untouched if a transfer throws half way through. A move constructor that is not `noexcept` gives it no way to promise that, so `move_if_noexcept` falls back to copying and the whole point of writing a move constructor is lost — silently, with no diagnostic. If a type has a move constructor, it almost always has a `noexcept` one; write the keyword.",
+      "review": { "chapter": "07-moves-and-copies", "section": "noexcept moves and the copy fallback" },
+      "check": "syntax",
+      "probe": "#include <cstdio>\n#include <string>\n#include <utility>\n#include <vector>\n\nstruct Tick {\n    std::string symbol;\n    explicit Tick(const char* s) : symbol(s) {}\n    Tick(const Tick& o) : symbol(o.symbol) { std::puts(\"copy\"); }\n    Tick(Tick&& o) : symbol(std::move(o.symbol)) { std::puts(\"move\"); }\n    ~Tick() = default;\n};\n\nint main() {\n    std::vector<Tick> book;\n    book.push_back(Tick{\"AAPL\"});\n    book.push_back(Tick{\"MSFT\"});\n    book.emplace_back(\"GOOG\");\n}"
+    },
+    {
+      "id": "opt-03",
+      "title": "The sink parameter that never sank",
+      "difficulty": "medium",
+      "topic": "sink parameters",
+      "prompt": "`Route`'s constructor takes its argument by value — the recommended shape for a parameter the object is going to keep. `Name` logs every copy and move.",
+      "code": "#include <string>\n#include <utility>\n\n// Name logs \"copy\" and \"move\".\nstruct Name {\n    std::string text;\n    explicit Name(const char* s);\n    Name(const Name&);\n    Name(Name&&) noexcept;\n    ~Name();\n};\n\nstruct Route {\n    Name via;\n    explicit Route(Name n) : via(n) {}\n};\n\nint main() {\n    Name a{\"nyc\"};\n    Route r1{a};\n    Route r2{Name{\"ldn\"}};\n}",
+      "parts": [
+        {
+          "id": "copies",
+          "type": "count",
+          "label": "How many copy constructions of Name run?",
+          "answer": 3,
+          "verify": "copy",
+          "explain": "Line 19 copies `a` into the parameter and then copies the parameter into `via` — two. Line 20 initialises the parameter directly from a prvalue, costing nothing, and then copies it into `via` — three."
+        },
+        {
+          "id": "moves",
+          "type": "count",
+          "label": "How many move constructions of Name run?",
+          "answer": 0,
+          "verify": "move",
+          "explain": "None. A by-value parameter is an lvalue inside the function, however it was initialised, so `via(n)` selects the copy constructor every time."
+        },
+        {
+          "id": "where",
+          "type": "lines",
+          "label": "Click the line that has to change.",
+          "answer": [15],
+          "explain": "The member initialiser is the defect. The by-value parameter on the same line is right — that is the whole point of taking a sink by value — but it only pays off if the value is then moved out of."
+        },
+        {
+          "id": "after",
+          "type": "choice",
+          "label": "With `via(std::move(n))`, how many copies remain?",
+          "options": ["0", "1", "2", "3"],
+          "answer": 1,
+          "explain": "One: `a` is an lvalue, so line 19 still copies it into the parameter, and that copy is genuinely required — `a` is used again by its owner. Line 20 then costs nothing at all: the prvalue builds the parameter and the parameter is moved into place. Two copies become one copy and two moves."
+        }
+      ],
+      "explain": "By-value sink parameters are half an idiom. Taking the parameter by value says \"I am going to keep this\"; moving out of it is what makes the claim true. Left as written, the by-value parameter is strictly worse than a `const Name&` overload, because it adds a copy on the lvalue path and buys nothing on the rvalue one — which is how a well-intentioned refactor makes code slower.",
+      "review": { "chapter": "07-moves-and-copies", "section": "Move semantics: transfer, not teleportation" },
+      "check": "syntax",
+      "probe": "#include <cstdio>\n#include <string>\n#include <utility>\n\nstruct Name {\n    std::string text;\n    explicit Name(const char* s) : text(s) {}\n    Name(const Name& o) : text(o.text) { std::puts(\"copy\"); }\n    Name(Name&& o) noexcept : text(std::move(o.text)) { std::puts(\"move\"); }\n    ~Name() = default;\n};\n\nstruct Route {\n    Name via;\n    explicit Route(Name n) : via(n) {}\n};\n\nint main() {\n    Name a{\"nyc\"};\n    Route r1{a};\n    Route r2{Name{\"ldn\"}};\n}"
+    },
+    {
+      "id": "opt-04",
+      "title": "Structured bindings in a range-for",
+      "difficulty": "easy",
+      "topic": "range-for",
+      "prompt": "A read-only scan over a map of three quotes. `Quote` logs every copy and move.",
+      "code": "#include <map>\n#include <string>\n\n// Quote logs \"copy\" and \"move\".\nstruct Quote {\n    double px;\n    explicit Quote(double p);\n    Quote(const Quote&);\n    Quote(Quote&&) noexcept;\n    ~Quote();\n};\n\ndouble best(const std::map<std::string, Quote>& book) {\n    double top = 0;\n    for (auto [symbol, quote] : book)\n        if (quote.px > top)\n            top = quote.px;\n    return top;\n}\n\nint main() {\n    std::map<std::string, Quote> book;\n    book.try_emplace(\"aapl\", 1.0);\n    book.try_emplace(\"msft\", 2.0);\n    book.try_emplace(\"goog\", 3.0);\n    best(book);\n}",
+      "parts": [
+        {
+          "id": "copies",
+          "type": "count",
+          "label": "How many copy constructions of Quote run?",
+          "answer": 3,
+          "verify": "copy",
+          "explain": "One per element. `auto [symbol, quote]` declares a hidden `std::pair<const std::string, Quote>` object and copy-initialises it from each element — the names are bindings into that copy, not into the map."
+        },
+        {
+          "id": "where",
+          "type": "lines",
+          "label": "Click the line that does the copying.",
+          "answer": [15],
+          "explain": "Line 15. Lines 22–24 use `try_emplace`, which constructs each `Quote` in place from the `double` and copies nothing, so every copy in the program belongs to the loop."
+        },
+        {
+          "id": "fix",
+          "type": "choice",
+          "label": "Which loop header costs nothing?",
+          "options": [
+            "`for (auto& [symbol, quote] : book)`",
+            "`for (const auto& [symbol, quote] : book)`",
+            "`for (auto&& [symbol, quote] : book)`",
+            "`for (const auto [symbol, quote] : book)`"
+          ],
+          "answer": 1,
+          "explain": "`const auto&` binds directly to each element. A plain `auto&` does not compile here: `book` is a `const` reference, so the elements are `const` and cannot bind to a non-const lvalue reference. `auto&&` also works and is what a generic template should write, but it is doing forwarding-reference work this loop does not need. `const auto` still copies — the `const` changes nothing about that."
+        }
+      ],
+      "explain": "Structured bindings are a declaration, and a declaration with `auto` and no reference is a copy — the destructuring syntax hides that the pair on the left is a new object. It is the same rule as `for (auto x : v)`, but it reads like pattern matching rather than initialisation, which is why it slips past review far more often. `const auto&` should be the default and the copy the deliberate exception.",
+      "review": { "chapter": "07-moves-and-copies", "section": "Copies, and where they hide" },
+      "check": "syntax",
+      "probe": "#include <cstdio>\n#include <map>\n#include <string>\n\nstruct Quote {\n    double px;\n    explicit Quote(double p) : px(p) {}\n    Quote(const Quote& o) : px(o.px) { std::puts(\"copy\"); }\n    Quote(Quote&& o) noexcept : px(o.px) { std::puts(\"move\"); }\n    ~Quote() = default;\n};\n\ndouble best(const std::map<std::string, Quote>& book) {\n    double top = 0;\n    for (auto [symbol, quote] : book)\n        if (quote.px > top)\n            top = quote.px;\n    return top;\n}\n\nint main() {\n    std::map<std::string, Quote> book;\n    book.try_emplace(\"aapl\", 1.0);\n    book.try_emplace(\"msft\", 2.0);\n    book.try_emplace(\"goog\", 3.0);\n    best(book);\n}"
+    },
+    {
+      "id": "opt-05",
+      "title": "Three ways into a map",
+      "difficulty": "hard",
+      "topic": "associative inserts",
+      "prompt": "Three inserts that all read as \"put `c` under this key\". `Config` logs \"copy\" for a copy construction *or* a copy assignment, and \"move\" for either move operation.",
+      "code": "#include <map>\n#include <string>\n\n// Config logs \"copy\" and \"move\", on construction and on assignment alike.\nstruct Config {\n    int retries = 0;\n    Config() = default;\n    Config(const Config&);\n    Config(Config&&) noexcept;\n    Config& operator=(const Config&);\n    Config& operator=(Config&&) noexcept;\n    ~Config();\n};\n\nint main() {\n    std::map<std::string, Config> registry;\n    Config c;\n    registry[\"alpha\"] = c;\n    registry.insert({\"beta\", c});\n    registry.try_emplace(\"gamma\", c);\n}",
+      "parts": [
+        {
+          "id": "copies",
+          "type": "count",
+          "label": "How many copies of Config happen?",
+          "answer": 3,
+          "verify": "copy",
+          "explain": "One per line. Line 18 default-constructs a `Config` in the map and then copy-*assigns* over it; line 19 copies `c` into a temporary pair; line 20 copy-constructs directly into the node."
+        },
+        {
+          "id": "moves",
+          "type": "count",
+          "label": "How many moves of Config happen?",
+          "answer": 1,
+          "verify": "move",
+          "explain": "One, on line 19: the temporary `std::pair` is moved into the freshly allocated node. Note that only the `Config` half moves — the key is `const std::string`, so it is copied, which is the other cost `insert` hides."
+        },
+        {
+          "id": "waste",
+          "type": "lines",
+          "label": "Click every line that builds a Config it then throws away.",
+          "answer": [18, 19],
+          "explain": "Line 18 default-constructs a `Config` purely so it has something to assign to — and if the key was already present, it silently overwrites instead of inserting. Line 19 materialises an entire `pair` only to move it into the node. Line 20 builds exactly one `Config`, in its final home."
+        },
+        {
+          "id": "best",
+          "type": "choice",
+          "label": "Which line already does the minimum?",
+          "options": ["Line 18", "Line 19", "Line 20", "They all cost the same"],
+          "answer": 2,
+          "explain": "`try_emplace` forwards its arguments to construct the mapped value in place, and — unlike `emplace` — does not build a node at all when the key is already present. `emplace({\"gamma\", c})` would have copied first and discovered the duplicate second."
+        }
+      ],
+      "explain": "`operator[]`, `insert` and `try_emplace` are not three spellings of one operation. `operator[]` requires a default constructor and quietly overwrites; `insert` needs a whole `value_type` before it can look at the key; `try_emplace` builds the mapped value in place and only if the key is new. The costs differ, and so does the behaviour on a duplicate key — which is the bug that outlives the performance question.",
+      "review": { "chapter": "11-associative-containers", "section": "Lookup, insertion, and node transfer" },
+      "check": "syntax",
+      "probe": "#include <cstdio>\n#include <map>\n#include <string>\n\nstruct Config {\n    int retries = 0;\n    Config() = default;\n    Config(const Config& o) : retries(o.retries) { std::puts(\"copy\"); }\n    Config(Config&& o) noexcept : retries(o.retries) { std::puts(\"move\"); }\n    Config& operator=(const Config& o) { retries = o.retries; std::puts(\"copy\"); return *this; }\n    Config& operator=(Config&& o) noexcept { retries = o.retries; std::puts(\"move\"); return *this; }\n    ~Config() = default;\n};\n\nint main() {\n    std::map<std::string, Config> registry;\n    Config c;\n    registry[\"alpha\"] = c;\n    registry.insert({\"beta\", c});\n    registry.try_emplace(\"gamma\", c);\n}"
+    },
+    {
+      "id": "opt-06",
+      "title": "The return the compiler may not touch",
+      "difficulty": "hard",
+      "topic": "elision limits",
+      "prompt": "Three functions that all return a `Fault` by value. `Fault` logs every copy and move. Assume the compiler applies every optimisation the standard allows it to.",
+      "code": "#include <utility>\n\n// Fault logs \"copy\" and \"move\".\nstruct Fault {\n    int code = 0;\n    Fault() = default;\n    Fault(const Fault&);\n    Fault(Fault&&) noexcept;\n    ~Fault();\n};\n\nFault fresh() { return Fault{}; }\n\nFault normalise(Fault f) { return f; }\n\nFault relabel(const Fault& f) { return Fault{f}; }\n\nint main() {\n    Fault a = fresh();\n    Fault b = normalise(Fault{});\n    Fault c = relabel(a);\n}",
+      "parts": [
+        {
+          "id": "copies",
+          "type": "count",
+          "label": "How many copy constructions of Fault run?",
+          "answer": 1,
+          "verify": "copy",
+          "explain": "One, inside `relabel`: `Fault{f}` builds a new object from a `const` reference, and there is no way around that — the caller still owns `a`. The prvalue it produces then initialises `c` directly."
+        },
+        {
+          "id": "moves",
+          "type": "count",
+          "label": "How many move constructions of Fault run?",
+          "answer": 1,
+          "verify": "move",
+          "explain": "One, inside `normalise`. Line 20's argument builds the parameter in place at no cost, and line 20's own initialisation of `b` is elided — the single move is `return f;`."
+        },
+        {
+          "id": "forced",
+          "type": "lines",
+          "label": "Click the line whose construction no conforming compiler is permitted to remove.",
+          "answer": [14],
+          "explain": "`return f;` where `f` is a *parameter*. NRVO is defined in terms of a non-volatile automatic object that is not a function parameter, so the optimisation is spelled out as not applying here. Line 12 needs no elision — it returns a prvalue — and line 16's copy is required by the interface, not by the language."
+        },
+        {
+          "id": "why",
+          "type": "choice",
+          "label": "Why is a parameter excluded from NRVO?",
+          "options": [
+            "Parameters may be `const`, and a `const` object cannot be moved from.",
+            "The caller owns the parameter's storage and destroys it after the call, so the callee cannot have built it in the return slot.",
+            "A parameter's address may have been taken by the caller.",
+            "It is an oversight; every mainstream compiler elides it anyway."
+          ],
+          "answer": 1,
+          "explain": "The parameter already lives somewhere the calling convention chose, and the caller — not `normalise` — is responsible for destroying it. Constructing the return value in place would require the parameter to have been born in the return slot, which the call was over before it could arrange. The compiler still gives you the consolation prize: the operand of a `return` naming a parameter is treated as an rvalue, so you get a move rather than a copy for free."
+        }
+      ],
+      "explain": "Guaranteed elision, NRVO, and implicit move are three separate rules, and knowing which applies tells you what a `return` costs. A prvalue return costs nothing and always has since C++17. A named local costs nothing *if* the compiler cooperates, and one move if it does not. A parameter costs exactly one move, always. Only the last of those is worth restructuring code for.",
+      "review": { "chapter": "07-moves-and-copies", "section": "Elision: RVO, NRVO, and guaranteed elision" },
+      "check": "syntax",
+      "probe": "#include <cstdio>\n#include <utility>\n\nstruct Fault {\n    int code = 0;\n    Fault() = default;\n    Fault(const Fault& o) : code(o.code) { std::puts(\"copy\"); }\n    Fault(Fault&& o) noexcept : code(o.code) { std::puts(\"move\"); }\n    ~Fault() = default;\n};\n\nFault fresh() { return Fault{}; }\n\nFault normalise(Fault f) { return f; }\n\nFault relabel(const Fault& f) { return Fault{f}; }\n\nint main() {\n    Fault a = fresh();\n    Fault b = normalise(Fault{});\n    Fault c = relabel(a);\n}"
+    },
+    {
+      "id": "opt-07",
+      "title": "The destructor that cost a move",
+      "difficulty": "medium",
+      "topic": "special members",
+      "prompt": "`Frame` owns a `Buffer` and flushes it on the way out. `Buffer` logs every copy and move, and moves cheaply. Nothing here is written wrong on purpose.",
+      "code": "#include <utility>\n\n// Buffer logs \"copy\" and \"move\".\nstruct Buffer {\n    Buffer() = default;\n    Buffer(const Buffer&);\n    Buffer(Buffer&&) noexcept;\n    ~Buffer();\n};\n\nclass Frame {\npublic:\n    explicit Frame(Buffer b) : data_(std::move(b)) {}\n    ~Frame() { flush(); }\n    void flush();\n\nprivate:\n    Buffer data_;\n};\n\nint main() {\n    Frame f{Buffer{}};\n    Frame g = std::move(f);\n}",
+      "parts": [
+        {
+          "id": "copies",
+          "type": "count",
+          "label": "How many copy constructions of Buffer run?",
+          "answer": 1,
+          "verify": "copy",
+          "explain": "One, on line 22 — despite the `std::move`. `Frame` has no move constructor, so overload resolution falls back to the copy constructor, which happily binds an rvalue to its `const Frame&` parameter."
+        },
+        {
+          "id": "moves",
+          "type": "count",
+          "label": "How many move constructions of Buffer run?",
+          "answer": 1,
+          "verify": "move",
+          "explain": "One, on line 21: the prvalue `Buffer{}` initialises the parameter at no cost, and `std::move(b)` then moves it into `data_`. The constructor is written correctly; it is the class around it that is not."
+        },
+        {
+          "id": "cause",
+          "type": "lines",
+          "label": "Click the line that stops Frame from being movable.",
+          "answer": [14],
+          "explain": "A user-declared destructor suppresses the implicit move constructor and move assignment operator, and leaves the copy operations declared (deprecated, but declared). The class silently changes category, and every `std::move` applied to it silently becomes a copy."
+        },
+        {
+          "id": "fix",
+          "type": "choice",
+          "label": "What is the best fix?",
+          "options": [
+            "Add `Frame(Frame&&) = default;` and `Frame& operator=(Frame&&) = default;`.",
+            "Give `Buffer` a destructor that flushes, so `Frame` needs no destructor at all.",
+            "Change line 22 to `Frame g{std::move(f.data_)};`.",
+            "Delete the copy constructor so the move is selected instead."
+          ],
+          "answer": 1,
+          "explain": "Defaulting the move operations works and is what you do when you cannot change `Buffer` — but it also obliges you to declare the copy operations, because declaring a move suppresses those in turn. Pushing the flush into the resource that needs flushing removes the user-declared destructor, and with it the whole problem: `Frame` goes back to being a class whose special members are all correct because none of them exist. Deleting the copy constructor does not conjure a move constructor; it makes the type immovable."
+        }
+      ],
+      "explain": "The rule of five is usually taught as \"if you write one, write them all\". The failure it actually prevents is quieter than a double free: a destructor added for logging, tracing or a flush turns a movable type into a copyable one, and nothing warns. The best version of the fix is not to write the five, but to arrange for the class to need none of them — every resource owned by something that already knows how to release itself.",
+      "review": { "chapter": "07-moves-and-copies", "section": "Move-only types and defaulting rules" },
+      "check": "syntax",
+      "probe": "#include <cstdio>\n#include <utility>\n\nstruct Buffer {\n    Buffer() = default;\n    Buffer(const Buffer&) { std::puts(\"copy\"); }\n    Buffer(Buffer&&) noexcept { std::puts(\"move\"); }\n    ~Buffer() = default;\n};\n\nclass Frame {\npublic:\n    explicit Frame(Buffer b) : data_(std::move(b)) {}\n    ~Frame() { flush(); }\n    void flush() {}\n\nprivate:\n    Buffer data_;\n};\n\nint main() {\n    Frame f{Buffer{}};\n    Frame g = std::move(f);\n}"
+    },
+    {
+      "id": "opt-08",
+      "title": "The branch the predictor cannot learn",
+      "difficulty": "medium",
+      "topic": "branch prediction",
+      "prompt": "`v` holds 32768 `int`s drawn uniformly at random from 0…255, and `sum_large` is called in a loop over the same vector. The build is `-O2` on a modern out-of-order core.",
+      "code": "#include <vector>\n\nlong sum_large(const std::vector<int>& v) {\n    long total = 0;\n    for (int x : v)\n        if (x >= 128)\n            total += x;\n    return total;\n}",
+      "parts": [
+        {
+          "id": "where",
+          "type": "lines",
+          "label": "Click the line that dominates the cost.",
+          "answer": [6],
+          "explain": "The comparison itself is one cheap instruction. What costs is the *branch* it drives: with uniformly random data it is taken half the time in no learnable pattern, so the predictor is right about half the time and every miss discards the work already speculatively issued."
+        },
+        {
+          "id": "cost",
+          "type": "choice",
+          "label": "Roughly what does each mispredicted branch cost?",
+          "options": [
+            "A few cycles — the pipeline refills from the L1 instruction cache.",
+            "Around 15–20 cycles, the depth of the pipeline being flushed and refilled.",
+            "Around 200 cycles, the cost of the memory access it was hiding.",
+            "Nothing measurable; branch prediction was solved by out-of-order execution."
+          ],
+          "answer": 1,
+          "explain": "A misprediction costs the depth of the front end — commonly 15–20 cycles on a current x86-64 or ARM core. That is the same order as an L2 hit and roughly ten times an arithmetic instruction, which is why a 50%-mispredicted branch in a tight loop can dominate a loop body that otherwise does one add."
+        },
+        {
+          "id": "fixes",
+          "type": "select",
+          "label": "Which changes actually remove the mispredictions?",
+          "options": [
+            "Sorting `v` once before the repeated calls.",
+            "`total += (x >= 128) * x;`",
+            "`total += x & -static_cast<long>(x >= 128);`",
+            "Marking the `if` with `[[likely]]`."
+          ],
+          "answer": [0, 1, 2],
+          "explain": "Sorting makes the branch overwhelmingly predictable — two long runs with one transition — and pays for itself when the scan is repeated. The two arithmetic forms have no branch left to mispredict; both are the shape a compiler recognises and turns into a conditional move or a mask. `[[likely]]` only tells the compiler how to lay out the code; it cannot make random data predictable, and asserting a 50/50 branch is likely is as often harmful as not."
+        }
+      ],
+      "explain": "The interesting property of this loop is not that a branch is expensive, it is that the *data* decides. The same code over sorted input runs several times faster with no change to a single instruction — so a microbenchmark on tidy input will report a number the production path never sees. Before making a branch branchless, check whether it is actually unpredictable: a branch the predictor gets right 99% of the time is already free, and `cmov` would make it slower by removing the speculation.",
+      "review": { "chapter": "10-sequence-containers", "section": "Latency Lens" },
+      "check": "syntax"
+    },
+    {
+      "id": "opt-09",
+      "title": "Two bytes out of every sixty-four",
+      "difficulty": "medium",
+      "topic": "cache friendliness",
+      "prompt": "`Order` is exactly 64 bytes and the cache line is 64 bytes. `book` holds 1024 orders in one contiguous `vector`, and nothing else is in cache when `notional` starts.",
+      "code": "#include <vector>\n\nstruct Order {      // 64 bytes exactly\n    char   symbol[8];\n    double price;\n    double size;\n    long   id;\n    char   pad[32];\n};\n\ndouble notional(const std::vector<Order>& book) {\n    double total = 0;\n    for (const Order& o : book)\n        total += o.price * o.size;\n    return total;\n}",
+      "parts": [
+        {
+          "id": "aos",
+          "type": "count",
+          "label": "How many 64-byte cache lines must be fetched to run notional?",
+          "answer": 1024,
+          "explain": "One per order: 1024. The loop reads 16 useful bytes from each line and the other 48 come along because they are on it. Contiguity has not saved anything here — the array is perfectly sequential and still fetches four times more than it uses."
+        },
+        {
+          "id": "soa",
+          "type": "count",
+          "label": "And if price and size were each stored in their own contiguous array?",
+          "answer": 256,
+          "explain": "1024 × 8 bytes of price is 8192 bytes, or 128 lines, and the same again for size: 256 in total. Every byte fetched is used."
+        },
+        {
+          "id": "claims",
+          "type": "select",
+          "label": "Which are true of the split-array version?",
+          "options": [
+            "It touches a quarter of the memory traffic.",
+            "It gives the hardware prefetcher two streams to follow instead of one, which modern prefetchers handle.",
+            "It makes looking up a single order by index more expensive.",
+            "It removes the need for the `pad` member."
+          ],
+          "answer": [0, 1],
+          "explain": "The traffic drops by 4× and both arrays are still sequential, so the prefetcher is comfortable — it tracks several streams. Indexing one whole order is *not* more expensive in instruction count; it is two indexed loads instead of one, from two lines instead of one, which is why the layout is a trade rather than a free win: it favours scans over random single-record access. The padding is a property of the struct's alignment, unrelated to which arrays exist."
+        }
+      ],
+      "explain": "\"Contiguous\" and \"cache friendly\" are not the same claim. A `vector` guarantees the first; whether the second follows depends on how much of each fetched line the loop actually reads. The number to compute before restructuring anything is the ratio of bytes used to bytes fetched — here 16 of 64. That ratio, not the container, is what a struct-of-arrays layout changes, and it is also what tells you when the change is not worth making.",
+      "review": { "chapter": "16-object-representation-and-layout", "section": "Latency Lens" },
+      "check": "syntax"
+    },
+    {
+      "id": "opt-10",
+      "title": "The accessor that looked cheap",
+      "difficulty": "hard",
+      "topic": "accessors",
+      "prompt": "Two accessors and one free function. `Symbol` logs every copy and move; it is expensive to copy. `Instrument` is default-constructible.",
+      "code": "#include <string>\n#include <utility>\n\n// Symbol logs \"copy\" and \"move\".\nstruct Symbol {\n    std::string text;\n    Symbol() = default;\n    Symbol(const Symbol&);\n    Symbol(Symbol&&) noexcept;\n    ~Symbol();\n};\n\nclass Instrument {\npublic:\n    Symbol symbol() const { return symbol_; }\n    const Symbol& ref() const { return symbol_; }\n\nprivate:\n    Symbol symbol_;\n};\n\nbool same(Symbol a, Symbol b);\n\nint main() {\n    Instrument x, y;\n    same(x.symbol(), y.symbol());\n    same(x.ref(), y.ref());\n    Symbol s = std::move(x).symbol();\n}",
+      "parts": [
+        {
+          "id": "copies",
+          "type": "count",
+          "label": "How many copy constructions of Symbol run?",
+          "answer": 5,
+          "verify": "copy",
+          "explain": "Two on line 26 (inside each `symbol()` call — the returned prvalues then initialise the parameters for free), two on line 27 (the accessor is free, the by-value parameters are not), and one on line 28."
+        },
+        {
+          "id": "moves",
+          "type": "count",
+          "label": "How many move constructions of Symbol run?",
+          "answer": 0,
+          "verify": "move",
+          "explain": "None — including on line 28. `std::move(x)` produces an rvalue `Instrument`, but `symbol()` is a `const` member function with no ref-qualifier, so it is happy to be called on it and its body still copies `symbol_`. Moving the object does not move what you then ask it for."
+        },
+        {
+          "id": "cheapest",
+          "type": "choice",
+          "label": "Which of lines 26 and 27 is cheaper?",
+          "options": [
+            "Line 26 — the prvalues initialise the parameters directly.",
+            "Line 27 — `ref()` returns a reference and copies nothing.",
+            "They cost the same.",
+            "Line 27, and it also avoids a dangling reference that line 26 risks."
+          ],
+          "answer": 2,
+          "explain": "Two copies each. Line 26 pays inside the accessor and gets the parameter initialisation for free; line 27 gets the accessor for free and pays at the parameter. Returning by reference only helps if the *caller* also stops copying — which is the trap: changing an accessor to return `const&` and measuring no improvement usually means the copy simply moved one call deeper."
+        },
+        {
+          "id": "after",
+          "type": "lines",
+          "label": "Click every line that would still copy if `same` took both arguments by `const Symbol&`.",
+          "answer": [26, 28],
+          "explain": "Line 27 becomes free — a reference binds to a reference. Line 26 still copies twice, because the copies are inside `symbol()` and have nothing to do with how `same` takes its arguments. Line 28 still copies for the same reason."
+        }
+      ],
+      "explain": "Where a copy happens and who is responsible for it are different questions, and the answer to the second is what the fix follows from. Here the accessor and the parameter each cost one copy, so fixing either alone halves the cost and fixing both makes it free. The full remedy for `symbol()` is a ref-qualified pair — `const Symbol& symbol() const &` and `Symbol symbol() &&` returning `std::move(symbol_)` — which is what makes line 28 mean what it looks like it means.",
+      "review": { "chapter": "07-moves-and-copies", "section": "Value categories and move eligibility" },
+      "check": "syntax",
+      "probe": "#include <cstdio>\n#include <string>\n#include <utility>\n\nstruct Symbol {\n    std::string text;\n    Symbol() = default;\n    Symbol(const Symbol& o) : text(o.text) { std::puts(\"copy\"); }\n    Symbol(Symbol&& o) noexcept : text(std::move(o.text)) { std::puts(\"move\"); }\n    ~Symbol() = default;\n};\n\nclass Instrument {\npublic:\n    Symbol symbol() const { return symbol_; }\n    const Symbol& ref() const { return symbol_; }\n\nprivate:\n    Symbol symbol_;\n};\n\nbool same(Symbol a, Symbol b) { return a.text == b.text; }\n\nint main() {\n    Instrument x, y;\n    same(x.symbol(), y.symbol());\n    same(x.ref(), y.ref());\n    Symbol s = std::move(x).symbol();\n}"
+    }
+  ]
+}

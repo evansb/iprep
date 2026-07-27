@@ -2,6 +2,7 @@
 import BaseLayout from '../layouts/BaseLayout.astro';
 import { books } from '../books';
 import { getBookChapters } from '../lib/chapters';
+import { counts, getChallengeSets } from '../lib/challenges';
 import { href } from '../lib/url';
 
 const cards = await Promise.all(
@@ -10,6 +11,11 @@ const cards = await Promise.all(
     count: (await getBookChapters(book.slug)).length,
   })),
 );
+
+// The challenges are an app rather than a book, so they get their own card
+// below the shelf instead of a row in it.
+const challengeSets = (await Promise.all(books.map((b) => getChallengeSets(b.slug)))).flat();
+const challengeTotal = challengeSets.reduce((n, s) => n + counts(s).items, 0);
 ---
 
 <BaseLayout title="Library of Quant">
@@ -31,5 +37,24 @@ const cards = await Promise.all(
         ))
       }
     </div>
+
+    {
+      challengeTotal > 0 && (
+        <div class="home-apps">
+          <h2 class="home-apps-head">Drills</h2>
+          <a class="book-card" href={href('/challenges/')}>
+            <span class="book-badge">⚡</span>
+            <h2>C++ Challenges</h2>
+            <p class="book-sub">
+              Count the copies and moves, find the race, find the leak — one snippet, several
+              questions, and no credit for getting most of them right.
+            </p>
+            <span class="book-meta">
+              {challengeTotal} challenges across {challengeSets.length} sets
+            </span>
+          </a>
+        </div>
+      )
+    }
   </section>
 </BaseLayout>

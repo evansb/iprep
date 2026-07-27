@@ -1,0 +1,89 @@
+---
+import { render } from 'astro:content';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import Challenge from '../../components/Challenge.astro';
+import { books } from '../../books';
+import { chapterSlug, getBookChapters } from '../../lib/chapters';
+import { sectionKey } from '../../lib/exercises';
+import {
+  challengeKind,
+  counts,
+  getChallengeSets,
+  storageKey,
+} from '../../lib/challenges';
+import { href } from '../../lib/url';
+
+export async function getStaticPaths() {
+  const paths = [];
+  for (const book of books) {
+    const sets = await getChallengeSets(book.slug);
+    if (!sets.length) continue;
+    const chapters = await getBookChapters(book.slug);
+
+    // An item's `review` names a chapter and one of its `##` headings; resolve
+    // that to the anchor Astro generated, exactly as the chapter exercise page
+    // does. Chapters are rendered once each, not once per item.
+    const anchors = new Map<string, Record<string, string>>();
+    for (const entry of chapters) {
+      const { headings } = await render(entry);
+      anchors.set(
+        chapterSlug(entry),
+        Object.fromEntries(headings.filter((h) => h.depth === 2).map((h) => [sectionKey(h.text), h.slug])),
+      );
+    }
+
+    for (const set of sets) {
+      const reviewHrefs: Record<string, string> = {};
+      for (const item of set.data.items) {
+        if (!item.review) continue;
+        const slug = anchors.get(item.review.chapter)?.[sectionKey(item.review.section)];
+        // A typo in `review` drops the link rather than breaking the build; the
+        // verifier is what fails on it.
+        if (slug) reviewHrefs[item.id] = href(`/books/${book.slug}/${item.review.chapter}/#${slug}`);
+      }
+      paths.push({
+        params: { kind: challengeKind(set) },
+        props: { book, set, reviewHrefs },
+      });
+    }
+  }
+  return paths;
+}
+
+const { book, set, reviewHrefs } = Astro.props;
+const n = counts(set);
+const kind = challengeKind(set);
+---
+
+<BaseLayout
+  title={`${set.data.title} — C++ Challenges`}
+  description={`${n.items} ${set.data.title.toLowerCase()} challenges: ${set.data.blurb}`}
+>
+  <div class="container quiz-page">
+    <div class="quiz-page-head">
+      <a class="quiz-back" href={href('/challenges/')}>← All challenges</a>
+      <h1>{set.data.title}</h1>
+      <p class="quiz-page-sub">
+        {n.items} challenges · {n.parts} graded parts · a challenge counts as solved only when
+        every part is right
+      </p>
+    </div>
+
+    <Challenge
+      set={set}
+      storageKey={storageKey(book.slug, kind)}
+      reviewHrefs={reviewHrefs}
+    />
+
+    <nav class="pager" aria-label="Challenge navigation">
+      <a class="prev" href={href('/challenges/')}>
+        <span class="pager-label">← Back to</span>
+        <span class="pager-title">All challenges</span>
+      </a>
+      <a class="next" href={href(`/books/${book.slug}/exercises/`)}>
+        <span class="pager-label">Chapter exercises →</span>
+        <span class="pager-title">{book.title}</span>
+      </a>
+    </nav>
+  </div>
+</BaseLayout>

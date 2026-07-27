@@ -738,8 +738,115 @@ code {
   border-bottom: 1px solid var(--border);
 }
 
+/* Non-book apps on the library home, below the shelf. */
+.home-apps { margin-top: 3rem; }
+.home-apps-head {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+  margin: 0 0 1rem;
+}
+.home-apps .book-card { display: block; max-width: 34rem; }
+
+/* ---- Challenge app ----
+   Reuses the quiz card, buttons, tags and feedback boxes; everything below is
+   what a multi-part challenge needs on top of them. */
+.chal-grid {
+  display: grid;
+  gap: 1.25rem;
+  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+  margin: 2rem 0 3rem;
+}
+.chal-card-link .book-meta { display: flex; align-items: center; gap: 0.5rem; }
+.chal-title { font-size: 1.15rem; margin: 0 0 0.5rem; }
+
+/* The snippet, with a clickable line gutter. The per-line numbers come from a
+   counter rather than injected markup, so Shiki's token spans are untouched.
+   The script strips the newline text nodes between lines, which would otherwise
+   double the leading once each line becomes a block. */
+.chal-code code {
+  display: block;
+  counter-reset: chal-line;
+}
+.chal-code .line {
+  display: block;
+  counter-increment: chal-line;
+  padding-left: 3.5ch;
+  margin-left: -0.35rem;
+  padding-right: 0.35rem;
+  border-radius: 4px;
+  position: relative;
+}
+.chal-code .line::before {
+  content: counter(chal-line);
+  position: absolute;
+  left: 0;
+  width: 2.5ch;
+  text-align: right;
+  color: var(--text-faint);
+  opacity: 0.7;
+  user-select: none;
+}
+.chal-code .line.pickable { cursor: pointer; }
+.chal-code .line.pickable:hover { background: var(--bg-soft); box-shadow: inset 0 0 0 1px var(--border); }
+.chal-code .line.pickable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.chal-code .line.picked { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.chal-code .line.picked::before { color: var(--accent); opacity: 1; }
+.chal-code .line.answer { background: var(--ok-soft); box-shadow: inset 0 0 0 1px var(--ok); }
+.chal-code .line.answer::before { color: var(--ok); opacity: 1; }
+.chal-code .line.wrong { background: var(--bad-soft); box-shadow: inset 0 0 0 1px var(--bad); }
+.chal-code .line.wrong::before { color: var(--bad); opacity: 1; }
+
+.chal-parts { display: grid; gap: 1.1rem; margin-top: 1.25rem; }
+.chal-part {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong);
+  border-radius: 10px;
+  padding: 0.9rem 1rem;
+  background: var(--bg);
+}
+.chal-part.ok { border-left-color: var(--ok); }
+.chal-part.bad { border-left-color: var(--bad); }
+.chal-part-label { margin: 0 0 0.7rem; font-weight: 600; line-height: 1.45; }
+.chal-part-explain { margin: 0.4rem 0 0; font-size: 0.9rem; color: var(--text-soft); line-height: 1.6; }
+.chal-verdict { margin: 0.7rem 0 0; font-size: 0.85rem; font-weight: 650; }
+.chal-verdict.ok { color: var(--ok); }
+.chal-verdict.bad { color: var(--bad); }
+
+.chal-count-row { display: flex; align-items: center; gap: 0.6rem; }
+.chal-count-input {
+  width: 6rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-family: var(--font-mono);
+}
+.chal-count-input.correct { border-color: var(--ok); background: var(--ok-soft); }
+.chal-count-input.incorrect { border-color: var(--bad); background: var(--bad-soft); }
+.chal-answer { font-size: 0.85rem; color: var(--bad); font-family: var(--font-mono); }
+
+.chal-options { display: grid; gap: 0.5rem; }
+.chal-lines-readout { margin: 0; font-size: 0.9rem; color: var(--text-soft); font-family: var(--font-mono); }
+.chal-line-grid { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.chal-line-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
 @media (max-width: 640px) {
   .quiz-card { padding: 1.1rem; }
+  .chal-part { padding: 0.8rem; }
   .quiz-answer-row { flex-direction: column; }
   .quiz-index-counts { margin-left: 0; flex-basis: 100%; }
 }

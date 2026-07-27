@@ -20,57 +20,14 @@
  *
  * Fragments (anything without `int main`) are only syntax-checked, never run.
  */
-import { execFile } from 'node:child_process';
 import { readFile, mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { glob } from 'node:fs/promises';
-
-const CXX = process.env.CXX || 'clang++';
-const STD = process.env.CXXSTD || '-std=c++23';
-// Two very different budgets. Compiling a threaded or heavily-templated snippet
-// on a loaded machine can take many seconds and that says nothing about the
-// exercise, so the compiler gets room. Running is where a snippet that hangs
-// must be caught, and correct snippets finish in milliseconds.
-const COMPILE_TIMEOUT_MS = Number(process.env.COMPILE_TIMEOUT_MS || 120000);
-const RUN_TIMEOUT_MS = Number(process.env.RUN_TIMEOUT_MS || 5000);
-const CONCURRENCY = Number(process.env.VERIFY_JOBS || 8);
-
-const run = (cmd, args, opts = {}) =>
-  new Promise((resolve) => {
-    execFile(cmd, args, { timeout: RUN_TIMEOUT_MS, maxBuffer: 4 << 20, ...opts }, (err, stdout, stderr) =>
-      resolve({
-        code: err ? (typeof err.code === 'number' ? err.code : 1) : 0,
-        timedOut: Boolean(err && err.killed),
-        signal: err?.signal ?? null,
-        stdout: stdout ?? '',
-        stderr: stderr ?? '',
-      }),
-    );
-  });
-
-/** Invoke the compiler. Never subject to the run budget. */
-const compile = (args) => run(CXX, args, { timeout: COMPILE_TIMEOUT_MS });
-
-/**
- * Execute a built snippet. On macOS the first exec of a freshly written binary
- * is scanned by the system (seconds of wall time at almost no CPU), which looks
- * exactly like a hang. A snippet that genuinely loops forever times out twice;
- * one that was merely being scanned runs immediately the second time.
- */
-const execute = async (bin, opts) => {
-  const first = await run(bin, [], opts);
-  if (!first.timedOut) return first;
-  return run(bin, [], opts);
-};
+import { STD, announceCompiler, compile, execute, isProgram, pool } from './lib/cxx.mjs';
 
 async function main() {
-  const probe = await run(CXX, ['--version']);
-  if (probe.code !== 0) {
-    console.log(`skip: no working ${CXX} on this machine — nothing verified.`);
-    process.exit(0);
-  }
-  console.log(`${CXX} ${STD} · ${probe.stdout.split('\n')[0]}\n`);
+  if (!(await announceCompiler())) process.exit(0);
 
   const patterns = process.argv.slice(2);
   const files = [];
@@ -133,23 +90,12 @@ async function main() {
   const dir = await mkdtemp(join(tmpdir(), 'ex-verify-'));
   const failures = [];
   const warnings = [];
-  let done = 0;
 
-  const worker = async (queue) => {
-    for (;;) {
-      const job = queue.shift();
-      if (!job) return;
-      const outcome = await check(job, dir);
-      done++;
-      if (outcome?.level === 'fail') failures.push({ job, ...outcome });
-      else if (outcome?.level === 'warn') warnings.push({ job, ...outcome });
-      process.stderr.write(`\r${done}/${jobs.length} checked`);
-    }
-  };
-
-  const queue = jobs.slice();
-  await Promise.all(Array.from({ length: CONCURRENCY }, () => worker(queue)));
-  process.stderr.write('\r');
+  await pool(jobs, async (job) => {
+    const outcome = await check(job, dir);
+    if (outcome?.level === 'fail') failures.push({ job, ...outcome });
+    else if (outcome?.level === 'warn') warnings.push({ job, ...outcome });
+  });
   await rm(dir, { recursive: true, force: true });
 
   for (const e of sectionErrors) console.log(`FAIL  ${e}`);
@@ -170,7 +116,7 @@ async function main() {
 async function check(job, dir) {
   const src = join(dir, `${job.id}-${job.what.replace(/\W/g, '')}.cpp`);
   await writeFile(src, job.code);
-  const selfContained = /\bint\s+main\s*\(/.test(job.code);
+  const selfContained = isProgram(job.code);
 
   if (job.expect === 'lenient') {
     const r = await compile([STD, '-fsyntax-only', src]);

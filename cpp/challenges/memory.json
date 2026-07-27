@@ -1,0 +1,458 @@
+{
+  "kind": "memory",
+  "title": "Memory Bugs",
+  "blurb": "Leaks, double frees and dangling references — most of them one exception away from code that is perfectly correct on the happy path.",
+  "items": [
+    {
+      "id": "mem-01",
+      "title": "Correct on the happy path",
+      "difficulty": "easy",
+      "topic": "leak on throw",
+      "prompt": "`handle` is called twice: once with an id that authorises, once with an empty id that does not.",
+      "code": "#include <cstdio>\n#include <stdexcept>\n#include <string>\n\nstruct Session {\n    std::string id;\n};\n\nvoid authorise(const Session& s) {\n    if (s.id.empty())\n        throw std::runtime_error(\"missing id\");\n}\n\nvoid handle(const std::string& id) {\n    Session* s = new Session{id};\n    authorise(*s);\n    std::puts(s->id.c_str());\n    delete s;\n}\n\nint main() {\n    try { handle(\"a1\"); } catch (...) {}\n    try { handle(\"\"); } catch (...) {}\n}",
+      "parts": [
+        {
+          "id": "count",
+          "type": "count",
+          "label": "How many Session objects are leaked?",
+          "answer": 1,
+          "verify": "alloc",
+          "explain": "One. The first call reaches line 17 and frees its session; the second throws out of line 15 and never gets there."
+        },
+        {
+          "id": "where",
+          "type": "lines",
+          "label": "Click the line whose failure strands the allocation.",
+          "answer": [15],
+          "explain": "Line 15 is the one that can leave `handle` without running line 17. Line 14 is where the memory comes from, but an allocation is not a bug — the bug is the unprotected window between it and the matching `delete`, and that window is opened by the call that can throw."
+        },
+        {
+          "id": "fix",
+          "type": "choice",
+          "label": "Which fix removes the leak without changing the interface?",
+          "options": [
+            "Wrap lines 14–17 in `try { … } catch (...) { delete s; throw; }`.",
+            "Replace line 14 with `auto s = std::make_unique<Session>(id);` and delete line 17.",
+            "Call `authorise` before the allocation.",
+            "Catch the exception in `handle` and return early."
+          ],
+          "answer": 1,
+          "explain": "The try/catch works and is what this code looked like before 1998; it also has to be repeated at every future early return, which is how the second leak gets added. Calling `authorise` first happens to work here only because it takes a `const Session&` that could be built on the stack — it does not generalise, and it is unavailable once the check needs the constructed object. Swallowing the exception changes what callers see, which the question rules out."
+        }
+      ],
+      "explain": "Every raw `new` followed by a `delete` some lines later is a claim that nothing in between can leave the function early. Exceptions are only the loudest way to break that claim; an added `return`, a `continue`, or a `co_await` breaks it just as quietly. Owning the allocation in a `unique_ptr` makes the claim unnecessary rather than merely true today.",
+      "review": { "chapter": "08-ownership-and-smart-pointers", "section": "`unique_ptr`: The Default Owner" },
+      "check": "leak",
+      "probe": "#include <cstdio>\n#include <stdexcept>\n#include <string>\n\nstatic int live = 0;\nstruct Reporter {\n    ~Reporter() { for (int i = 0; i < live; ++i) std::puts(\"alloc\"); }\n};\nstatic Reporter reporter;\n\nstruct Session {\n    std::string id;\n    explicit Session(std::string s) : id(std::move(s)) { ++live; }\n    ~Session() { --live; }\n};\n\nvoid authorise(const Session& s) {\n    if (s.id.empty())\n        throw std::runtime_error(\"missing id\");\n}\n\nvoid handle(const std::string& id) {\n    Session* s = new Session{id};\n    authorise(*s);\n    delete s;\n}\n\nint main() {\n    try { handle(\"a1\"); } catch (...) {}\n    try { handle(\"\"); } catch (...) {}\n}"
+    },
+    {
+      "id": "mem-02",
+      "title": "Half a constructor",
+      "difficulty": "medium",
+      "topic": "partial construction",
+      "prompt": "`Channel` owns two handles and frees both in its destructor. The validation was added later, at the top of the constructor body.",
+      "code": "#include <stdexcept>\n\nstruct Handle {\n    int id;\n    explicit Handle(int i) : id(i) {}\n};\n\nclass Channel {\npublic:\n    Channel(int a, int b)\n        : in_(new Handle(a)), out_(new Handle(b)) {\n        if (b < 0)\n            throw std::invalid_argument(\"bad port\");\n    }\n\n    ~Channel() { delete in_; delete out_; }\n\nprivate:\n    Handle* in_;\n    Handle* out_;\n};\n\nint main() {\n    try { Channel c{1, -1}; } catch (...) {}\n}",
+      "parts": [
+        {
+          "id": "count",
+          "type": "count",
+          "label": "How many Handle objects are leaked?",
+          "answer": 2,
+          "verify": "alloc",
+          "explain": "Both. The member initialiser list on line 11 runs to completion, so both handles exist — and then the body throws, so the object was never fully constructed and `~Channel` is never called."
+        },
+        {
+          "id": "where",
+          "type": "lines",
+          "label": "Click the line that becomes unreachable, and so strands the allocations.",
+          "answer": [16],
+          "explain": "The destructor. It is the only `delete` in the program, and a destructor runs only for an object whose constructor *completed*. Throwing from the constructor body means this object never counted as constructed, so the language never calls it."
+        },
+        {
+          "id": "claims",
+          "type": "select",
+          "label": "Which statements about a constructor that throws are true?",
+          "options": [
+            "Members that were already fully constructed are destroyed, in reverse order.",
+            "The object's own destructor is not called.",
+            "Here that rule salvages nothing, because the members are raw pointers with trivial destructors.",
+            "The memory for the object itself leaks too."
+          ],
+          "answer": [0, 1, 2],
+          "explain": "The language does unwind the members — that is exactly the mechanism a `unique_ptr` member relies on. It just cannot help when the members it destroys are pointers, whose destructors do nothing. The object's own storage is not leaked: `c` is automatic, and had it been `new Channel{…}` the `new` expression would have released the storage before propagating."
+        },
+        {
+          "id": "fix",
+          "type": "choice",
+          "label": "What is the fix?",
+          "options": [
+            "Move the validation above the member initialiser list, into a delegating constructor or a factory function.",
+            "Make the members `std::unique_ptr<Handle>`.",
+            "Wrap the constructor body in a function-try-block that deletes both pointers.",
+            "Any of the first three — but the second is the only one that stays correct when a third handle is added."
+          ],
+          "answer": 3,
+          "explain": "All three work here. Validating first is the cleanest expression of intent when it is possible, but it stops being possible the moment the check needs a constructed member. A function-try-block works and is nearly unreadable, and it also cannot tell which members were built. `unique_ptr` members are the fix that survives edits: with them, member unwinding does the whole job, and a fourth resource added next year is covered without anyone remembering this bug."
+        }
+      ],
+      "explain": "\"The destructor cleans up\" is a promise that only applies to objects whose constructors finished. A constructor that acquires two raw resources and then throws has, for that instant, no owner for either — and the language's member unwinding cannot help because raw pointers do not own anything. This is the argument for RAII that has nothing to do with forgetting a `delete`: not a single `delete` is missing here.",
+      "review": { "chapter": "06-errors-and-exceptions", "section": "Exception-safety guarantees" },
+      "check": "leak",
+      "probe": "#include <cstdio>\n#include <stdexcept>\n\nstatic int live = 0;\nstruct Reporter {\n    ~Reporter() { for (int i = 0; i < live; ++i) std::puts(\"alloc\"); }\n};\nstatic Reporter reporter;\n\nstruct Handle {\n    int id;\n    explicit Handle(int i) : id(i) { ++live; }\n    ~Handle() { --live; }\n};\n\nclass Channel {\npublic:\n    Channel(int a, int b)\n        : in_(new Handle(a)), out_(new Handle(b)) {\n        if (b < 0)\n            throw std::invalid_argument(\"bad port\");\n    }\n\n    ~Channel() { delete in_; delete out_; }\n\nprivate:\n    Handle* in_;\n    Handle* out_;\n};\n\nint main() {\n    try { Channel c{1, -1}; } catch (...) {}\n}"
+    },
+    {
+      "id": "mem-03",
+      "title": "Everyone owns everyone",
+      "difficulty": "medium",
+      "topic": "reference cycle",
+      "prompt": "Not a raw pointer in sight. Both objects are created with `make_shared` and neither is ever `delete`d by hand.",
+      "code": "#include <memory>\n#include <vector>\n\nstruct Node;\n\nstruct Session {\n    std::vector<std::shared_ptr<Node>> nodes;\n};\n\nstruct Node {\n    std::shared_ptr<Session> owner;\n};\n\nint main() {\n    auto s = std::make_shared<Session>();\n    auto n = std::make_shared<Node>();\n    s->nodes.push_back(n);\n    n->owner = s;\n}",
+      "parts": [
+        {
+          "id": "count",
+          "type": "count",
+          "label": "How many objects are still alive when main returns?",
+          "answer": 2,
+          "verify": "alloc",
+          "explain": "Both. At the end of `main`, `s` and `n` release their references and each count drops from 2 to 1 — held by the other object. Neither reaches zero, so neither destructor runs, so neither releases the reference that would let the other go."
+        },
+        {
+          "id": "where",
+          "type": "lines",
+          "label": "Click the line that should not be a shared_ptr.",
+          "answer": [11],
+          "explain": "The back-pointer. A `Node` does not keep its `Session` alive — the session outlives its nodes by design, and the arrow pointing back up the hierarchy is the one that should not own. Making `nodes` weak instead would be the wrong half of the cycle to break: nothing else holds the nodes, so they would be destroyed immediately."
+        },
+        {
+          "id": "claims",
+          "type": "select",
+          "label": "Which are true of this leak?",
+          "options": [
+            "It is invisible to `unique_ptr`-style reasoning: every pointer has a well-defined owner.",
+            "A leak detector reports it as reachable memory that was never freed.",
+            "`std::weak_ptr` on line 11 fixes it, and callers must then use `lock()` to get a usable pointer.",
+            "Using `new Session` and `new Node` instead of `make_shared` would avoid it."
+          ],
+          "answer": [0, 1, 2],
+          "explain": "That is what makes cycles the hard case: nothing is unowned and nothing is owned twice. `weak_ptr` participates in the control block without contributing to the strong count, and `lock()` is what turns it back into a `shared_ptr` — returning empty if the owner has gone, which is a check the caller now has to write and is the real cost of the fix. How the objects were allocated is beside the point; the cycle is in who points at whom."
+        }
+      ],
+      "explain": "Reference counting cannot collect cycles — that is a property of the algorithm, not a bug in the library, and it is why `weak_ptr` exists rather than being an optimisation. The practical rule is to decide which direction in your object graph owns: parents own children, children observe parents. Any time two types name each other with `shared_ptr`, one of the two is wrong.",
+      "review": { "chapter": "08-ownership-and-smart-pointers", "section": "`weak_ptr` and Ownership Cycles" },
+      "check": "leak",
+      "probe": "#include <cstdio>\n#include <memory>\n#include <vector>\n\nstatic int live = 0;\nstruct Reporter {\n    ~Reporter() { for (int i = 0; i < live; ++i) std::puts(\"alloc\"); }\n};\nstatic Reporter reporter;\n\nstruct Node;\n\nstruct Session {\n    std::vector<std::shared_ptr<Node>> nodes;\n    Session() { ++live; }\n    ~Session() { --live; }\n};\n\nstruct Node {\n    std::shared_ptr<Session> owner;\n    Node() { ++live; }\n    ~Node() { --live; }\n};\n\nint main() {\n    auto s = std::make_shared<Session>();\n    auto n = std::make_shared<Node>();\n    s->nodes.push_back(n);\n    n->owner = s;\n}"
+    },
+    {
+      "id": "mem-04",
+      "title": "Two owners, one object",
+      "difficulty": "easy",
+      "topic": "double free",
+      "prompt": "A raw pointer is handed to two `shared_ptr`s so that both subsystems can keep the buffer alive independently.",
+      "code": "#include <memory>\n\nstruct Buffer {\n    int* data;\n    Buffer() : data(new int[16]) {}\n    ~Buffer() { delete[] data; }\n};\n\nvoid publish(std::shared_ptr<Buffer> b) {}\n\nint main() {\n    Buffer* raw = new Buffer();\n    std::shared_ptr<Buffer> a(raw);\n    std::shared_ptr<Buffer> b(raw);\n    publish(a);\n    publish(b);\n}",
+      "parts": [
+        {
+          "id": "count",
+          "type": "count",
+          "label": "How many times is the Buffer destroyed?",
+          "answer": 2,
+          "explain": "Twice. Constructing a `shared_ptr` from a raw pointer creates a *new* control block, so lines 13 and 14 produce two independent reference counts of one. Each drops to zero at the end of `main` and each deletes the same object."
+        },
+        {
+          "id": "where",
+          "type": "lines",
+          "label": "Click the two lines that together create the second owner.",
+          "answer": [13, 14],
+          "explain": "Neither line is wrong alone — line 13 is a perfectly ordinary adoption of a raw pointer. It is the pair that is wrong, and the give-away is that `raw` is named twice: the moment a raw pointer is handed to a smart pointer it should stop being reachable under its own name."
+        },
+        {
+          "id": "fix",
+          "type": "choice",
+          "label": "Which version is correct?",
+          "options": [
+            "`auto a = std::make_shared<Buffer>(); auto b = a;`",
+            "`std::shared_ptr<Buffer> a(raw); std::shared_ptr<Buffer> b(a.get());`",
+            "`std::shared_ptr<Buffer> a(raw), b(raw, [](Buffer*) {});`",
+            "`std::unique_ptr<Buffer> a(raw); auto b = a.get();`"
+          ],
+          "answer": 0,
+          "explain": "Copying the `shared_ptr` is the whole point: the copy shares the control block, so the count is 2 and there is exactly one delete. `a.get()` re-creates the original bug with an extra step. The no-op deleter version does avoid the double free and is a real technique — but it makes `b` a non-owner that lies about being one, so `b` outliving `a` dangles. `make_shared` also gets you one allocation instead of two."
+        }
+      ],
+      "explain": "A `shared_ptr` does not track the object, it tracks the *control block*, and constructing one from a raw pointer always makes a new block. So the count of owners is the count of times a raw pointer was adopted — never the number of `shared_ptr`s pointing at the thing. The habit that prevents this entire category: never let a raw pointer to an owned object exist under a name of its own. `make_shared` and `make_unique` are worth using because they make it impossible.",
+      "review": { "chapter": "08-ownership-and-smart-pointers", "section": "`shared_ptr`: Control Blocks and Refcounts" },
+      "check": "asan"
+    },
+    {
+      "id": "mem-05",
+      "title": "The wrong kind of delete",
+      "difficulty": "easy",
+      "topic": "array new",
+      "prompt": "A sliding window of `n` ints, wrapped in a smart pointer so nothing has to remember to free it.",
+      "code": "#include <memory>\n\nstd::unique_ptr<int> make_window(int n) {\n    return std::unique_ptr<int>(new int[n]);\n}\n\nint main() {\n    auto w = make_window(8);\n    w.get()[3] = 1;\n}",
+      "parts": [
+        {
+          "id": "where",
+          "type": "lines",
+          "label": "Click the line with the defect.",
+          "answer": [4],
+          "explain": "`std::unique_ptr<int>` deletes with `delete`; the memory came from `new[]`. Line 9's indexing is legal — the pointer really does address 8 ints — so the code reads correctly right up to the moment `w` goes out of scope."
+        },
+        {
+          "id": "what",
+          "type": "choice",
+          "label": "What does the mismatch actually do?",
+          "options": [
+            "It frees only the first element, leaking the other seven.",
+            "It is undefined behaviour; on a typical allocator the pointer passed to `free` is not the one it handed out, so the heap is corrupted.",
+            "Nothing, for a trivially destructible type like `int`.",
+            "It calls the destructor on all eight elements but frees the wrong size."
+          ],
+          "answer": 1,
+          "explain": "`new[]` may place a bookkeeping header before the returned pointer, so `delete` hands the allocator an address it never issued. The result is heap corruption, and AddressSanitizer names it exactly — `alloc-dealloc-mismatch`. The tempting answer is the third: for `int` there is no destructor to skip, so it feels harmless. Skipping destructors is only *one* of the two things `delete[]` does; recovering the right allocation is the other."
+        },
+        {
+          "id": "fixes",
+          "type": "select",
+          "label": "Which spellings are correct?",
+          "options": [
+            "`std::unique_ptr<int[]>(new int[n])`",
+            "`std::make_unique<int[]>(n)`",
+            "`std::vector<int>(n)`",
+            "`std::unique_ptr<int>(new int[n], std::default_delete<int[]>())`"
+          ],
+          "answer": [0, 1, 2],
+          "explain": "`unique_ptr<int[]>` is the array specialisation: it deletes with `delete[]` and gives you `operator[]` instead of `operator*`. `make_unique<int[]>` is the same thing without naming `new`, and it value-initialises. A `vector` is what you actually want in almost every case — it carries the size, which a `unique_ptr<int[]>` does not. The last option does not compile: `unique_ptr<int>`'s deleter type is fixed at `default_delete<int>`, and the deleter is not a constructor argument you can substitute."
+        }
+      ],
+      "explain": "`new`/`delete` and `new[]`/`delete[]` are two allocation systems that happen to share a keyword, and the type system tracks the difference only if you let it — which is what the `unique_ptr<T[]>` specialisation is for. The wider lesson is that this bug is invisible at the point of use: everything about `w` behaves correctly until the destructor runs, which is why a sanitizer, not a code path, is what finds it.",
+      "review": { "chapter": "08-ownership-and-smart-pointers", "section": "Custom Deleters" },
+      "check": "asan"
+    },
+    {
+      "id": "mem-06",
+      "title": "Deleting through the interface",
+      "difficulty": "medium",
+      "topic": "virtual destructors",
+      "prompt": "`Codec` is an abstract interface. `JsonCodec` implements it and holds a 64-byte scratch buffer.",
+      "code": "#include <string>\n\nstruct Codec {\n    virtual int decode(int) const = 0;\n    ~Codec() = default;\n};\n\nstruct JsonCodec : Codec {\n    std::string scratch = std::string(64, 'x');\n    int decode(int v) const override { return v; }\n};\n\nint main() {\n    Codec* c = new JsonCodec();\n    delete c;\n}",
+      "parts": [
+        {
+          "id": "where",
+          "type": "lines",
+          "label": "Click the line with the defect.",
+          "answer": [5],
+          "explain": "The destructor is not `virtual`. Line 15 then deletes a `JsonCodec` through a `Codec*`, which the standard calls undefined behaviour outright — not \"leaks the derived part\", though that is the usual symptom."
+        },
+        {
+          "id": "consequence",
+          "type": "select",
+          "label": "Which of these are real consequences?",
+          "options": [
+            "`~JsonCodec` never runs, so `scratch`'s 64-byte allocation leaks.",
+            "The wrong amount of memory may be handed back to the allocator.",
+            "The compiler diagnoses it: a class with virtual functions and a non-virtual destructor is ill-formed.",
+            "AddressSanitizer reports it as a new-delete-type-mismatch."
+          ],
+          "answer": [0, 1, 3],
+          "explain": "The leak is the symptom people expect; the size mismatch is the one that corrupts the heap, since `delete` is entitled to pass the static type's size to the deallocation function. It is *not* ill-formed — the compiler is silent by default, which is why `-Wnon-virtual-dtor` (and `-Wdelete-non-virtual-dtor`, which is on in `-Wall`) exist and why this survives review."
+        },
+        {
+          "id": "fix",
+          "type": "choice",
+          "label": "What should line 5 be?",
+          "options": [
+            "`virtual ~Codec() = default;`",
+            "`protected: ~Codec() = default;`",
+            "Either — and the choice says what you mean about how the interface may be used.",
+            "Remove the destructor; the implicit one is virtual in a class with virtual functions."
+          ],
+          "answer": 2,
+          "explain": "A public virtual destructor says \"you may delete a derived object through this base\". A protected non-virtual one says \"you may not\" — the delete on line 15 then fails to compile, which is the better error when ownership was never meant to flow through the interface. Both are correct; picking one deliberately is the point. The implicit destructor is never virtual, whatever else the class contains."
+        }
+      ],
+      "explain": "The rule is usually taught as \"base classes need virtual destructors\", which sounds like a tax on inheritance. The precise version is narrower and more useful: a base class needs a *public virtual* destructor if and only if objects are deleted through it, and a *protected non-virtual* one otherwise. The second option costs nothing at runtime, keeps the class free of a vtable slot it does not need, and turns the mistake into a compile error.",
+      "review": { "chapter": "04-classes-and-polymorphism", "section": "Virtual destructors and deleting through base pointers" },
+      "check": "leak"
+    },
+    {
+      "id": "mem-07",
+      "title": "Clearing is not deleting",
+      "difficulty": "easy",
+      "topic": "container of owners",
+      "prompt": "`Book` owns its orders and deletes them in its destructor. `clear` was added to reset the book between sessions.",
+      "code": "#include <vector>\n\nstruct Order {\n    long id;\n    explicit Order(long i) : id(i) {}\n};\n\nclass Book {\npublic:\n    void add(long id) { orders_.push_back(new Order(id)); }\n    void clear() { orders_.clear(); }\n    ~Book() { for (Order* o : orders_) delete o; }\n\nprivate:\n    std::vector<Order*> orders_;\n};\n\nint main() {\n    Book b;\n    b.add(1);\n    b.add(2);\n    b.clear();\n    b.add(3);\n}",
+      "parts": [
+        {
+          "id": "count",
+          "type": "count",
+          "label": "How many Order objects are leaked?",
+          "answer": 2,
+          "verify": "alloc",
+          "explain": "Two — the ones added before `clear`. The third is still in the vector when `~Book` runs, so it is deleted correctly, which is what makes the bug easy to miss in a test that never calls `clear`."
+        },
+        {
+          "id": "where",
+          "type": "lines",
+          "label": "Click the line that leaks.",
+          "answer": [11],
+          "explain": "`vector::clear` destroys its elements — and the elements here are pointers, whose destructors do nothing. The vector has done exactly what it promised; it was never told that the pointers meant anything."
+        },
+        {
+          "id": "fix",
+          "type": "choice",
+          "label": "What is the right fix?",
+          "options": [
+            "Change `clear` to `for (Order* o : orders_) delete o; orders_.clear();`",
+            "Store `std::vector<std::unique_ptr<Order>>` and delete the destructor entirely.",
+            "Store `std::vector<Order>` and construct in place with `emplace_back`.",
+            "Give `Book` a copy constructor so the pointers are never shared."
+          ],
+          "answer": 1,
+          "explain": "Fixing `clear` fixes today's bug and leaves the class one method away from the next one — and `Book` still has a destructor to keep in step, and still copies into a double free if anyone copies it. `unique_ptr` elements make `clear`, the destructor, and the copy problem all disappear at once. Storing `Order` by value is even better when the objects are small and never referred to by pointer; here it is a real option and the reason to reach for the `unique_ptr` version is only that pointer stability was presumably wanted."
+        }
+      ],
+      "explain": "A container of raw pointers is a container of things that look like they are owned and are not. Every method that removes an element — `clear`, `erase`, `pop_back`, `resize`, assignment — is then a leak waiting to be written, and the class's destructor being correct is what hides them. If the elements are owned, say so in the type: the compiler then generates all the code you would otherwise have to remember to write.",
+      "review": { "chapter": "08-ownership-and-smart-pointers", "section": "RAII Owners and the Decision Table" },
+      "check": "leak",
+      "probe": "#include <cstdio>\n#include <vector>\n\nstatic int live = 0;\nstruct Reporter {\n    ~Reporter() { for (int i = 0; i < live; ++i) std::puts(\"alloc\"); }\n};\nstatic Reporter reporter;\n\nstruct Order {\n    long id;\n    explicit Order(long i) : id(i) { ++live; }\n    ~Order() { --live; }\n};\n\nclass Book {\npublic:\n    void add(long id) { orders_.push_back(new Order(id)); }\n    void clear() { orders_.clear(); }\n    ~Book() { for (Order* o : orders_) delete o; }\n\nprivate:\n    std::vector<Order*> orders_;\n};\n\nint main() {\n    Book b;\n    b.add(1);\n    b.add(2);\n    b.clear();\n    b.add(3);\n}"
+    },
+    {
+      "id": "mem-08",
+      "title": "Allocate before you free",
+      "difficulty": "hard",
+      "topic": "self-assignment",
+      "prompt": "The assignment operator was rewritten to allocate the new buffer *before* releasing the old one, so that a failed allocation leaves the packet untouched. That part works.",
+      "code": "#include <algorithm>\n#include <cstddef>\n\nclass Packet {\npublic:\n    Packet(const std::byte* p, std::size_t n) : size_(n), data_(new std::byte[n]) {\n        std::copy_n(p, n, data_);\n    }\n\n    Packet& operator=(const Packet& other) {\n        std::byte* fresh = new std::byte[other.size_];\n        delete[] data_;\n        std::copy_n(other.data_, other.size_, fresh);\n        size_ = other.size_;\n        data_ = fresh;\n        return *this;\n    }\n\n    ~Packet() { delete[] data_; }\n\nprivate:\n    std::size_t size_;\n    std::byte* data_;\n};\n\nint main() {\n    std::byte raw[8]{};\n    Packet p{raw, 8};\n    Packet& alias = p;\n    p = alias;\n}",
+      "parts": [
+        {
+          "id": "where",
+          "type": "lines",
+          "label": "Click the line that reads freed memory.",
+          "answer": [13],
+          "explain": "When `other` is `*this`, `other.data_` is the same pointer line 12 just freed — and line 15 has not overwritten it yet. The copy reads from a buffer that no longer belongs to the program."
+        },
+        {
+          "id": "order",
+          "type": "choice",
+          "label": "The allocate-then-free order was introduced for exception safety. Did it cause this bug?",
+          "options": [
+            "Yes — freeing last would have been safe.",
+            "No. The original free-then-allocate order self-assigns just as badly; it corrupts the data instead of reading freed memory.",
+            "Yes, and it also breaks the strong exception guarantee it was meant to provide.",
+            "No, and self-assignment is safe in either order because the sizes match."
+          ],
+          "answer": 1,
+          "explain": "Both orders are broken by self-assignment, in different ways. Free-then-allocate reads from the *new* buffer, so the packet silently fills with garbage and no sanitizer says a word — arguably the worse outcome. The reordering did deliver what it promised: if `new` throws on line 11, the object is untouched. It just did nothing about aliasing, which is a separate hazard that the same function has to answer for."
+        },
+        {
+          "id": "fixes",
+          "type": "select",
+          "label": "Which fixes handle self-assignment?",
+          "options": [
+            "`if (this == &other) return *this;` at the top.",
+            "Copy-and-swap: take the parameter by value and `std::swap` the members.",
+            "Move `delete[] data_;` to just before `return *this;`, after the copy.",
+            "Declare the operator `= default`."
+          ],
+          "answer": [0, 1, 2],
+          "explain": "The explicit identity check is the direct answer and the one to write when the copy is expensive. Copy-and-swap handles it structurally — the parameter is a separate object, so there is nothing to alias — and gives the strong guarantee for free, at the cost of a copy even when self-assigning. Freeing last also works, because nothing reads `data_` after it is released. Defaulting the operator would copy the pointer, giving two owners and a double free."
+        }
+      ],
+      "explain": "A copy assignment operator has to answer two questions that look like one: what happens if the allocation fails, and what happens if the source is the destination. Fixing the first by reordering feels like it should help with the second, and does not. Copy-and-swap is worth knowing precisely because it answers both at once and cannot be got half right — which is also the argument for not writing the operator at all, and holding a `vector<std::byte>` instead.",
+      "review": { "chapter": "04-classes-and-polymorphism", "section": "Special member functions and the rules" },
+      "check": "asan"
+    },
+    {
+      "id": "mem-09",
+      "title": "The sampler that outlived its object",
+      "difficulty": "medium",
+      "topic": "dangling this",
+      "prompt": "`start` kicks off a background sample and returns immediately. The lambda captures `this` so it can reach the member vector — nothing is captured by reference except the object itself.",
+      "code": "#include <chrono>\n#include <thread>\n#include <vector>\n\nclass Sampler {\npublic:\n    void start() {\n        std::thread([this] {\n            std::this_thread::sleep_for(std::chrono::milliseconds(100));\n            values_.push_back(1);\n        }).detach();\n    }\n\nprivate:\n    std::vector<int> values_;\n};\n\nint main() {\n    {\n        Sampler s;\n        s.start();\n    }\n    std::this_thread::sleep_for(std::chrono::milliseconds(300));\n}",
+      "parts": [
+        {
+          "id": "where",
+          "type": "lines",
+          "label": "Click the line that captures a lifetime the thread cannot rely on.",
+          "answer": [8],
+          "explain": "`[this]` is a capture by pointer, however it is spelled. The `Sampler` dies at the closing brace on line 21; the thread wakes 100 ms later and pushes into a member of an object that no longer exists."
+        },
+        {
+          "id": "trap",
+          "type": "choice",
+          "label": "`values_` is written inside the lambda but never named in the capture list. Why?",
+          "options": [
+            "Members are captured implicitly by reference, as if by `[&]`.",
+            "`values_` is not captured at all — it is `this->values_`, so capturing `this` is what gives access, and it is the pointer whose lifetime matters.",
+            "A default-constructed member does not need capturing.",
+            "It is captured by value, because the lambda is not `mutable`."
+          ],
+          "answer": 1,
+          "explain": "There is no such thing as capturing a member. Naming `values_` inside a lambda is shorthand for `this->values_`, so the capture list holds one pointer no matter how many members are used. That is why `[=]` is no safer than `[&]` for a member-using lambda — both capture `this` by value, and the pointer is what dangles. C++20 deprecated implicit `this` capture via `[=]` for exactly this reason, and `[*this]` (capture the object by copy) exists as the alternative."
+        },
+        {
+          "id": "fixes",
+          "type": "select",
+          "label": "Which changes make the program correct?",
+          "options": [
+            "Keep the thread as a member and join it in `~Sampler`.",
+            "Make `Sampler` inherit `std::enable_shared_from_this` and capture `shared_from_this()`.",
+            "Capture `[*this]` so the object is copied into the closure.",
+            "Change `[this]` to `[=]`."
+          ],
+          "answer": [0, 1],
+          "explain": "Joining in the destructor makes the object outlive the thread by construction — a `std::jthread` member declared last is the tidy form. Capturing a `shared_ptr` to yourself inverts it: the thread keeps the object alive instead. `[*this]` compiles and removes the dangling pointer, but the thread then pushes into its own private copy and the real sampler never sees a thing — a correct program that does nothing. `[=]` captures `this` by value, which is the same pointer."
+        }
+      ],
+      "explain": "`[this]` reads like a scope and behaves like a raw pointer, which is the entire problem. Any lambda that outlives its enclosing scope — a detached thread, a queued task, a callback stored in a registry — is making a claim about the lifetime of every object it captured, and `this` is the one that never appears in the capture list next to the members it actually uses. Either the object owns the work and joins it, or the work owns the object through a `shared_ptr`. There is no third arrangement that ends well.",
+      "review": { "chapter": "21-lambdas-and-callable-objects-in-depth", "section": "Capturing `this`" },
+      "check": "asan"
+    },
+    {
+      "id": "mem-10",
+      "title": "A reference into a growing vector",
+      "difficulty": "medium",
+      "topic": "iterator invalidation",
+      "prompt": "`smooth` takes the first sample as a reference to avoid copying it in the loop, then appends 64 smoothed values derived from it.",
+      "code": "#include <vector>\n\nstruct Sample {\n    double v;\n};\n\ndouble smooth(std::vector<Sample>& xs) {\n    Sample& first = xs.front();\n    for (int i = 0; i < 64; ++i)\n        xs.push_back(Sample{first.v});\n    return first.v;\n}\n\nint main() {\n    std::vector<Sample> xs{Sample{1.0}};\n    return smooth(xs) > 0 ? 0 : 1;\n}",
+      "parts": [
+        {
+          "id": "where",
+          "type": "lines",
+          "label": "Click the line that makes `first` dangle.",
+          "answer": [10],
+          "explain": "`push_back` reallocates as soon as the capacity is exhausted, which frees the buffer `first` refers to. Line 8 is not the defect — taking a reference to an element is fine, and remains fine right up to the first insertion."
+        },
+        {
+          "id": "reserve",
+          "type": "choice",
+          "label": "Does `xs.reserve(65)` before the loop fix it?",
+          "options": [
+            "Yes, completely: with no reallocation, `first` stays valid for the whole function.",
+            "It removes the symptom here, but leaves a function that is wrong the moment the loop count or the initial size changes.",
+            "No — `reserve` itself invalidates references.",
+            "No, because `push_back` may still reallocate even below capacity."
+          ],
+          "answer": 1,
+          "explain": "`reserve` does fix this program, and it is worth being precise about that rather than pretending otherwise. What it does not fix is the *function*: it now depends on a capacity computed elsewhere from a loop bound written here, with no check tying the two together and no diagnostic when they drift. `reserve` does invalidate everything — which is exactly why it has to happen before line 8, not after."
+        },
+        {
+          "id": "fixes",
+          "type": "select",
+          "label": "Which changes are robust?",
+          "options": [
+            "`double first = xs.front().v;` — copy the value out.",
+            "Re-read `xs.front().v` inside the loop.",
+            "Use `std::deque<Sample>`, whose references survive `push_back`.",
+            "Take `Sample* first = &xs.front();` instead of a reference."
+          ],
+          "answer": [0, 1, 2],
+          "explain": "Copying a `double` is the obvious answer and the right one — the reference was avoiding a copy that costs nothing. Re-reading is correct but pays for an indirection every iteration. `deque` genuinely does keep references valid across end insertions (its iterators, note, do not survive), which is the reason to pick it over `vector`, and it costs cache locality. A pointer is a reference with different syntax and dangles identically."
+        }
+      ],
+      "explain": "Iterator invalidation is usually taught as a rule about iterators, and the dangerous cases are the ones that do not involve any: a reference, a pointer, or a `string_view` into a container that later grows. The question to ask of any name that refers *into* a container is what happens between here and its last use — and for `vector`, a single `push_back` is enough to answer it badly.",
+      "review": { "chapter": "10-sequence-containers", "section": "Iterator invalidation — the centerpiece" },
+      "check": "asan"
+    }
+  ]
+}

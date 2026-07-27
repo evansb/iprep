@@ -1,0 +1,474 @@
+{
+  "kind": "concurrency",
+  "title": "Concurrency Bugs",
+  "blurb": "Races, deadlocks, starvation and false sharing, in code that looks like it passed review — because it did.",
+  "items": [
+    {
+      "id": "con-01",
+      "title": "The one member nobody locked",
+      "difficulty": "easy",
+      "topic": "data race",
+      "prompt": "`total` is guarded on every access. The reviewer checked that and approved the change.",
+      "code": "#include <mutex>\n#include <thread>\n\nstruct Collector {\n    std::mutex m;\n    long total = 0;\n    bool stop = false;\n\n    void ingest(long v) {\n        std::lock_guard lock(m);\n        total += v;\n    }\n\n    void drain() {\n        while (!stop)\n            ingest(1);\n    }\n\n    void shutdown() { stop = true; }\n};\n\nint main() {\n    Collector c;\n    std::thread w(&Collector::drain, &c);\n    c.shutdown();\n    w.join();\n}",
+      "parts": [
+        {
+          "id": "where",
+          "type": "lines",
+          "label": "Click every line that takes part in the data race.",
+          "answer": [15, 19],
+          "explain": "Line 15 reads `stop` from the worker; line 19 writes it from `main`. A race needs both ends, and naming only the write hides that the read is equally unsynchronised. Lines 10–11 are fine: `total` is properly guarded, which is precisely what makes this bug easy to walk past."
+        },
+        {
+          "id": "claims",
+          "type": "select",
+          "label": "Which of these are true of the program as written?",
+          "options": [
+            "It is undefined behaviour, even though `total` is correctly guarded.",
+            "Holding `m` inside `ingest` also protects `stop`, since both are members of the same object.",
+            "The compiler is allowed to hoist the read of `stop` out of the loop, so `drain` may never return.",
+            "ThreadSanitizer would report it."
+          ],
+          "answer": [0, 2, 3],
+          "explain": "A mutex protects the data the programmer decided it protects — membership of the same struct means nothing to the memory model. Because the read of `stop` is not atomic and not ordered by any lock, the compiler may prove the loop body cannot change it and load it once, which is how this bug usually presents: a shutdown that hangs only in release builds."
+        },
+        {
+          "id": "fix",
+          "type": "choice",
+          "label": "What is the right fix?",
+          "options": [
+            "Nothing: a `bool` write is a single instruction on every mainstream CPU.",
+            "Make `stop` a `std::atomic<bool>` (or use `std::jthread` and its `stop_token`).",
+            "Declare `stop` as `volatile bool`.",
+            "Move `stop` next to `total` so a single cache line covers both."
+          ],
+          "answer": 1,
+          "explain": "Single-instruction stores do not help: the race is a language-level one, and the miscompilation is the compiler hoisting the load, not the CPU tearing the store. `volatile` constrains the compiler's caching of the *variable* but supplies no inter-thread ordering and is not a synchronisation primitive in C++. Taking `m` around both accesses would also be correct, just needlessly expensive for a flag."
+        }
+      ],
+      "explain": "The defect is not that a lock is missing, it is that a lock is *present* — the guarded counter next door is what convinces a reader the object is thread-safe. Whenever you review a class with a mutex, enumerate the members the mutex does not cover and justify each one; a flag racing next to a properly locked counter is the most common way this goes wrong.",
+      "review": { "chapter": "23-threads-and-synchronization", "section": "Data Races and the Mutex Family" },
+      "check": "tsan"
+    },
+    {
+      "id": "con-02",
+      "title": "Two accounts, two locks",
+      "difficulty": "easy",
+      "topic": "deadlock",
+      "prompt": "Each account carries its own mutex, and `transfer` locks both before touching either — the textbook shape. Two threads move money in opposite directions.",
+      "code": "#include <mutex>\n#include <thread>\n\nstruct Account {\n    std::mutex m;\n    long balance = 0;\n};\n\nvoid transfer(Account& from, Account& to, long amount) {\n    std::lock_guard a(from.m);\n    std::lock_guard b(to.m);\n    from.balance -= amount;\n    to.balance += amount;\n}\n\nint main() {\n    Account x, y;\n    std::thread t1([&] { for (int i = 0; i < 100000; ++i) transfer(x, y, 1); });\n    std::thread t2([&] { for (int i = 0; i < 100000; ++i) transfer(y, x, 1); });\n    t1.join();\n    t2.join();\n}",
+      "parts": [
+        {
+          "id": "where",
+          "type": "lines",
+          "label": "Click the lines that can deadlock.",
+          "answer": [10, 11],
+          "explain": "Taken together. `t1` holds `x.m` and wants `y.m`; `t2` holds `y.m` and wants `x.m`. Neither line is wrong on its own — the defect is that the *order* in which they run depends on the arguments, and the two call sites pass them in opposite orders."
+        },
+        {
+          "id": "conditions",
+          "type": "select",
+          "label": "Which of Coffman's four conditions does this program satisfy?",
+          "options": [
+            "Mutual exclusion — a mutex is held by at most one thread.",
+            "Hold and wait — a thread holding one lock blocks for another.",
+            "No preemption — `lock_guard` will not surrender a held mutex.",
+            "Circular wait — the two threads' lock orders form a cycle."
+          ],
+          "answer": [0, 1, 2, 3],
+          "explain": "All four, which is what makes it a deadlock rather than a near miss. The reason to enumerate them is that a fix has to break one: `std::scoped_lock` breaks hold-and-wait, a global lock ordering breaks circular wait, and `try_lock` with backoff breaks no-preemption. Everything else is a smaller window, not a fix."
+        },
+        {
+          "id": "fix",
+          "type": "choice",
+          "label": "Which change removes the deadlock?",
+          "options": [
+            "`std::scoped_lock guard(from.m, to.m);` in place of lines 10–11.",
+            "Swap lines 10 and 11 so `to` is locked first.",
+            "Give `transfer` a `std::try_lock` on `to.m` and skip the transfer if it fails.",
+            "Make `balance` a `std::atomic<long>` and drop both locks."
+          ],
+          "answer": 0,
+          "explain": "`scoped_lock` locks all of its mutexes with a deadlock-avoiding algorithm and releases them together. Swapping the order changes nothing — the cycle comes from the callers, not the callee. Skipping the transfer breaks the deadlock and the program's purpose along with it. Two atomic updates are not one atomic transfer: an observer can see the money debited and not yet credited, which is the invariant the lock existed to protect."
+        }
+      ],
+      "explain": "Locking both accounts is the right instinct; locking them in an order the caller chose is the defect, and it is invisible at the point where it is written. If a function must hold more than one lock, either take them all in one `std::scoped_lock`, or impose a total order that does not depend on the arguments — comparing addresses is the usual trick, and `scoped_lock` saves you from having to remember it.",
+      "review": { "chapter": "23-threads-and-synchronization", "section": "RAII Lock Wrappers and Multi-Lock Deadlock Avoidance" },
+      "check": "deadlock"
+    },
+    {
+      "id": "con-03",
+      "title": "A notification with nobody home",
+      "difficulty": "medium",
+      "topic": "lost wakeup",
+      "prompt": "The flag is set under the mutex and the notification is sent after releasing it — both of those are correct. The program hangs anyway.",
+      "code": "#include <condition_variable>\n#include <mutex>\n#include <thread>\n\nstd::mutex m;\nstd::condition_variable cv;\nbool ready = false;\n\nvoid consumer() {\n    std::unique_lock lock(m);\n    cv.wait(lock);\n    if (!ready)\n        return;\n}\n\nint main() {\n    {\n        std::lock_guard lock(m);\n        ready = true;\n    }\n    cv.notify_one();\n    std::thread c(consumer);\n    c.join();\n}",
+      "parts": [
+        {
+          "id": "where",
+          "type": "lines",
+          "label": "Click the line that hangs.",
+          "answer": [11],
+          "explain": "`cv.wait(lock)` with no predicate. A condition variable has no memory: the `notify_one` on line 20 happened before this thread existed, so there is nothing left to receive and the wait blocks forever. Checking `ready` *after* waiting, as line 12 does, cannot help — the thread never gets there."
+        },
+        {
+          "id": "claims",
+          "type": "select",
+          "label": "Which statements about condition variables are true?",
+          "options": [
+            "A notification sent while no thread is waiting is lost.",
+            "`wait` may return without any notification at all.",
+            "Holding the mutex while calling `notify_one` would have prevented the hang.",
+            "The predicate must be checked in a loop, which `wait(lock, pred)` does for you."
+          ],
+          "answer": [0, 1, 3],
+          "explain": "Notifications are edges, not state — that is the whole reason a separate predicate exists. Spurious wakeups are permitted, which is the other reason. Holding the mutex across `notify_one` changes only *when* the waiter is scheduled, not whether a notification sent before it waited is remembered; it is a performance question, not a correctness one."
+        },
+        {
+          "id": "fix",
+          "type": "choice",
+          "label": "Which line 11 makes the program correct?",
+          "options": [
+            "`cv.wait(lock, [] { return ready; });`",
+            "`while (!ready) cv.wait(lock);` — but only if `ready` is `std::atomic<bool>`.",
+            "`cv.wait_for(lock, std::chrono::seconds(1));`",
+            "`if (!ready) cv.wait(lock);`"
+          ],
+          "answer": 0,
+          "explain": "The predicate form is exactly `while (!pred()) wait(lock);` — it tests the condition *before* waiting, so an already-satisfied condition never waits at all, and it re-tests after every wakeup. Writing that loop by hand is equally correct and needs no atomic, because the predicate is read under the mutex. A timeout turns a hang into a slow hang. The `if` form checks once, before waiting, and then waits regardless of a spurious wakeup — it is the bug with an extra step."
+        }
+      ],
+      "explain": "The canonical pattern is three parts and all three are load-bearing: mutate the state under the mutex, notify, and wait on a *predicate*. This program gets the first two right, which is what makes the omission of the third so easy to miss in review. If you ever find yourself checking the condition after `wait` returns, the check belongs inside `wait`.",
+      "review": { "chapter": "23-threads-and-synchronization", "section": "Condition Variables: The Canonical Pattern" },
+      "check": "deadlock"
+    },
+    {
+      "id": "con-04",
+      "title": "Checked twice, locked once",
+      "difficulty": "medium",
+      "topic": "double-checked locking",
+      "prompt": "The lazy-initialisation idiom, written to avoid taking the mutex on every call after the first.",
+      "code": "#include <mutex>\n#include <thread>\n\nstruct Registry {\n    void build() {}\n};\n\nRegistry* instance = nullptr;\nbool initialised = false;\nstd::mutex m;\n\nRegistry& get() {\n    if (!initialised) {\n        std::lock_guard lock(m);\n        if (!initialised) {\n            instance = new Registry();\n            instance->build();\n            initialised = true;\n        }\n    }\n    return *instance;\n}\n\nint main() {\n    std::thread a(get);\n    std::thread b(get);\n    a.join();\n    b.join();\n}",
+      "parts": [
+        {
+          "id": "where",
+          "type": "lines",
+          "label": "Click the two lines whose accesses race.",
+          "answer": [13, 18],
+          "explain": "Line 13 reads `initialised` with no lock held; line 18 writes it with the lock held. A mutex only orders accesses that all take it, so the fast path's read is unsynchronised against the slow path's write. The second check on line 15 is fine — that one is under the lock."
+        },
+        {
+          "id": "consequence",
+          "type": "choice",
+          "label": "What is the worst thing that can happen, beyond the race being UB?",
+          "options": [
+            "Two `Registry` objects are constructed and one leaks.",
+            "A thread sees `initialised == true` and dereferences an `instance` that is not yet built.",
+            "`get` returns a null reference on the very first call.",
+            "The mutex is left locked if `build` throws."
+          ],
+          "answer": 1,
+          "explain": "This is the failure that made double-checked locking notorious. Nothing orders the write of `instance` and the call to `build` against the write of `initialised`, so a second thread taking the fast path can observe the flag set while the object it advertises is still half-constructed — on a weakly-ordered machine, or after the compiler reorders the stores. Two objects cannot be built: the second check is under the lock. And `lock_guard` unlocks on the way out of a throw."
+        },
+        {
+          "id": "fixes",
+          "type": "select",
+          "label": "Which of these are correct fixes?",
+          "options": [
+            "Replace the flag and pointer with a function-local `static Registry instance;` and return it.",
+            "Use `std::call_once` with a `std::once_flag`.",
+            "Make `initialised` a `std::atomic<bool>` and leave the rest unchanged.",
+            "Declare `initialised` and `instance` as `volatile`."
+          ],
+          "answer": [0, 1, 2],
+          "explain": "A function-local static is initialised exactly once, thread-safely, by the language itself — it is the fix that deletes the code rather than repairing it. `call_once` is the explicit form. An `std::atomic<bool>` with default sequential consistency does work: the release on the store and the acquire on the load are what publish the fully-built object, and that ordering is exactly what was missing. `volatile` supplies no ordering between threads in C++ and fixes nothing."
+        }
+      ],
+      "explain": "Double-checked locking is not wrong because the second check is redundant; it is wrong because the *first* check reads data the mutex is supposed to protect. The fix people reach for — adding `volatile` — is the one that does nothing, because the problem is inter-thread ordering rather than the compiler caching a value. In modern C++ the honest answer is that you should almost never write this pattern: a function-local static already is it, correctly, with no flag to get wrong.",
+      "review": { "chapter": "23-threads-and-synchronization", "section": "One-Time Initialization" },
+      "check": "tsan"
+    },
+    {
+      "id": "con-05",
+      "title": "Two counters, one cache line",
+      "difficulty": "medium",
+      "topic": "false sharing",
+      "prompt": "Two independent counters, each touched by one thread, both `relaxed` so there is no ordering cost. On an 8-core machine this runs several times slower than the same loops on two separate `Counters` objects.",
+      "code": "#include <atomic>\n#include <thread>\n\nstruct Counters {\n    std::atomic<long> accepted{0};\n    std::atomic<long> rejected{0};\n};\n\nCounters counters;\n\nvoid accept_loop() {\n    for (int i = 0; i < 1000000; ++i)\n        counters.accepted.fetch_add(1, std::memory_order_relaxed);\n}\n\nvoid reject_loop() {\n    for (int i = 0; i < 1000000; ++i)\n        counters.rejected.fetch_add(1, std::memory_order_relaxed);\n}\n\nint main() {\n    std::thread a(accept_loop);\n    std::thread b(reject_loop);\n    a.join();\n    b.join();\n}",
+      "parts": [
+        {
+          "id": "where",
+          "type": "lines",
+          "label": "Click the lines that create the problem.",
+          "answer": [5, 6],
+          "explain": "The declarations, not the loops. Two 8-byte members declared adjacently land 8 bytes apart, which puts them in the same 64-byte cache line — and the cache coherence protocol works in lines, not variables. Neither `fetch_add` is wrong; they are simply fighting over a line they never needed to share."
+        },
+        {
+          "id": "gap",
+          "type": "count",
+          "label": "How many bytes apart must the two counters be, on a typical x86-64 or AArch64 core, for the problem to disappear?",
+          "answer": 64,
+          "explain": "64 — the cache line size, which `std::hardware_destructive_interference_size` names. Anything less and some pair of addresses still shares a line. (Some Intel parts prefetch line pairs and effectively want 128; that is why the constant exists rather than a hard-coded number.)"
+        },
+        {
+          "id": "why",
+          "type": "choice",
+          "label": "Why is `relaxed` not enough to make the loops independent?",
+          "options": [
+            "`relaxed` still emits a memory fence on x86-64.",
+            "Memory ordering is about visibility between variables; cache coherence works on whole lines regardless of ordering.",
+            "`fetch_add` is a read-modify-write, so it always locks the bus.",
+            "Two atomics in one struct are serialised by the standard."
+          ],
+          "answer": 1,
+          "explain": "`relaxed` removes the *ordering* requirements, and it does exactly that — there is no fence. What remains is the hardware cost: each `fetch_add` needs the line in an exclusive state, so every increment on one core invalidates the other core's copy of a line it also needs. The two threads ping-pong one line between them a million times each. Modern x86 does not lock the bus for this; it is the coherence traffic on a single line that costs."
+        },
+        {
+          "id": "fixes",
+          "type": "select",
+          "label": "Which changes fix it?",
+          "options": [
+            "`alignas(std::hardware_destructive_interference_size)` on each member.",
+            "Each thread accumulates into a local `long` and adds the total once at the end.",
+            "Changing both to `std::memory_order_seq_cst`.",
+            "Making both members plain `long` instead of `std::atomic<long>`."
+          ],
+          "answer": [0, 1],
+          "explain": "Padding the members apart is the direct fix; accumulating locally is the better one, because it removes almost all of the shared traffic rather than spreading it out. Strengthening the ordering makes it slower, not faster. Dropping `atomic` replaces a performance problem with a data race — and the counts would then be wrong as well as undefined."
+        }
+      ],
+      "explain": "False sharing is the one performance bug where the code is correct, the algorithm is correct, and the declaration order is the defect. It does not show up in single-threaded profiling, it scales *negatively* with core count, and it usually appears in exactly the place a team put its statistics counters. The habit worth building: when two hot values are written by different threads, either pad them apart or do not share them at all.",
+      "review": { "chapter": "23-threads-and-synchronization", "section": "Pathologies" },
+      "check": "run"
+    },
+    {
+      "id": "con-06",
+      "title": "The writer that waits its turn forever",
+      "difficulty": "hard",
+      "topic": "starvation",
+      "prompt": "A shared/exclusive lock over a value that is read constantly and written rarely — exactly the case `std::shared_mutex` is advertised for. Eight readers loop; one writer wants in.",
+      "code": "#include <shared_mutex>\n#include <thread>\n#include <vector>\n\nstd::shared_mutex sm;\nlong snapshot = 0;\n\nvoid reader() {\n    for (int i = 0; i < 200; ++i) {\n        std::shared_lock lock(sm);\n        volatile long seen = snapshot;\n        (void)seen;\n    }\n}\n\nvoid writer() {\n    for (int i = 0; i < 200; ++i) {\n        std::unique_lock lock(sm);\n        ++snapshot;\n    }\n}\n\nint main() {\n    std::vector<std::thread> readers;\n    for (int i = 0; i < 8; ++i)\n        readers.emplace_back(reader);\n    std::thread w(writer);\n    for (auto& t : readers)\n        t.join();\n    w.join();\n}",
+      "parts": [
+        {
+          "id": "where",
+          "type": "lines",
+          "label": "Click the line where a thread can be made to wait indefinitely.",
+          "answer": [18],
+          "explain": "The exclusive acquisition. A reader-preferring implementation admits any arriving reader while the lock is held shared, so with eight readers looping there may never be a moment when the reader count reaches zero — and the writer, which needs exactly that moment, never gets it."
+        },
+        {
+          "id": "difference",
+          "type": "choice",
+          "label": "How does starvation differ from deadlock here?",
+          "options": [
+            "It does not — a starved thread is deadlocked against the readers.",
+            "No thread holds a resource another needs in a cycle; the writer is simply always outbid, and would proceed the instant the readers paused.",
+            "Starvation is undefined behaviour, deadlock is well-defined.",
+            "Starvation can only happen with more than two threads."
+          ],
+          "answer": 1,
+          "explain": "There is no cycle and nothing is stuck: every reader makes progress, the system as a whole makes progress, and one thread is starved. That is why a deadlock detector finds nothing and why the symptom is a latency tail rather than a hang — a p99.9 that is measured in seconds while the mean looks fine."
+        },
+        {
+          "id": "claims",
+          "type": "select",
+          "label": "Which are true of `std::shared_mutex`?",
+          "options": [
+            "The standard specifies neither reader nor writer preference, so starvation behaviour is implementation-defined.",
+            "Acquiring it in shared mode is more expensive than locking a plain `std::mutex`.",
+            "It is the right choice whenever reads outnumber writes.",
+            "A reader acquiring it in shared mode still writes to shared state."
+          ],
+          "answer": [0, 1, 3],
+          "explain": "The standard is silent on fairness, so the same program starves on one platform and not another. Shared acquisition is *not* free: it maintains a reader count, so every reader performs an atomic read-modify-write on the same line — which is both slower than a plain mutex acquisition and a false-sharing hotspot. That is why \"reads outnumber writes\" is not sufficient justification: for short critical sections a plain `std::mutex` is usually faster, and the real wins come from not sharing at all (a per-thread copy, or an atomic snapshot pointer)."
+        }
+      ],
+      "explain": "Reader-writer locks are the standard example of a primitive chosen from its name rather than its cost model. They pay off when the read critical section is long enough to dwarf the atomic bookkeeping every reader does on the way in — rarely the case for reading one `long`. And because the standard promises nothing about fairness, a writer's worst-case latency is not a property of your code, it is a property of whichever standard library you happened to link.",
+      "review": { "chapter": "23-threads-and-synchronization", "section": "Reader-Writer Locks, Honestly" },
+      "check": "run"
+    },
+    {
+      "id": "con-07",
+      "title": "Member order is destruction order",
+      "difficulty": "hard",
+      "topic": "lifetime",
+      "prompt": "`std::jthread` was chosen deliberately: it requests a stop and joins in its own destructor, so `Feed` needs no destructor of its own. Every member is used only under `m_`, and the worker checks for a stop on every pass.",
+      "code": "#include <chrono>\n#include <mutex>\n#include <stop_token>\n#include <thread>\n#include <vector>\n\nclass Feed {\npublic:\n    Feed() : worker_([this](std::stop_token st) { poll(st); }) {}\n\nprivate:\n    void poll(std::stop_token st) {\n        while (!st.stop_requested()) {\n            std::this_thread::sleep_for(std::chrono::milliseconds(200));\n            std::lock_guard lock(m_);\n            buffer_.push_back(1);\n        }\n    }\n\n    std::jthread worker_;\n    std::mutex m_;\n    std::vector<int> buffer_;\n};\n\nint main() {\n    Feed f;\n    std::this_thread::sleep_for(std::chrono::milliseconds(20));\n}",
+      "parts": [
+        {
+          "id": "where",
+          "type": "lines",
+          "label": "Click the line that has to move.",
+          "answer": [20],
+          "explain": "Members are destroyed in reverse declaration order, so declaring the thread *first* means it is destroyed *last*. `buffer_` and `m_` are already gone by the time `~jthread` asks the worker to stop and waits for it — and a worker that was asleep on line 14 when the stop arrived still runs lines 15 and 16 before it can check for one."
+        },
+        {
+          "id": "what",
+          "type": "choice",
+          "label": "What actually goes wrong at the end of `main`?",
+          "options": [
+            "`std::terminate` is called because the worker is still running when `Feed` is destroyed.",
+            "The worker wakes, locks a destroyed `m_` and pushes into a destroyed `buffer_`, because `~jthread` runs after both of theirs.",
+            "Nothing: `jthread` requests the stop before any member is destroyed.",
+            "The `this` captured in the constructor dangles as soon as `Feed`'s destructor body begins."
+          ],
+          "answer": 1,
+          "explain": "Destroying a running `jthread` is not an error — requesting a stop and joining is exactly what its destructor does, and that is why it was the right type to choose. The problem is purely *when*: it runs after its siblings' destructors. `this` remains valid throughout, because the `Feed` object's storage outlives its members — which is what makes this so quiet. The pointer is fine; the objects behind it are not."
+        },
+        {
+          "id": "rules",
+          "type": "select",
+          "label": "Which are reliable ways to avoid this class of bug?",
+          "options": [
+            "Declare thread members last, after everything they touch.",
+            "Give `Feed` a destructor that calls `worker_.request_stop(); worker_.join();`.",
+            "Capture the members by value in the lambda instead of capturing `this`.",
+            "Make `buffer_` and `m_` `static`."
+          ],
+          "answer": [0, 1],
+          "explain": "Declaring the thread last makes the destruction order correct by construction, which is why it is the rule worth memorising. An explicit destructor also works and is more obvious to a reader — the destructor body runs before any member is destroyed. Capturing by value cannot work: the worker must see the *same* buffer the rest of the class does. Making the members static fixes the lifetime by making them immortal, and breaks the class for the second `Feed`."
+        }
+      ],
+      "explain": "A thread member is the one member whose destructor waits for code that is still reading the other members. That inverts the usual intuition about declaration order being a matter of style: here it is the difference between a clean shutdown and a use-after-free. On libc++ it surfaces as an uncaught `system_error` from locking a destroyed mutex — a crash at exit, blamed on the standard library, in a program whose bug is which line a member was declared on. Thread last, or an explicit destructor: pick one and apply it to every class that owns a thread.",
+      "review": { "chapter": "23-threads-and-synchronization", "section": "Starting Threads: `std::thread` and `std::jthread`" },
+      "check": "crash"
+    },
+    {
+      "id": "con-08",
+      "title": "Guarding the writes only",
+      "difficulty": "medium",
+      "topic": "iterator invalidation",
+      "prompt": "Appends take the mutex. The summing function only reads, so it does not.",
+      "code": "#include <mutex>\n#include <thread>\n#include <vector>\n\nstd::mutex m;\nstd::vector<int> samples;\n\nvoid record(int v) {\n    std::lock_guard lock(m);\n    samples.push_back(v);\n}\n\nlong total() {\n    long sum = 0;\n    for (int v : samples)\n        sum += v;\n    return sum;\n}\n\nint main() {\n    std::thread w([] {\n        for (int i = 0; i < 10000; ++i)\n            record(i);\n    });\n    long t = total();\n    w.join();\n    (void)t;\n}",
+      "parts": [
+        {
+          "id": "where",
+          "type": "lines",
+          "label": "Click every line involved in the race.",
+          "answer": [10, 15],
+          "explain": "Line 10 grows the vector; line 15 walks it. Both ends have to be named — the reader is unsynchronised, and \"it only reads\" is the reasoning that put it there."
+        },
+        {
+          "id": "worse",
+          "type": "choice",
+          "label": "Why is this worse than a torn read of one `int`?",
+          "options": [
+            "It is not — a stale sum is the only possible symptom.",
+            "`push_back` may reallocate, so the reader's iterators point into a buffer that has been freed.",
+            "`std::vector` is not thread-safe for reads even without concurrent writes.",
+            "The loop may read `samples.size()` twice and disagree with itself."
+          ],
+          "answer": 1,
+          "explain": "A reallocation frees the old buffer, and the range-for is holding pointers into it. The failure is a use-after-free with a wrong answer as the *best* case, not a stale value. Concurrent reads of a `vector` with no writer are perfectly fine — the standard library's rule is the usual one: any number of readers, or one writer. Re-reading `size()` would be a benign detail by comparison."
+        },
+        {
+          "id": "claims",
+          "type": "select",
+          "label": "Which fixes make `total` correct?",
+          "options": [
+            "Take `std::lock_guard lock(m);` at the top of `total`.",
+            "Reserve enough capacity up front so `push_back` never reallocates.",
+            "Use a `std::shared_mutex`: `shared_lock` in `total`, `unique_lock` in `record`.",
+            "Copy the vector under the lock and sum the copy."
+          ],
+          "answer": [0, 2, 3],
+          "explain": "Anything that makes the reader take the same lock is correct — exclusively, in shared mode, or just long enough to take a snapshot. Reserving is the tempting wrong answer: it removes the reallocation, and leaves a plain data race on the elements and on `size()`, which is still undefined behaviour and can still produce a wrong sum. Removing the visible symptom is not the same as removing the race."
+        }
+      ],
+      "explain": "\"Readers don't need the lock\" is true of a value that is written atomically and false of every container. The mutex here is not protecting the `int`s, it is protecting the *shape* of the vector — its buffer, its size, and the validity of every iterator into it. Reviewing thread-safety by asking which functions mutate is how this gets approved; asking which functions may observe a mutation is how it gets caught.",
+      "review": { "chapter": "23-threads-and-synchronization", "section": "Data Races and the Mutex Family" },
+      "check": "tsan"
+    },
+    {
+      "id": "con-09",
+      "title": "Fire and forget",
+      "difficulty": "easy",
+      "topic": "dangling capture",
+      "prompt": "A retry is scheduled on a background thread and the caller returns immediately — the thread is detached precisely so nobody has to wait for it.",
+      "code": "#include <chrono>\n#include <cstdio>\n#include <string>\n#include <thread>\n\nvoid schedule_retry(int attempt) {\n    std::string tag = \"retry-for-connection-attempt-\" + std::to_string(attempt);\n    std::thread([&tag] {\n        std::this_thread::sleep_for(std::chrono::milliseconds(50));\n        std::printf(\"%s\\n\", tag.c_str());\n    }).detach();\n}\n\nint main() {\n    schedule_retry(1);\n    std::this_thread::sleep_for(std::chrono::milliseconds(200));\n}",
+      "parts": [
+        {
+          "id": "where",
+          "type": "lines",
+          "label": "Click the line that is wrong.",
+          "answer": [8],
+          "explain": "The capture. `[&tag]` binds a reference to a local that dies when `schedule_retry` returns on line 12, roughly 50 milliseconds before the thread reads it. Line 11's `detach` is what makes the mistake fatal rather than merely risky, but the capture is the line to change."
+        },
+        {
+          "id": "fix",
+          "type": "choice",
+          "label": "What is the smallest correct fix?",
+          "options": [
+            "Capture by value: `[tag]`.",
+            "Capture by value and move: `[tag = std::move(tag)]`.",
+            "Join the thread instead of detaching it.",
+            "Make `tag` `static`."
+          ],
+          "answer": 1,
+          "explain": "Both value captures are correct; moving is the one to write, because the local is dead the moment the lambda is built and copying its buffer for nothing is pure waste. Joining also fixes the lifetime and destroys the reason the function exists — it would block the caller for 50 ms. `static` fixes one thread and introduces a race between every subsequent pair of calls."
+        },
+        {
+          "id": "claims",
+          "type": "select",
+          "label": "Which are true about detached threads?",
+          "options": [
+            "A detached thread keeps running after `main` returns, and the runtime may tear the process down underneath it.",
+            "Capturing `this` in a detached thread has the same hazard as capturing a local by reference.",
+            "`std::jthread` cannot be detached, which is part of why it is the safer default.",
+            "The 200 ms sleep in `main` makes the program correct."
+          ],
+          "answer": [0, 1],
+          "explain": "Detaching gives up every guarantee about when the thread ends, including whether it ends before the objects it uses do — a captured `this` is the same bug with a longer-lived victim. `jthread` *can* be detached; what it changes is the default, since its destructor joins rather than calling `terminate`. And the sleep does not fix anything: it makes the use-after-free likely to go unnoticed, which is strictly worse than a crash."
+        }
+      ],
+      "explain": "Every lambda handed to a thread is a lifetime contract, and `detach` is the point where you promise the captured objects outlive a thread whose end you have just made unobservable. The rule that survives contact with real code: a detached thread may capture only by value, or by a `shared_ptr` that keeps what it needs alive. If a reference capture is genuinely necessary, the thread must be joined — and then you have a `jthread`, not a detached one.",
+      "review": { "chapter": "23-threads-and-synchronization", "section": "Starting Threads: `std::thread` and `std::jthread`" },
+      "check": "asan"
+    },
+    {
+      "id": "con-10",
+      "title": "Waiting with the door locked",
+      "difficulty": "hard",
+      "topic": "deadlock",
+      "prompt": "The atomic flag is published with `release` and consumed with `acquire`, so the handoff of `payload` is correctly ordered. The mutex protects `payload` against any third thread. The consumer starts first.",
+      "code": "#include <atomic>\n#include <chrono>\n#include <mutex>\n#include <thread>\n\nstd::mutex m;\nstd::atomic<bool> ready{false};\nint payload = 0;\n\nvoid consumer() {\n    std::lock_guard lock(m);\n    while (!ready.load(std::memory_order_acquire))\n        ;\n    payload += 1;\n}\n\nvoid producer() {\n    std::lock_guard lock(m);\n    payload = 42;\n    ready.store(true, std::memory_order_release);\n}\n\nint main() {\n    std::thread c(consumer);\n    std::this_thread::sleep_for(std::chrono::milliseconds(50));\n    std::thread p(producer);\n    c.join();\n    p.join();\n}",
+      "parts": [
+        {
+          "id": "where",
+          "type": "lines",
+          "label": "Click the lines that together cause the hang.",
+          "answer": [11, 12],
+          "explain": "The consumer takes the mutex on line 11 and then, still holding it, waits on line 12 for something only a thread that needs that same mutex can do. The wait cannot end until the producer runs, and the producer cannot run until the wait ends. Neither line is wrong alone; holding a lock across a wait is."
+        },
+        {
+          "id": "ordering",
+          "type": "choice",
+          "label": "Is the memory ordering on lines 12 and 20 part of the problem?",
+          "options": [
+            "Yes — `relaxed` would be enough, and `acquire`/`release` adds the fence that deadlocks.",
+            "No. The ordering is correct and irrelevant; the deadlock is structural and would happen with any ordering, including `seq_cst`.",
+            "Yes — the `release` store must happen before the mutex is acquired to be visible.",
+            "No, but the ordering is redundant: the mutex already provides it."
+          ],
+          "answer": 1,
+          "explain": "The acquire/release pair is exactly right for publishing `payload`, and no memory ordering can help a thread that is waiting for an event that cannot occur. It is worth being precise about the last option too: the mutex *would* provide the ordering if both threads' accesses were inside it — but that is a statement about the fixed program, not this one, and it is not why this hangs."
+        },
+        {
+          "id": "fixes",
+          "type": "select",
+          "label": "Which changes make the program complete?",
+          "options": [
+            "Move `std::lock_guard lock(m);` in `consumer` to after the spin loop.",
+            "Replace the spin loop with `ready.wait(false, std::memory_order_acquire);`.",
+            "Replace the mutex and flag with a `std::condition_variable` and `cv.wait(lock, []{ return ready.load(); });`.",
+            "Add `std::this_thread::yield();` inside the spin loop."
+          ],
+          "answer": [0, 2],
+          "explain": "Waiting before locking is the direct fix — take the lock only once there is something to protect. A condition variable is the structural fix, and the reason it exists: `wait` *releases* the mutex while it waits and reacquires it on wake, which is precisely the operation this code needed and open-coded wrong. `atomic::wait` blocks more politely than a spin but still holds the mutex, so it hangs identically. `yield` lets the producer run only up to the point where it blocks on the mutex, then hands control back — a busier deadlock."
+        }
+      ],
+      "explain": "Every blocking wait needs the same question asked of it: what do I hold while I wait, and can whoever must wake me obtain it? A spin loop makes that question easy to skip, because it does not look like a wait — there is no `wait` in it. The general rule is that a lock should be held across a bounded amount of work and never across an unbounded one, and a condition variable is the primitive that exists because that rule and \"check the condition under the lock\" would otherwise contradict each other.",
+      "review": { "chapter": "23-threads-and-synchronization", "section": "Pathologies" },
+      "check": "deadlock"
+    }
+  ]
+}

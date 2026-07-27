@@ -3,6 +3,7 @@ import BaseLayout from '../../../layouts/BaseLayout.astro';
 import { books } from '../../../books';
 import { chapterNumber, chapterSlug, chapterTitle, getBookChapters } from '../../../lib/chapters';
 import { counts, exerciseChapterSlug, getBookExercises } from '../../../lib/exercises';
+import { getChallengeSets } from '../../../lib/challenges';
 import { href } from '../../../lib/url';
 
 export async function getStaticPaths() {
@@ -24,12 +25,15 @@ export async function getStaticPaths() {
         };
       })
       .filter(Boolean);
-    paths.push({ params: { book: book.slug }, props: { book, rows } });
+    // The challenge app is a separate drill over the same material; link to it
+    // from the book that has one.
+    const hasChallenges = (await getChallengeSets(book.slug)).length > 0;
+    paths.push({ params: { book: book.slug }, props: { book, rows, hasChallenges } });
   }
   return paths;
 }
 
-const { book, rows } = Astro.props;
+const { book, rows, hasChallenges } = Astro.props;
 const total = rows.reduce(
   (a, r) => ({
     mcq: a.mcq + r.n.mcq,
@@ -56,6 +60,7 @@ const total = rows.reduce(
       </p>
       <p class="quiz-index-links">
         <a href={href(`/books/${book.slug}/`)}>Table of contents</a>
+        {hasChallenges && <a href={href('/challenges/')}>Challenges</a>}
         <button type="button" class="quiz-btn" id="quiz-reset">Reset all progress</button>
       </p>
     </div>

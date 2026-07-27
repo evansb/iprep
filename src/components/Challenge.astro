@@ -1,0 +1,495 @@
+---
+/**
+ * The challenge app: a sibling of Quiz.astro, not a successor.
+ *
+ * Where the quiz asks one question and grades one answer, a challenge shows one
+ * snippet and asks two to four questions about it — how many copies run, which
+ * line races, which fix is right — and only counts as solved when every part is
+ * right. Two of those part types are positional, which is the whole reason this
+ * is its own component: the reader answers by clicking lines *in the code*.
+ *
+ * Like the quiz, snippets are highlighted server-side with Shiki into hidden
+ * <template>s and cloned on demand, so no highlighter ships to the browser.
+ * Line numbers come from a CSS counter (see .chal-code in global.css) rather
+ * than injected markup, so Shiki's token spans are never touched.
+ */
+import { Code } from 'astro:components';
+import type { ChallengeSet } from '../lib/challenges';
+import { snippets } from '../lib/challenges';
+
+interface Props {
+  set: ChallengeSet;
+  storageKey: string;
+  /** Item id -> href back into the book, resolved by the page. */
+  reviewHrefs: Record<string, string>;
+}
+
+const { set, storageKey, reviewHrefs } = Astro.props;
+
+const THEMES = { light: 'github-light', dark: 'github-dark' } as const;
+
+const codeBlocks = snippets(set);
+
+// The payload carries everything except `code` (already on the page, inside the
+// templates) and `probe` (an answer key for the verifier, never for the reader).
+const payload = {
+  storageKey,
+  items: set.data.items.map(({ code, probe, review, ...item }) => ({
+    ...item,
+    lineCount: code.replace(/\n$/, '').split('\n').length,
+    reviewHref: reviewHrefs[item.id] ?? null,
+    reviewLabel: review?.section ?? null,
+  })),
+};
+---
+
+<section class="quiz chal" id="chal">
+  <div class="quiz-head">
+    <div class="quiz-progress" role="presentation"><span id="chal-fill"></span></div>
+    <p class="quiz-meta">
+      <span id="chal-count"></span>
+      <span id="chal-score"></span>
+    </p>
+  </div>
+
+  <div id="chal-stage"></div>
+  <p class="quiz-live" id="chal-live" role="status" aria-live="polite"></p>
+</section>
+
+{
+  codeBlocks.map(({ key, code }) => (
+    <template data-code={key}>
+      <Code code={code} lang="cpp" themes={THEMES} />
+    </template>
+  ))
+}
+
+<script type="application/json" id="chal-data" set:html={JSON.stringify(payload)} />
+
+<script is:inline>
+  (() => {
+    const root = document.getElementById('chal');
+    const dataEl = document.getElementById('chal-data');
+    if (!root || !dataEl) return;
+
+    const DATA = JSON.parse(dataEl.textContent);
+    const ALL = DATA.items;
+    if (!ALL.length) return;
+
+    const stage = document.getElementById('chal-stage');
+    const live = document.getElementById('chal-live');
+    const fill = document.getElementById('chal-fill');
+    const countEl = document.getElementById('chal-count');
+    const scoreEl = document.getElementById('chal-score');
+
+    /* ---- persistence ------------------------------------------------------
+       Same convention as the quiz: one small JSON blob, and a failure to read
+       or write it must never break the page. Per-part verdicts are kept too, so
+       a near miss is visible rather than just "wrong". */
+    const STORE = DATA.storageKey;
+    const load = () => {
+      try {
+        const raw = JSON.parse(localStorage.getItem(STORE) || '{}');
+        return raw && raw.v === 1 && raw.results ? raw.results : {};
+      } catch {
+        return {};
+      }
+    };
+    const results = load();
+    const save = () => {
+      try {
+        localStorage.setItem(STORE, JSON.stringify({ v: 1, results }));
+      } catch {
+        /* private mode or quota — progress is a nicety, not a requirement */
+      }
+    };
+
+    /* ---- helpers ---------------------------------------------------------- */
+    const el = (tag, cls, text) => {
+      const n = document.createElement(tag);
+      if (cls) n.className = cls;
+      if (text != null) n.textContent = text;
+      return n;
+    };
+
+    const shuffle = (arr) => {
+      const a = arr.slice();
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    };
+
+    const sameSet = (a, b) => {
+      const x = [...new Set(a)].sort((m, n) => m - n).join(',');
+      const y = [...new Set(b)].sort((m, n) => m - n).join(',');
+      return x === y;
+    };
+
+    const listLines = (ns) =>
+      ns.length === 1 ? `line ${ns[0]}` : `lines ${[...ns].sort((a, b) => a - b).join(', ')}`;
+
+    /* ---- the snippet ------------------------------------------------------
+       Returns { node, lines } where `lines` are the per-line spans Shiki emits.
+       If a future Shiki stops emitting them, `lines` is empty and the caller
+       falls back to a checkbox list — a line part must never be unanswerable. */
+    const codeFor = (key) => {
+      const tpl = document.querySelector(`template[data-code="${key}"]`);
+      if (!tpl) return { node: null, lines: [] };
+      const wrap = el('div', 'quiz-code chal-code');
+      wrap.appendChild(tpl.content.cloneNode(true));
+      const codeEl = wrap.querySelector('code');
+      // Shiki separates its line spans with newline text nodes. Those are what
+      // gives a <pre> its line breaks, but .chal-code makes each line a block,
+      // so leaving them in would double the leading. Blank lines keep their
+      // height from the gutter counter in ::before.
+      if (codeEl) {
+        for (const n of [...codeEl.childNodes]) {
+          if (n.nodeType === 3 && !n.textContent.trim()) n.remove();
+        }
+      }
+      const lines = [...wrap.querySelectorAll('code > .line')];
+      // A snippet ending in a newline gets a trailing empty line.
+      if (lines.length > 1 && !lines[lines.length - 1].textContent.trim()) {
+        lines.pop().remove();
+      }
+      lines.forEach((n, i) => (n.dataset.line = String(i + 1)));
+      return { node: wrap, lines };
+    };
+
+    /* ---- parts ------------------------------------------------------------
+       Each renderer returns { node, read, mark } — read() gives the reader's
+       answer, mark() paints the verdict. Keeping that shape uniform is what
+       lets grading treat all four types identically. */
+
+    const partShell = (part, controlCls) => {
+      const box = el('div', 'chal-part');
+      box.appendChild(el('p', 'chal-part-label', part.label));
+      const control = el('div', controlCls);
+      box.appendChild(control);
+      return { box, control };
+    };
+
+    const renderCount = (part) => {
+      const { box, control } = partShell(part, 'chal-count-row');
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.min = '0';
+      input.className = 'chal-count-input';
+      input.inputMode = 'numeric';
+      input.setAttribute('aria-label', part.label);
+      control.appendChild(input);
+      return {
+        node: box,
+        read: () => (input.value.trim() === '' ? null : Number(input.value)),
+        ok: (given) => given !== null && given === part.answer,
+        mark: (given, ok) => {
+          input.disabled = true;
+          input.classList.add(ok ? 'correct' : 'incorrect');
+          if (!ok) control.appendChild(el('span', 'chal-answer', `answer: ${part.answer}`));
+        },
+      };
+    };
+
+    const renderOptions = (part, multi) => {
+      const { box, control } = partShell(part, 'chal-options');
+      const inputs = [];
+      part.options.forEach((text, i) => {
+        const label = el('label', 'quiz-choice');
+        const input = document.createElement('input');
+        input.type = multi ? 'checkbox' : 'radio';
+        input.name = `${part.id}`;
+        input.value = String(i);
+        label.appendChild(input);
+        label.appendChild(el('span', 'quiz-choice-text', text));
+        control.appendChild(label);
+        inputs.push({ input, label, i });
+      });
+      const answers = multi ? part.answer : [part.answer];
+      return {
+        node: box,
+        read: () => inputs.filter((x) => x.input.checked).map((x) => x.i),
+        ok: (given) => (multi ? sameSet(given, answers) : given.length === 1 && given[0] === part.answer),
+        mark: (given) => {
+          for (const x of inputs) {
+            x.input.disabled = true;
+            if (answers.includes(x.i)) x.label.classList.add('correct');
+            else if (x.input.checked) x.label.classList.add('incorrect');
+          }
+        },
+      };
+    };
+
+    /**
+     * The one genuinely new mechanic. The lines of the snippet above become
+     * checkboxes in place; this part contributes only a live readout, so the
+     * answer is given by pointing at the code rather than by transcribing line
+     * numbers out of it.
+     */
+    const renderLines = (part, lines) => {
+      const { box, control } = partShell(part, 'chal-lines');
+      const picked = new Set();
+
+      if (!lines.length) {
+        // Fallback: no per-line spans to click, so offer the numbers directly.
+        const grid = el('div', 'chal-line-grid');
+        const inputs = [];
+        for (let n = 1; n <= part.lineCount; n++) {
+          const label = el('label', 'chal-line-box');
+          const input = document.createElement('input');
+          input.type = 'checkbox';
+          input.value = String(n);
+          label.appendChild(input);
+          label.appendChild(el('span', null, String(n)));
+          grid.appendChild(label);
+          inputs.push({ input, n });
+        }
+        control.appendChild(grid);
+        return {
+          node: box,
+          read: () => inputs.filter((x) => x.input.checked).map((x) => x.n),
+          ok: (given) => sameSet(given, part.answer),
+          mark: (given, ok) => {
+            for (const x of inputs) x.input.disabled = true;
+            if (!ok) control.appendChild(el('span', 'chal-answer', `answer: ${listLines(part.answer)}`));
+          },
+        };
+      }
+
+      const readout = el('p', 'chal-lines-readout', 'Click the lines in the code above.');
+      control.appendChild(readout);
+
+      const paint = () => {
+        readout.textContent = picked.size
+          ? `Selected: ${listLines([...picked])}`
+          : 'Click the lines in the code above.';
+      };
+
+      // The line spans keep their listeners after grading — they are Shiki's
+      // markup, not ours to rebuild — so the flag is what disables them.
+      let graded = false;
+
+      const toggle = (span, n) => {
+        if (graded) return;
+        if (picked.has(n)) picked.delete(n);
+        else picked.add(n);
+        span.classList.toggle('picked', picked.has(n));
+        span.setAttribute('aria-checked', String(picked.has(n)));
+        paint();
+      };
+
+      for (const span of lines) {
+        const n = Number(span.dataset.line);
+        span.classList.add('pickable');
+        span.setAttribute('role', 'checkbox');
+        span.setAttribute('aria-checked', 'false');
+        span.setAttribute('aria-label', `Line ${n}`);
+        span.tabIndex = 0;
+        span.addEventListener('click', () => toggle(span, n));
+        span.addEventListener('keydown', (e) => {
+          if (e.key === ' ' || e.key === 'Enter') {
+            e.preventDefault();
+            toggle(span, n);
+          }
+        });
+      }
+
+      return {
+        node: box,
+        read: () => [...picked],
+        ok: (given) => sameSet(given, part.answer),
+        mark: (given, ok) => {
+          graded = true;
+          for (const span of lines) {
+            span.classList.remove('pickable');
+            span.removeAttribute('tabindex');
+            span.removeAttribute('role');
+            const n = Number(span.dataset.line);
+            if (part.answer.includes(n)) span.classList.add('answer');
+            else if (picked.has(n)) span.classList.add('wrong');
+          }
+          if (!ok) control.appendChild(el('span', 'chal-answer', `answer: ${listLines(part.answer)}`));
+        },
+      };
+    };
+
+    /* ---- state ------------------------------------------------------------ */
+    let state = null;
+
+    const start = (queue) => {
+      state = { queue: queue || shuffle(ALL), i: 0, right: 0, wrong: [], answered: false };
+      render();
+    };
+
+    const updateMeta = () => {
+      const n = state.queue.length;
+      const done = state.i + (state.answered ? 1 : 0);
+      fill.style.width = `${(done / n) * 100}%`;
+      countEl.textContent = state.i >= n ? `${n} of ${n}` : `Challenge ${state.i + 1} of ${n}`;
+      scoreEl.textContent = done ? `· ${state.right}/${done} solved` : '';
+    };
+
+    const next = () => {
+      state.i++;
+      state.answered = false;
+      render();
+    };
+
+    const nextButton = () => {
+      const b = el(
+        'button',
+        'quiz-btn primary',
+        state.i + 1 >= state.queue.length ? 'See results' : 'Next challenge',
+      );
+      b.type = 'button';
+      b.addEventListener('click', next);
+      return b;
+    };
+
+    /* ---- one challenge ----------------------------------------------------- */
+    const renderItem = (item) => {
+      const card = el('div', 'quiz-card chal-card');
+
+      const tags = el('div', 'quiz-tags');
+      tags.appendChild(el('span', 'quiz-tag', item.topic));
+      tags.appendChild(el('span', `quiz-tag d-${item.difficulty}`, item.difficulty));
+      card.appendChild(tags);
+      card.appendChild(el('h2', 'chal-title', item.title));
+      card.appendChild(el('p', 'quiz-prompt', item.prompt));
+
+      const { node, lines } = codeFor(item.id);
+      if (node) card.appendChild(node);
+
+      const parts = item.parts.map((p) => {
+        if (p.type === 'count') return { p, ...renderCount(p) };
+        if (p.type === 'choice') return { p, ...renderOptions(p, false) };
+        if (p.type === 'select') return { p, ...renderOptions(p, true) };
+        return { p, ...renderLines({ ...p, lineCount: item.lineCount }, lines) };
+      });
+      const partBox = el('div', 'chal-parts');
+      for (const part of parts) partBox.appendChild(part.node);
+      card.appendChild(partBox);
+
+      const actions = el('div', 'quiz-actions');
+      const check = el('button', 'quiz-btn primary', 'Check answers');
+      check.type = 'button';
+      actions.appendChild(check);
+      card.appendChild(actions);
+
+      check.addEventListener('click', () => {
+        if (state.answered) return;
+
+        // Every part is graded at once: the parts describe one snippet, and
+        // grading them one at a time would leak the answer to the next.
+        const verdicts = {};
+        let allOk = true;
+        for (const part of parts) {
+          const given = part.read();
+          const ok = part.ok(given);
+          verdicts[part.p.id] = ok;
+          if (!ok) allOk = false;
+          part.mark(given, ok);
+          part.node.classList.add(ok ? 'ok' : 'bad');
+          part.node.appendChild(
+            el('p', `chal-verdict ${ok ? 'ok' : 'bad'}`, ok ? 'Correct.' : 'Not quite.'),
+          );
+          part.node.appendChild(el('p', 'chal-part-explain', part.p.explain));
+        }
+
+        state.answered = true;
+        if (allOk) state.right++;
+        else state.wrong.push(item);
+        results[item.id] = { r: allOk ? 'right' : 'wrong', t: Date.now(), parts: verdicts };
+        save();
+        updateMeta();
+
+        const n = parts.length;
+        const got = Object.values(verdicts).filter(Boolean).length;
+        const box = el('div', `quiz-feedback ${allOk ? 'ok' : 'bad'}`);
+        box.appendChild(
+          el('strong', null, allOk ? 'Solved — every part right.' : `${got} of ${n} parts right.`),
+        );
+        box.appendChild(el('p', null, item.explain));
+        if (item.reviewHref) {
+          const a = el('a', 'quiz-review', `Review “${item.reviewLabel}” →`);
+          a.href = item.reviewHref;
+          box.appendChild(a);
+        }
+        card.appendChild(box);
+        live.textContent = allOk ? 'Solved.' : `${got} of ${n} parts right.`;
+
+        actions.replaceChildren(nextButton());
+        card.appendChild(actions);
+      });
+
+      return card;
+    };
+
+    /* ---- summary ----------------------------------------------------------- */
+    const renderSummary = () => {
+      const n = state.queue.length;
+      const card = el('div', 'quiz-card quiz-summary');
+      card.appendChild(el('h2', null, `${state.right} / ${n} solved`));
+      const pct = Math.round((state.right / n) * 100);
+      card.appendChild(
+        el(
+          'p',
+          'quiz-summary-line',
+          pct === 100 ? 'Clean sweep.' : `${pct}% — ${state.wrong.length} to revisit.`,
+        ),
+      );
+
+      if (state.wrong.length) {
+        const list = el('ul', 'quiz-missed');
+        for (const item of state.wrong) {
+          const li = document.createElement('li');
+          li.appendChild(el('span', 'quiz-tag', item.topic));
+          li.appendChild(el('span', null, item.title));
+          list.appendChild(li);
+        }
+        card.appendChild(list);
+      }
+
+      const actions = el('div', 'quiz-actions');
+      if (state.wrong.length) {
+        const missed = state.wrong.slice();
+        const retry = el('button', 'quiz-btn primary', `Retry the ${missed.length} missed`);
+        retry.type = 'button';
+        retry.addEventListener('click', () => start(shuffle(missed)));
+        actions.appendChild(retry);
+      }
+      const again = el('button', 'quiz-btn', 'Start over');
+      again.type = 'button';
+      again.addEventListener('click', () => start());
+      actions.appendChild(again);
+      card.appendChild(actions);
+
+      live.textContent = `Finished. ${state.right} of ${n} solved.`;
+      return card;
+    };
+
+    /* ---- driver ------------------------------------------------------------ */
+    const render = () => {
+      updateMeta();
+      stage.replaceChildren(
+        state.i >= state.queue.length ? renderSummary() : renderItem(state.queue[state.i]),
+      );
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    document.addEventListener('keydown', (e) => {
+      if (!state || e.metaKey || e.ctrlKey || e.altKey) return;
+      const tag = e.target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.key !== 'Enter') return;
+      const btn = stage.querySelector('.quiz-actions .primary, .quiz-actions button');
+      if (btn) {
+        e.preventDefault();
+        btn.click();
+      }
+    });
+
+    start();
+  })();
+</script>

@@ -1,0 +1,106 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { books } from '../../books';
+import { challengeKind, counts, getChallengeSets, storageKey } from '../../lib/challenges';
+import { href } from '../../lib/url';
+
+// The app is book-agnostic in the same way the exercises are: any book that
+// grows a `challenges/` directory shows up here.
+const groups = [];
+for (const book of books) {
+  const sets = await getChallengeSets(book.slug);
+  if (!sets.length) continue;
+  groups.push({
+    book,
+    sets: sets.map((set) => ({
+      kind: challengeKind(set),
+      title: set.data.title,
+      blurb: set.data.blurb,
+      n: counts(set),
+      store: storageKey(book.slug, challengeKind(set)),
+    })),
+  });
+}
+
+const total = groups.reduce((a, g) => a + g.sets.reduce((b, s) => b + s.n.items, 0), 0);
+---
+
+<BaseLayout
+  title="C++ Challenges"
+  description="Specialised C++ diagnostic drills: count the copies and moves, find the race, find the leak."
+>
+  <div class="container">
+    <div class="book-head">
+      <span class="eyebrow">⚡ &nbsp;·&nbsp; {total} challenges</span>
+      <h1>Challenges</h1>
+      <p>
+        A different drill from the chapter exercises. Each challenge is one snippet and several
+        questions about it — how many copies run, which line races, which allocation escapes — and
+        it counts as solved only when every part is right. Progress is kept in this browser only.
+      </p>
+      <p class="quiz-index-links">
+        {groups.map((g) => <a href={href(`/books/${g.book.slug}/exercises/`)}>{g.book.title} exercises</a>)}
+        <button type="button" class="quiz-btn" id="chal-reset">Reset all progress</button>
+      </p>
+    </div>
+
+    <div class="chal-grid">
+      {
+        groups.flatMap((g) =>
+          g.sets.map((s) => (
+            <a class="book-card chal-card-link" href={href(`/challenges/${s.kind}/`)} data-store={s.store}>
+              <span class="book-badge">{s.kind.slice(0, 3).toUpperCase()}</span>
+              <h2>{s.title}</h2>
+              <p class="book-sub">{s.blurb}</p>
+              <span class="book-meta">
+                {s.n.items} challenges · {s.n.parts} parts
+                <span class="quiz-index-progress" data-total={s.n.items} />
+              </span>
+            </a>
+          )),
+        )
+      }
+    </div>
+  </div>
+
+  {/* Progress lives in localStorage, so it can only be filled in on the client.
+      Same shape the challenge app writes: challenge:<book>:<kind>. */}
+  <script is:inline>
+    (() => {
+      const cards = [...document.querySelectorAll('.chal-card-link[data-store]')];
+      if (!cards.length) return;
+
+      const paint = () => {
+        for (const card of cards) {
+          const slot = card.querySelector('.quiz-index-progress');
+          const total = Number(slot.dataset.total) || 0;
+          let right = 0;
+          let done = 0;
+          try {
+            const raw = JSON.parse(localStorage.getItem(card.dataset.store) || '{}');
+            for (const v of Object.values(raw.results || {})) {
+              done++;
+              if (v.r === 'right') right++;
+            }
+          } catch {
+            /* unreadable storage just means no progress to show */
+          }
+          if (!done) {
+            slot.textContent = '';
+            slot.removeAttribute('data-state');
+            continue;
+          }
+          slot.textContent = `${right}/${total}`;
+          slot.dataset.state = right === total ? 'complete' : 'partial';
+        }
+      };
+
+      document.getElementById('chal-reset')?.addEventListener('click', () => {
+        for (const card of cards) localStorage.removeItem(card.dataset.store);
+        paint();
+      });
+
+      paint();
+    })();
+  </script>
+</BaseLayout>
