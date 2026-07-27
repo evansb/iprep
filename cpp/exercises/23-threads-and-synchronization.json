@@ -661,8 +661,7 @@
       "prompt": "Write submit() and the worker loop for a fixed pool whose task queue is bounded. Contract: submit() must never block and never grow the queue — it returns false when full; close() must be safe to call twice and must wake every parked worker; a worker must exit only once the queue is drained; and no task may run with the queue mutex held. State the shutdown policy and the overload policy in comments.",
       "checklist": [
         "The queue has a capacity and submit() returns false rather than waiting or growing",
-        "close() sets durable state under the mutex and then notifies all workers",
-        "close() is idempotent — calling it twice is harmless",
+        "close() sets durable state under the mutex, notifies all workers, and is idempotent",
         "The wait predicate is a statement about state: a task exists, or the pool is closed",
         "The exit condition requires both closed and an empty queue, so queued work still runs",
         "The task is moved out of the queue into a local and invoked after the lock is released",
