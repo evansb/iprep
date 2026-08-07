@@ -31,6 +31,17 @@ export const books: Book[] = [
     badge: 'C++',
   },
   {
+    dir: 'modern-cpp-for-high-frequency-trading',
+    slug: 'modern-cpp-hft',
+    title: 'Modern C++ for High-Frequency Trading',
+    subtitle: 'An impatient guide to C++23, Linux, and networks',
+    description:
+      'A rigorous path from the C++ object model and memory allocation through concurrency, ' +
+      'Linux internals, packet delivery, trading-system correctness, and latency diagnosis. ' +
+      'Every topic is analyzed through semantics, latency, memory, predictability, and verification.',
+    badge: 'HFT',
+  },
+  {
     dir: 'system-design-notes',
     slug: 'system-design',
     title: 'System Design',
