@@ -31,17 +31,6 @@ export const books: Book[] = [
     badge: 'C++',
   },
   {
-    dir: 'modern-cpp-for-high-frequency-trading',
-    slug: 'modern-cpp-hft',
-    title: 'Modern C++ for High-Frequency Trading',
-    subtitle: 'An impatient guide to C++23, Linux, and networks',
-    description:
-      'A rigorous path from the C++ object model and memory allocation through concurrency, ' +
-      'Linux internals, packet delivery, trading-system correctness, and latency diagnosis. ' +
-      'Every topic is analyzed through semantics, latency, memory, predictability, and verification.',
-    badge: 'HFT',
-  },
-  {
     dir: 'system-design-notes',
     slug: 'system-design',
     title: 'System Design',
@@ -62,6 +51,17 @@ export const books: Book[] = [
       'measurement techniques behind deterministic low-latency systems. Built for engineers ' +
       'preparing for HFT infrastructure and performance interviews.',
     badge: 'HFT',
+  },
+  {
+    dir: 'cpp-quant-cheatsheet',
+    slug: 'cpp-cheatsheet',
+    title: 'The C++ Interview Cheatsheet',
+    subtitle: 'C++23 recall, syntax, and blueprints for quant and HFT interviews',
+    description:
+      'A cheatsheet, not a tutorial: one-line recall for every rule, comprehensive syntax and ' +
+      'standard-library tables with complexity and invalidation, and whiteboard-ready ' +
+      'implementations of ring buffers, order books, and parsers — closing with drills and appendices.',
+    badge: 'C++23',
   },
 ];
 
